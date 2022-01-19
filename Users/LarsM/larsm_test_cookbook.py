@@ -24,13 +24,14 @@ import pandas as pd
 import textwrap
 pd.options.mode.chained_assignment = None 
 sys.path.append(os.path.join(os.getcwd(), '../../prog'))
+sys.path.append(os.path.join(os.getcwd(), '../E22'))
 import pylab as plt
 import resdir
 import get_data
 import utils
 import regression
 import find_regressions
-from polygon_utils import plot_rectangles
+from polygon_utils_old import plot_rectangles
 import sort_results as sr
 import divide_left_and_right
 import weather_data
@@ -128,7 +129,7 @@ import all_e22_experiments as experiment
 start_and_stopdate = ['20200901', '20201009']  #YYYYMMDD 2nd date has to be one day after the last date you want
 redo_regressions =  True
 
-options = {#'interval': 130, 
+options = {'interval': 130, 
            'start':0,
            'stop':200,
            'crit': 'steepest', 
@@ -255,11 +256,11 @@ Define a plotting function for Regressor.  EEB:  This functionality was moved to
 # EEB: Disabled this because it was called via find_regressions or update_regressions, and plotted all lines on a single image instead of separate ones.
 # The legend disappeared, and other strange problems.  It also made regressions run much slower.
 # Instead there is now a standalone function for saving images further down.
-"""def my_plotfun(data, regressions, normalized=True):
+"""def my_plotfun(regressions, data, normalized=True):
     plt.cla()
     print(data['filename'])
     print(regressions)
-    find_regressions.plot_regressions(data, regressions, normalized)
+    find_regressions.plot_regressions(regressions, data, normalized)
     #plt.show()
     saveimagefilename = os.path.join(images_output_path, data['filename']+'.png')
     opt = regr.options.get_options_string(data['filename'])

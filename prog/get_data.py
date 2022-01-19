@@ -3,11 +3,12 @@ import re
 import math
 import time
 import pickle
+import json
+import gzip
 from collections import OrderedDict, defaultdict
-
 import licor_indexes
 import dlt_indexes
-
+import resdir
 
 def number_after(s, letters, decimal_symbol, start=0):
     """ Returns the floating point number and the starting and ending positios 
@@ -133,11 +134,23 @@ get_data.parse_filename({})""".format(os.path.split(filename)[-1]))
 
     return res
 
+def get_file_raw_data(filename):
+    if not os.path.isfile(filename) and os.path.split(filename)[0]=='':
+        filename0 = filename
+        filename = os.path.join(resdir.raw_data_path, filename)
+    if not os.path.isfile(filename):
+        raise Exception("Neither {} nor {} found".format(filename0, filename))
+    if os.path.splitext(filename)[1] == '.gz':
+        s = gzip.open(filename).read()
+        raw = json.loads(s)
+    else:
+        with open(filename, 'rb') as f:
+            raw = pickle.load(f)
+    return raw
 
 def get_file_data(filename):
-    with open(filename, 'rb') as f:
-        a = pickle.load(f)
-    return parse_saved_data(old2new(a), filename)
+    name = filename[:-3] if filename.endswith('.gz') else filename
+    return parse_saved_data(get_file_raw_data(filename), name)
 
 
 def selection_fun(x, G):
