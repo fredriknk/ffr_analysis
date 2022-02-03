@@ -131,4 +131,4 @@ dmypy.json
 #Raw data files in raw data folders
 **/raw_data/
 **/output/
-!.gitkeep
+metno_client_id.txt

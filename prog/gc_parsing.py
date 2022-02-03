@@ -19,7 +19,7 @@ import matplotlib.pyplot as plt
 import datetime as DT
 from collections import defaultdict
 
-sys.path.append(os.path.realpath(os.path.join(os.getcwd(), '../../prog')))
+sys.path.append(os.path.realpath(os.path.join(os.getcwd(), '')))
 from regression import *
 import find_regressions
 import bisect_find
@@ -30,11 +30,11 @@ import csv
 
 def make_calibration_array(ref_gas_calibration=None):
     if ref_gas_calibration is None:
-        ref_gas_calibration = {'OL': {'CO2': 361., 'CH4': 1.89, 'N2O': 0.585, 'SF6': None, 'H2': None},  # Old Low
-                               'OH': {'CO2': 10000., 'CH4': 10000., 'N2O': 151., 'SF6': None, 'H2': None},  # Old High
-                               'NL': {'CO2': 400., 'CH4': 2.00, 'N2O': 0.500, 'SF6': 0.05, 'H2': None},  # New Low
-                               'NH': {'CO2': 2000., 'CH4': 100., 'N2O': 10., 'SF6': None, 'H2': None},  # New High
-                               'LA': {'CO2': 400., 'CH4': 0., 'N2O': 0., 'SF6': 0., 'H2': 0.}
+        ref_gas_calibration = {'OL': {'CO2': 361., 'CH4': 1.89, 'N2O': 0.585, 'SF6': None, 'H2': None,"luft":1.},  # Old Low
+                               'OH': {'CO2': 10000., 'CH4': 10000., 'N2O': 151., 'SF6': None, 'H2': None,"luft":1.},  # Old High
+                               'NL': {'CO2': 400., 'CH4': 2.00, 'N2O': 0.500, 'SF6': 0.05, 'H2': None,"luft":1.},  # New Low
+                               'NH': {'CO2': 2000., 'CH4': 100., 'N2O': 10., 'SF6': None, 'H2': None,"luft":1.},  # New High
+                               'LA': {'CO2': 400., 'CH4': 0., 'N2O': 0., 'SF6': 0., 'H2': 0.,"luft":1.}
                                }
     ref_gas_values = {}
 
@@ -51,7 +51,7 @@ def make_calibration_array(ref_gas_calibration=None):
     return ref_gas_values
 
 
-def get_ref_gas_Values(df, ref_gas_values, index=None, sanity=False, column="Unnamed: 10"):
+def get_ref_gas_Values(df, ref_gas_values, index=None, sanity=False, column="standard"):
     """ Function to calculate calibration values when standards are written in the excel document"""
 
     for gas_tank in ref_gas_values:
@@ -68,7 +68,7 @@ def get_ref_gas_Values(df, ref_gas_values, index=None, sanity=False, column="Unn
                     ref_gas_values[gas_tank][gas_key]["gc_tick_std"] = ref_gas_stdev[gas_key]
 
                     if ref_gas_values[gas_tank][gas_key]["ref_gas_ppm"] != None:
-                        ref_gas_values[gas_tank][gas_key] = ref_gas_values[gas_tank][gas_key]["ref_gas_ppm"] / \
+                        ref_gas_values[gas_tank][gas_key]["gc_ppm_mean"] = ref_gas_values[gas_tank][gas_key]["ref_gas_ppm"] / \
                                                             ref_gas_values[gas_tank][gas_key]["gc_tick_mean"]
 
     return ref_gas_values
@@ -96,7 +96,7 @@ def makeindex(
     # std_at_end=gasrun["std_at_end"]
 
     time_between_samples = min_between_samples * 60
-    column_list_ = ["sample_id", "field", "standard", "use_std", "use_sample", "time"]
+    column_list_ = ["sample_id", "field", "standard", "use_std", "use_sample", "time","calgas"]
     df = pd.DataFrame(columns=column_list_)
 
     iterations = 0
@@ -109,7 +109,7 @@ def makeindex(
     for run in range(int(num_flasks / bracket_size)):
         for std_run, std_gas in zip(std_repetitions, std_gases):
             for std_repeats in range(std_run):
-                df = df.append(pd.DataFrame([[standard_its, None, std_gas, std_gas in use_std, False, None]],
+                df = df.append(pd.DataFrame([[standard_its, None, std_gas, std_gas in use_std, False, None, True]],
                                             columns=column_list_), ignore_index=True)
                 iterations += 1
                 standard_its += 1
@@ -119,8 +119,10 @@ def makeindex(
                 use_sample = False
                 field_ = None
                 time_ = None
+                calgas = True
             else:
                 use_sample = True
+                calgas = False
                 time += time_between_samples
                 if field_its % num_samples_per_field == 0:
                     time = 0
@@ -129,7 +131,7 @@ def makeindex(
                 field_ = field
                 field_its += 1
 
-            df = df.append(pd.DataFrame([[sample_its, field_, None, False, use_sample, time_]], columns=column_list_),
+            df = df.append(pd.DataFrame([[sample_its, field_, None, False, use_sample, time_,calgas]], columns=column_list_),
                            ignore_index=True)
             iterations += 1
             sample_its += 1
@@ -137,7 +139,7 @@ def makeindex(
     if std_at_end:
         for std_run, std_gas in zip(std_repetitions, std_gases):
             for std_repeats in range(std_run):
-                df = df.append(pd.DataFrame([[standard_its, None, std_gas, std_gas in use_std, False, None]],
+                df = df.append(pd.DataFrame([[standard_its, None, std_gas, std_gas in use_std, False, None,True]],
                                             columns=column_list_), ignore_index=True)
                 iterations += 1
                 standard_its += 1
@@ -185,7 +187,7 @@ def infer_values(df, ref_gas_values, gasrun=None,cal_string = "Cal_" ,column= "U
 
     co2 = samples["CO2"]
 
-    gasrun["num_samples_per_field"] = round(1/(1-(co2.iloc[1:].values.astype(int)>co2.iloc[:-1].values).mean()))
+    #gasrun["num_samples_per_field"] = round(1/(1-(co2.iloc[1:].values.astype(int)>co2.iloc[:-1].values).mean()))
 
     gasrun["num_flasks"] = len(samples)
 
@@ -226,6 +228,10 @@ def sanitycheck(df, index,column= "Unnamed: 10"):
 
 
 if __name__ == "__main__":
+
+    pd.set_option('display.width', 220)
+    pd.set_option('display.max_columns', 20)
+
     flux_units = {'N2O': {'name': 'N2O_N_mug_m2h', 'factor': 2 * 14 * 1e6 * 3600},
                   'CO2': {'name': 'CO2_C_mug_m2h', 'factor': 12 * 1e6 * 3600}}
 
@@ -244,11 +250,15 @@ if __name__ == "__main__":
                     'sort_detailed_by_experiment': False
                     }
 
-    ref_gas_calibration = {'OL': {'CO2': 361., 'CH4': 1.89, 'N2O': 0.585, 'SF6': None, 'H2': None},  # Old Low
-                           'OH': {'CO2': 10000., 'CH4': 10000., 'N2O': 151., 'SF6': None, 'H2': None},  # Old High
-                           'NL': {'CO2': 400., 'CH4': 2.00, 'N2O': 0.500, 'SF6': 0.05, 'H2': None},  # New Low
-                           'NH': {'CO2': 2000., 'CH4': 100., 'N2O': 10., 'SF6': None, 'H2': None},  # New High
-                           'LA': {'CO2': 400., 'CH4': 0., 'N2O': 0., 'SF6': 0., 'H2': 0.}
+    ref_gas_calibration = {'OL': {'CO2': 361., 'CH4': 1.89, 'N2O': 0.585, 'SF6': None, 'H2': None, "luft": 1.},
+                           # Old Low
+                           'OH': {'CO2': 10000., 'CH4': 10000., 'N2O': 151., 'SF6': None, 'H2': None, "luft": 1.},
+                           # Old High
+                           'NL': {'CO2': 400., 'CH4': 2.00, 'N2O': 0.500, 'SF6': 0.05, 'H2': None, "luft": 1.},
+                           # New Low
+                           'NH': {'CO2': 2000., 'CH4': 100., 'N2O': 10., 'SF6': None, 'H2': None, "luft": 1.},
+                           # New High
+                           'LA': {'CO2': 400., 'CH4': 0., 'N2O': 0., 'SF6': 0., 'H2': 0., "luft": 1.}
                            }
 
 
@@ -260,7 +270,7 @@ if __name__ == "__main__":
 
     all_filenames = glob.glob(os.path.join(resdir.raw_data_path, '2*'))
 
-    for filename in all_filenames[:8]:
+    for filename in all_filenames[7:8]:
         gasrun = {"num_samples_per_field": 3,
                   "num_flasks": 108,
                   "bracket_size": 12,
@@ -289,16 +299,28 @@ if __name__ == "__main__":
 
         sanity = sanitycheck(df,index)
         if all(value == True for value in sanity.values()):
+            print(sanity)
+            df = df.join(index)
+            ref_gas_values = get_ref_gas_Values(df, ref_gas_values)
 
-
-    # ref_gas_values, droprows = get_ref_gas_Values(df, ref_gas_values, index=index, column="Unnamed: 10")
-
-    # df_data = df[droprows]
-    #
-    #
-    # if  (df["File Name"].str.contains("Cal_")).value_counts()[True] != len(droprows):
-    #     df_data["Sample Id"]=range(1,len(df_data["Sample Id"])+1)
-    #
-    # df_data["time"] = (np.floor((df_data["Sample Id"] - 1) % num_samples_per_field)*time_between_samples).astype("int")
-    # df_data["field"] = (np.floor((df_data["Sample Id"]-1)/num_samples_per_field)+1).astype("int")
-    #
+            for standard in gasrun["use_std"]:
+                plotgases = ["luft","CH4","CO2","N2O"]
+                fig, axs = plt.subplots(4, sharex=True)
+                df_plot = df[(df["calgas"] == True) & (df["standard"] == standard)]
+                for i, gas in enumerate(plotgases):
+                    axs[i].set_title(standard+" "+gas)
+                    axs[i].plot(df_plot[gas])
+                plt.show()
+                print(ref_gas_values[standard])
+                nplots = 18
+                fig, axs = plt.subplots(nplots,4)
+                samplegas = df[df["use_sample"]]
+                for k,plot in enumerate(samplegas["field"].unique()[:nplots]):
+                    fieldsample = samplegas[samplegas["field"]==plot]
+                    first = True
+                    for j, gas in enumerate(plotgases):
+                        if first:
+                            axs[0,j].set_title(gas)
+                            first=False
+                        axs[k,j].plot(fieldsample["time"],fieldsample[gas]*ref_gas_values[standard][gas]['gc_ppm_mean'])
+                plt.show()

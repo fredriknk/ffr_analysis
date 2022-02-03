@@ -6,7 +6,7 @@ Created on Fri May 18 11:50:35 2018
 """
 import sys
 import os
-
+import glob
 import numpy as np
 import pandas as pd
 from os import walk, chdir, getcwd, stat
@@ -118,7 +118,7 @@ class App:
     def __init__(self, master):
         # Create the GUI container
 
-        frame = TK.Frame(master, width=2000, height=2000)
+        frame = TK.Frame(master, width=1200, height=2000)
         self.master = master
         self.initializeDF()
         self.maxf = len(self.df)
@@ -136,80 +136,60 @@ class App:
                                      command=self.decrease)
         # Placement of the button with padding around edges
         self.button_left.grid(row=row_disp, column=0, padx=5, pady=5)  # pack( padx=5, pady=5)
-
-        self.button_right = TK.Button(frame, text="GoTo#",
-                                      command=self.goto)
-        self.button_right.grid(row=row_disp, column=1, padx=5, pady=5)  # .pack( padx=5, pady=5)
+        #
+        # self.button_right = TK.Button(frame, text="GoTo#",
+        #                               command=self.goto)
+        # self.button_right.grid(row=row_disp, column=1, padx=5, pady=5)  # .pack( padx=5, pady=5)
 
         self.button_right = TK.Button(frame, text="Next >",
                                       command=self.increase)
-        self.button_right.grid(row=row_disp, column=2, padx=5, pady=5)  # .pack( padx=5, pady=5)
+        self.button_right.grid(row=row_disp, column=1, padx=5, pady=5)  # .pack( padx=5, pady=5)
 
         self.Outs = {}
 
         row_disp += 1
-        name = "CO2_MUG"
-        label = "MUG"
+        name = "num_samples_per_field"
+        label = "Samples Per Field"
         self.MakeTextbox(name, label, row_disp, frame, 1, width=8)
-        name = "N2O_MUG"
-        self.MakeTextbox(name, label, row_disp, frame, 2, width=8)
 
         row_disp += 1
-        name = "CO2_SLOPE"
-        label = "Slope"
-        self.MakeTextbox(name, label, row_disp, frame, 1)
-        name = "N2O_SLOPE"
-        self.MakeTextbox(name, label, row_disp, frame, 2)
-
-        row_disp += 1
-        name = "mse_CO2"
-        label = "MSE"
-        self.MakeTextbox(name, label, row_disp, frame, 1)
-        name = "mse_N2O"
-        self.MakeTextbox(name, label, row_disp, frame, 2)
-
-        row_disp += 1
-        name = "rsq_CO2"
-        label = "rsq"
-        self.MakeTextbox(name, label, row_disp, frame, 1)
-        name = "rsq_N2O"
-        self.MakeTextbox(name, label, row_disp, frame, 2)
-
-        row_disp += 1
-        name = "diff_CO2"
-        label = "diff"
-        self.MakeTextbox(name, label, row_disp, frame, 1)
-        name = "diff_N2O"
-        self.MakeTextbox(name, label, row_disp, frame, 2)
-
-        row_disp += 1
-        name = "SampleNo"
-        label = "graph"
+        name = "num_flasks"
+        label = "Number of flasks total"
         self.MakeTextbox(name, label, row_disp, frame, 1)
 
         row_disp += 1
-        name = "airTemp"
-        label = "Air Temp"
+        name = "bracket_size"
+        label = "How many samples between Standards"
+        self.MakeTextbox(name, label, row_disp, frame, 1)
+
+        row_disp += 1
+        name = "min_between_samples"
+        label = "Minutes between samples"
+        self.MakeTextbox(name, label, row_disp, frame, 1)
+
+        row_disp += 1
+        name = "use_std"
+        label = "Which standards to use"
+        self.MakeTextbox(name, label, row_disp, frame, 1)
+
+        row_disp += 1
+        name = "std_gases"
+        label = "Which standards are sampled?"
+        self.MakeTextbox(name, label, row_disp, frame, 1)
+
+        row_disp += 1
+        name = "purge_gas"
+        label = "Is there a purge gas in the bracket?"
         self.MakeTextbox(name, label, row_disp, frame)
 
         row_disp += 1
-        name = "side_box"
-        label = "Side"
+        name = "std_repetitions"
+        label = "How many times are standars repeated?"
         self.MakeTextbox(name, label, row_disp, frame)
 
         row_disp += 1
-        name = "gndTemp"
-        label = "Gnd Temp"
-        self.MakeTextbox(name, label, row_disp, frame)
-
-        row_disp += 1
-        name = "EC"
-        label = "EC"
-        self.MakeTextbox(name, label, row_disp, frame)
-
-        row_disp += 1
-        name = "VWC"
-        label = "Moisture"
+        name = "std_at_end"
+        label = "Is there a standard at the end?"
         self.MakeTextbox(name, label, row_disp, frame)
 
         row_disp += 1
@@ -255,72 +235,52 @@ class App:
         self.save.grid(row=24, column=1, pady=40)
 
         #
-        self.Outs["CO2_SLOPE"].configure(state="disabled")
-
-        self.fig = Figure(figsize=(15, 10), dpi=80)  # Set the size of plot
+        nplots = 36
+        #self.fig = Figure(figsize=(15, 10), dpi=80)  # Set the size of plot
         plt.style.use('ggplot')
-        self.ax = self.fig.add_subplot(121)
-        self.ax1 = self.fig.add_subplot(122)
-        # self.ax2 = self.fig.add_subplot(424)
-        # self.ax3 = self.fig.add_subplot(426)
-        # self.ax4 = self.fig.add_subplot(428)
-        self.ax.set_title("CO2")
-        self.ax.set_xlabel("Time (s)")
-        self.ax.set_ylabel("CO2 (ppm)")
+        pltwidth = 14.5
+        # self.fig2, self.ax2 = plt.subplots(2,1,figsize=(pltwidth,5))
+        # self.ax2[0].plot([1, 2], [1, 2], linewidth=1, color="tab:blue",alpha=0.5)  # Inititalise measurement graph
+        # self.ax2[1].plot([1, 2], [1, 2], linewidth=1, color="tab:blue",alpha=0.5)  # Inititalise measurement graph
+
+        self.fig, self.ax = plt.subplots(nplots,4,figsize=(pltwidth,17))
+
+        self.ax[0, 0].set_title("Luft")
+        self.ax[0, 1].set_title("CO2")
+        self.ax[0, 2].set_title("N20")
+        self.ax[0, 3].set_title("CH4")
+        # self.ax.set_xlabel("Time (s)")
+        # self.ax.set_ylabel("CO2 (ppm)")
         self.fig.autofmt_xdate()  # Dont know what this does
+        self.lineA = []
+        for nplotno in range(nplots):
+            self.lineA.append([])
+            for gasno in range(4):
+                self.ax[nplotno,0].set_ylabel(str(nplotno))
+                self.lineA[nplotno].append(self.ax[nplotno,gasno].plot([1, 2], [1, 2], linewidth=1, color="tab:blue",alpha=0.5))# Inititalise measurement graph
+        # self.CO2line1, = self.ax.plot([1, 2], [1, 2], marker='o', linestyle='dashed', linewidth=2, color="tab:green",
+        #                               alpha=0.7)
 
-        self.CO2line, = self.ax.plot([1, 2], [1, 2], linewidth=1, color="tab:blue",
-                                     alpha=0.5)  # Inititalise measurement graph
-        self.CO2line1, = self.ax.plot([1, 2], [1, 2], marker='o', linestyle='dashed', linewidth=2, color="tab:green",
-                                      alpha=0.7)
-        self.CO2line2, = self.ax.plot([1, 2], [1, 2], linewidth=3, color="tab:orange")  # Inititalize regression graph
 
-        self.airTempLine1, = self.ax1.plot([1, 2], [1, 2], linewidth=1, color="tab:blue", alpha=0.5)
-        self.airTempLine2, = self.ax1.plot([1, 2], [1, 2], marker='o', linestyle='dashed', linewidth=2,
-                                           color="tab:green", alpha=0.7)  # Inititalize regression graph
-        self.airTempLine3, = self.ax1.plot([1, 2], [1, 2], linewidth=3,
-                                           color="tab:orange")  # Inititalize regression graph
-        self.ax1.set_title("N2O")
-        self.ax1.set_title("N20")
-        self.ax1.set_ylabel("N2O (ppm)")
-        self.ax1.set_xlabel("Time (S)")
-        #
-        # self.gndTempLine1, = self.ax2.plot([2, 1], [1, 2], linewidth=4, color="green")
-        # self.gndTempLine2, = self.ax2.plot([2, 1], [2, 1], linewidth=4, color="red")  # Inititalize regression graph
-        # self.ax2.set_title("Ground Temp")
-        # self.ax2.set_ylabel("Temp (C)")
-        #
-        # self.ECLine1, = self.ax3.plot([2, 1], [1, 2], linewidth=4, color="green")
-        # self.ECLine2, = self.ax3.plot([2, 1], [2, 1], linewidth=4, color="red")  # Inititalize regression graph
-        # self.ax3.set_title("EC")
-        # self.ax3.set_ylabel("EC")
-        #
-        # self.VWCLine1, = self.ax4.plot([1, 3], [3, 1], linewidth=4, color="green")
-        # self.VWCLine2, = self.ax4.plot([3, 1], [3, 1], linewidth=4, color="red")  # Inititalize regression graph
-        # self.ax4.set_title("Moisture")
-        # self.ax4.set_xlabel("Time (s)")
-        # self.ax4.set_ylabel("VWC")
-
+        # self.fig2.subplots_adjust(left=0.05, right=0.95, top=0.9, bottom=0.06)
         self.fig.subplots_adjust(left=0.05, right=0.95, top=0.9, bottom=0.06)
+
+
+
+        # self.canvas2 = FigureCanvasTkAgg(self.fig2, master=master, )  # Make the canvas
+        # self.canvas2.draw()  # show()#show the canvesRemoved due to breaking update
+        # self.canvas2.get_tk_widget().grid(row=0, column=3, rowspan=1)  # set graph position
+
         self.canvas = FigureCanvasTkAgg(self.fig, master=master, )  # Make the canvas
         self.canvas.draw()  # show()#show the canvesRemoved due to breaking update
-        self.canvas.get_tk_widget().grid(row=0, column=3, rowspan=9)  # set graph position
-
-        sliderLength = 1000
-        self._job = None
-        self.sliderMin = TK.Scale(master, from_=0, to=180, length=sliderLength, orient=TK.HORIZONTAL)
-        self.sliderMin.bind("<ButtonRelease-1>", self.updateValue)
-        self.sliderMin.set(5)
-        self.sliderMin.grid(row=10, column=3)
-
-        self.sliderMax = TK.Scale(master, from_=0, to=180, length=sliderLength, orient=TK.HORIZONTAL)
-        self.sliderMax.bind("<ButtonRelease-1>", self.updateValue)
-        self.sliderMax.set(170)
-        self.sliderMax.grid(row=11, column=3)
-
-        self.update()
+        self.canvas.get_tk_widget().grid(row=0, column=4, rowspan=row_disp)  # set graph position
+        #self.update()
 
         frame.grid(row=0, column=0)
+
+        # scrollbar = TK.Scrollbar(master=root, orient=TK.HORIZONTAL)
+        # scrollbar.pack(side=TK.BOTTOM, fill=TK.X)
+
         #
         # self.canvas.pack()
         # self.canvas.bind("<Left>", self.decrease)
@@ -633,76 +593,99 @@ class App:
 
 
 if __name__ == "__main__":
-    flux_units = {'N2O': {'name': 'N2O_N_mug_m2h', 'factor': 2 * 14 * 1e6 * 3600},
-                  'CO2': {'name': 'CO2_C_mug_m2h', 'factor': 12 * 1e6 * 3600}}
 
-    fixpath = utils.ensure_absolute_path
-    options = {'interval': 100,
-               'start': 0,
-               'stop': 180,
-               'crit': 'steepest',
-               'co2_guides': True,
-               'correct_negatives': False
-               }
-
-    save_options = {'show_images': False,
-                    'save_images': False,
-                    'save_detailed_excel': False,
-                    'sort_detailed_by_experiment': False
-                    }
-
-    resdir.raw_data_path = fixpath('raw_data')
-    detailed_output_path = fixpath('output/detailed_regression_output_unsorted')
-    find_regressions.make_detailed_output_folders(detailed_output_path)
-    specific_options_filename = fixpath('specific_options.xls')
-    slopes_filename = fixpath("output/capture_slopes.txt")
-
-    malingnr = "1"
-    currDir = getcwd()
-    # path of measurements
-
-    data_path = "raw_data/"
-    df_path = "output/capture_RegressionOutput.xls"
-
-    df = pd.read_excel(df_path, index_col=0)
-    df.date = pd.to_datetime(df.date, format="%Y%m%d-%H%M%S")
-    # startGui()
-
-    frames = {}  # dict of dataframes
-    regr = find_regressions.Regressor(slopes_filename, options, save_options,
-                                      specific_options_filename, detailed_output_path)
-
-    t0 = time()
-
-    mseco2l = []
-    mseco2r = []
-    msen2ol = []
-    msen2or = []
-    rsqco2l = []
-    rsqco2r = []
-    rsqn2ol = []
-    rsqn2or = []
-
-    for file in df.filename[:10]:
-        datafilename = resdir.raw_data_path + "\\" + file
-        meas = find_regressions.plot_raw(datafilename)
-        regressions = regr.find_all_slopes(filename_or_data=datafilename, do_plot=False, given_specific_options=False)
-        # try:
-    #         mseco2l.append(regressions["left"]["CO2"].mse)
-    #         mseco2r.append(regressions["right"]["CO2"].mse)
-    #         msen2ol.append(regressions["left"]["N2O"].mse)
-    #         msen2or.append(regressions["right"]["N2O"].mse)
-    #         rsqco2l.append(regressions["left"]["CO2"].rsq)
-    #         rsqco2r.append(regressions["right"]["CO2"].rsq)
-    #         rsqn2ol.append(regressions["left"]["N2O"].rsq)
-    #         rsqn2or.append(regressions["right"]["N2O"].rsq)
-    #     except:
-    #         pass
-    # print(time() - t0)
-    # print("CO2 MSE Right: %.2f  Left: %.2f" % (np.average(mseco2r), np.average(mseco2l)))
-    # print("N20 MSE Right: %.2e  Left: %.2e" % (np.average(msen2or), np.average(msen2ol)))
-    # print("CO2 rsq Right: %.2f  Left: %.2f" % (np.average(rsqco2r), np.average(rsqco2l)))
-    # print("N20 rsq Right: %.2f  Left: %.2f" % (np.average(rsqn2or), np.average(rsqn2ol)))
+    pd.set_option('display.width', 220)
+    pd.set_option('display.max_columns', 20)
+    #
+    # flux_units = {'N2O': {'name': 'N2O_N_mug_m2h', 'factor': 2 * 14 * 1e6 * 3600},
+    #               'CO2': {'name': 'CO2_C_mug_m2h', 'factor': 12 * 1e6 * 3600}}
+    #
+    # fixpath = utils.ensure_absolute_path
+    # options = {'interval': 100,
+    #            'start': 0,
+    #            'stop': 180,
+    #            'crit': 'steepest',
+    #            'co2_guides': True,
+    #            'correct_negatives': False
+    #            }
+    #
+    # save_options = {'show_images': False,
+    #                 'save_images': False,
+    #                 'save_detailed_excel': False,
+    #                 'sort_detailed_by_experiment': False
+    #                 }
+    #
+    # ref_gas_calibration = {'OL': {'CO2': 361., 'CH4': 1.89, 'N2O': 0.585, 'SF6': None, 'H2': None, "luft": 1.},
+    #                        # Old Low
+    #                        'OH': {'CO2': 10000., 'CH4': 10000., 'N2O': 151., 'SF6': None, 'H2': None, "luft": 1.},
+    #                        # Old High
+    #                        'NL': {'CO2': 400., 'CH4': 2.00, 'N2O': 0.500, 'SF6': 0.05, 'H2': None, "luft": 1.},
+    #                        # New Low
+    #                        'NH': {'CO2': 2000., 'CH4': 100., 'N2O': 10., 'SF6': None, 'H2': None, "luft": 1.},
+    #                        # New High
+    #                        'LA': {'CO2': 400., 'CH4': 0., 'N2O': 0., 'SF6': 0., 'H2': 0., "luft": 1.}
+    #                        }
+    #
+    #
+    # resdir.raw_data_path = fixpath('raw_data/manual')
+    #
+    #
+    # all_filenames = glob.glob(os.path.join(resdir.raw_data_path, '2*'))
+    #
+    # for filename in all_filenames[7:8]:
+        # gasrun = {"num_samples_per_field": 3,
+        #           "num_flasks": 108,
+        #           "bracket_size": 12,
+        #           "min_between_samples": 15,
+        #           "use_std": ["NL"],
+        #           "std_gases": ["NL", "LA"],
+        #           "purge_gas": [-1],
+        #           "std_repetitions": [1, 1],
+        #           "std_at_end": True}
+        #
+        # df = pd.read_excel(filename, skiprows=2)
+        # df[["CH4", "CO2", "N2O"]]= df[["CH4", "CO2", "N2O"]].fillna(0).replace("          ",0)
+        # ref_gas_values = make_calibration_array(ref_gas_calibration)
+        #
+        # gasrun = infer_values(df, ref_gas_values, gasrun)
+        #
+        # index = makeindex(   gasrun["num_samples_per_field"],
+        #                      gasrun["num_flasks"],
+        #                      gasrun["bracket_size"],
+        #                      gasrun["min_between_samples"],
+        #                      gasrun["use_std"],
+        #                      gasrun["std_gases"],
+        #                      gasrun["purge_gas"],
+        #                      gasrun["std_repetitions"],
+        #                      gasrun["std_at_end"])
+        #
+        # sanity = sanitycheck(df,index)
+        # if all(value == True for value in sanity.values()):
+        #     print(sanity)
+        #     df = df.join(index)
+        #     ref_gas_values = get_ref_gas_Values(df, ref_gas_values)
+        #
+        #     for standard in gasrun["use_std"]:
+        #         plotgases = ["luft","CH4","CO2","N2O"]
+        #         fig, axs = plt.subplots(4, sharex=True)
+        #         df_plot = df[(df["calgas"] == True) & (df["standard"] == standard)]
+        #         for i, gas in enumerate(plotgases):
+        #             axs[i].set_title(standard+" "+gas)
+        #             axs[i].plot(df_plot[gas])
+        #         plt.show()
+        #         print(ref_gas_values[standard])
+        #         nplots = 18
+        #         fig, axs = plt.subplots(nplots,4)
+        #         samplegas = df[df["use_sample"]]
+        #         for k,plot in enumerate(samplegas["field"].unique()[:nplots]):
+        #             fieldsample = samplegas[samplegas["field"]==plot]
+        #             first = True
+        #             for j, gas in enumerate(plotgases):
+        #                 if first:
+        #                     axs[0,j].set_title(gas)
+        #                     first=False
+        #                 axs[k,j].plot(fieldsample["time"],fieldsample[gas]*ref_gas_values[standard][gas]['gc_ppm_mean'])
+        #         plt.show()
 
 root = TK.Tk()
 app = App(root)
