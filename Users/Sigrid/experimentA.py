@@ -40,6 +40,8 @@ import polygon_utils
 # import xlwt
 #import shutil
 #import errno
+
+
  
 fixpath = utils.ensure_absolute_path
  
@@ -55,8 +57,8 @@ options = {'interval': 100,
            'correct_negatives':False
            }
  
-save_options= {'show_images':True,
-               'save_images':True,
+save_options= {'show_images':False,
+               'save_images':False,
                'save_detailed_excel':True,
                'sort_detailed_by_experiment':True
                }
@@ -69,8 +71,16 @@ flux_units = {'N2O': {'name': 'N2O_N_mug_m2h', 'factor': 2 * 14 * 1e6 * 3600},
               'CO2': {'name': 'CO2_C_mug_m2h', 'factor': 12 * 1e6 * 3600}}
  
 specific_options_filename = fixpath('specific_options.xls')
- 
-resdir.raw_data_path = fixpath('raw_data')
+
+DATA_FILE_NAME = "raw_data_path.ino"
+
+try:
+    datapath = [open(DATA_FILE_NAME).readlines()[0].strip()]
+    resdir.raw_data_path =  datapath[0]
+except FileNotFoundError:
+    print(DATA_FILE_NAME + ' not found')
+    resdir.raw_data_path = fixpath('raw_data')
+
 detailed_output_path = fixpath('output/detailed_regression_output_unsorted')
 find_regressions.make_detailed_output_folders(detailed_output_path)
  

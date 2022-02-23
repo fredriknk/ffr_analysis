@@ -344,7 +344,15 @@ class App:
                              'sort_detailed_by_experiment': False
                              }
 
-        resdir.raw_data_path = fixpath('raw_data')
+        DATA_FILE_NAME = "raw_data_path.ino"
+
+        try:
+            datapath = [open(DATA_FILE_NAME).readlines()[0].strip()]
+            resdir.raw_data_path = datapath[0]
+        except FileNotFoundError:
+            print(DATA_FILE_NAME + ' not found')
+            resdir.raw_data_path = fixpath('raw_data')
+
         detailed_output_path = fixpath('output/detailed_regression_output_unsorted')
         find_regressions.make_detailed_output_folders(detailed_output_path)
         specific_options_filename = fixpath('specific_options.xls')
@@ -651,7 +659,15 @@ if __name__ == "__main__":
                     'sort_detailed_by_experiment': False
                     }
 
-    resdir.raw_data_path = fixpath('raw_data')
+    DATA_FILE_NAME = "raw_data_path.ino"
+
+    try:
+        datapath = [open(DATA_FILE_NAME).readlines()[0].strip()]
+        resdir.raw_data_path = datapath[0]
+    except FileNotFoundError:
+        print(DATA_FILE_NAME + ' not found')
+        resdir.raw_data_path = fixpath('raw_data')
+
     detailed_output_path = fixpath('output/detailed_regression_output_unsorted')
     find_regressions.make_detailed_output_folders(detailed_output_path)
     specific_options_filename = fixpath('specific_options.xls')
@@ -661,7 +677,6 @@ if __name__ == "__main__":
     currDir = getcwd()
     # path of measurements
 
-    data_path = "raw_data/"
     df_path = "output/capture_RegressionOutput.xls"
 
     df = pd.read_excel(df_path, index_col=0)

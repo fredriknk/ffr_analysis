@@ -35,7 +35,7 @@ if __name__ == "__main__":
     fig, (ax1, ax2,ax3) = plt.subplots(nrows = 3, ncols = 1, sharex=True)
 
     ax1.plot(plot["date"],n2o_int)
-    ax1.set_ylabel('Cumulative\nNO2 kg/ha')
+    ax1.set_ylabel('Cumulative\nNO2 kg/ha/hour')
     ax1.set_title('N2O Release plot '+ str(plotno))
     ax2.plot(plot["date"],n2o_sum,'.')
     ax3.plot(plot["date"], n2o,'.')
