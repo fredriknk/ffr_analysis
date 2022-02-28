@@ -132,3 +132,4 @@ dmypy.json
 **/raw_data/
 **/output/
 metno_client_id.txt
+raw_data_path.ino

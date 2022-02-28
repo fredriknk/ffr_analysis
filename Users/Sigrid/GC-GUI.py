@@ -596,97 +596,97 @@ if __name__ == "__main__":
 
     pd.set_option('display.width', 220)
     pd.set_option('display.max_columns', 20)
-    #
-    # flux_units = {'N2O': {'name': 'N2O_N_mug_m2h', 'factor': 2 * 14 * 1e6 * 3600},
-    #               'CO2': {'name': 'CO2_C_mug_m2h', 'factor': 12 * 1e6 * 3600}}
-    #
-    # fixpath = utils.ensure_absolute_path
-    # options = {'interval': 100,
-    #            'start': 0,
-    #            'stop': 180,
-    #            'crit': 'steepest',
-    #            'co2_guides': True,
-    #            'correct_negatives': False
-    #            }
-    #
-    # save_options = {'show_images': False,
-    #                 'save_images': False,
-    #                 'save_detailed_excel': False,
-    #                 'sort_detailed_by_experiment': False
-    #                 }
-    #
-    # ref_gas_calibration = {'OL': {'CO2': 361., 'CH4': 1.89, 'N2O': 0.585, 'SF6': None, 'H2': None, "luft": 1.},
-    #                        # Old Low
-    #                        'OH': {'CO2': 10000., 'CH4': 10000., 'N2O': 151., 'SF6': None, 'H2': None, "luft": 1.},
-    #                        # Old High
-    #                        'NL': {'CO2': 400., 'CH4': 2.00, 'N2O': 0.500, 'SF6': 0.05, 'H2': None, "luft": 1.},
-    #                        # New Low
-    #                        'NH': {'CO2': 2000., 'CH4': 100., 'N2O': 10., 'SF6': None, 'H2': None, "luft": 1.},
-    #                        # New High
-    #                        'LA': {'CO2': 400., 'CH4': 0., 'N2O': 0., 'SF6': 0., 'H2': 0., "luft": 1.}
-    #                        }
-    #
-    #
-    # resdir.raw_data_path = fixpath('raw_data/manual')
-    #
-    #
-    # all_filenames = glob.glob(os.path.join(resdir.raw_data_path, '2*'))
-    #
-    # for filename in all_filenames[7:8]:
-        # gasrun = {"num_samples_per_field": 3,
-        #           "num_flasks": 108,
-        #           "bracket_size": 12,
-        #           "min_between_samples": 15,
-        #           "use_std": ["NL"],
-        #           "std_gases": ["NL", "LA"],
-        #           "purge_gas": [-1],
-        #           "std_repetitions": [1, 1],
-        #           "std_at_end": True}
-        #
-        # df = pd.read_excel(filename, skiprows=2)
-        # df[["CH4", "CO2", "N2O"]]= df[["CH4", "CO2", "N2O"]].fillna(0).replace("          ",0)
-        # ref_gas_values = make_calibration_array(ref_gas_calibration)
-        #
-        # gasrun = infer_values(df, ref_gas_values, gasrun)
-        #
-        # index = makeindex(   gasrun["num_samples_per_field"],
-        #                      gasrun["num_flasks"],
-        #                      gasrun["bracket_size"],
-        #                      gasrun["min_between_samples"],
-        #                      gasrun["use_std"],
-        #                      gasrun["std_gases"],
-        #                      gasrun["purge_gas"],
-        #                      gasrun["std_repetitions"],
-        #                      gasrun["std_at_end"])
-        #
-        # sanity = sanitycheck(df,index)
-        # if all(value == True for value in sanity.values()):
-        #     print(sanity)
-        #     df = df.join(index)
-        #     ref_gas_values = get_ref_gas_Values(df, ref_gas_values)
-        #
-        #     for standard in gasrun["use_std"]:
-        #         plotgases = ["luft","CH4","CO2","N2O"]
-        #         fig, axs = plt.subplots(4, sharex=True)
-        #         df_plot = df[(df["calgas"] == True) & (df["standard"] == standard)]
-        #         for i, gas in enumerate(plotgases):
-        #             axs[i].set_title(standard+" "+gas)
-        #             axs[i].plot(df_plot[gas])
-        #         plt.show()
-        #         print(ref_gas_values[standard])
-        #         nplots = 18
-        #         fig, axs = plt.subplots(nplots,4)
-        #         samplegas = df[df["use_sample"]]
-        #         for k,plot in enumerate(samplegas["field"].unique()[:nplots]):
-        #             fieldsample = samplegas[samplegas["field"]==plot]
-        #             first = True
-        #             for j, gas in enumerate(plotgases):
-        #                 if first:
-        #                     axs[0,j].set_title(gas)
-        #                     first=False
-        #                 axs[k,j].plot(fieldsample["time"],fieldsample[gas]*ref_gas_values[standard][gas]['gc_ppm_mean'])
-        #         plt.show()
 
-root = TK.Tk()
-app = App(root)
-root.mainloop()
+    flux_units = {'N2O': {'name': 'N2O_N_mug_m2h', 'factor': 2 * 14 * 1e6 * 3600},
+                  'CO2': {'name': 'CO2_C_mug_m2h', 'factor': 12 * 1e6 * 3600}}
+
+    fixpath = utils.ensure_absolute_path
+    options = {'interval': 100,
+               'start': 0,
+               'stop': 180,
+               'crit': 'steepest',
+               'co2_guides': True,
+               'correct_negatives': False
+               }
+
+    save_options = {'show_images': False,
+                    'save_images': False,
+                    'save_detailed_excel': False,
+                    'sort_detailed_by_experiment': False
+                    }
+
+    ref_gas_calibration = {'OL': {'CO2': 361., 'CH4': 1.89, 'N2O': 0.585, 'SF6': None, 'H2': None, "luft": 1.},
+                           # Old Low
+                           'OH': {'CO2': 10000., 'CH4': 10000., 'N2O': 151., 'SF6': None, 'H2': None, "luft": 1.},
+                           # Old High
+                           'NL': {'CO2': 400., 'CH4': 2.00, 'N2O': 0.500, 'SF6': 0.05, 'H2': None, "luft": 1.},
+                           # New Low
+                           'NH': {'CO2': 2000., 'CH4': 100., 'N2O': 10., 'SF6': None, 'H2': None, "luft": 1.},
+                           # New High
+                           'LA': {'CO2': 400., 'CH4': 0., 'N2O': 0., 'SF6': 0., 'H2': 0., "luft": 1.}
+                           }
+
+
+    resdir.raw_data_path = fixpath('raw_data/manual')
+
+
+    all_filenames = glob.glob(os.path.join(resdir.raw_data_path, '2*'))
+
+    for filename in all_filenames[7:8]:
+        gasrun = {"num_samples_per_field": 3,
+                  "num_flasks": 108,
+                  "bracket_size": 12,
+                  "min_between_samples": 15,
+                  "use_std": ["NL"],
+                  "std_gases": ["NL", "LA"],
+                  "purge_gas": [-1],
+                  "std_repetitions": [1, 1],
+                  "std_at_end": True}
+
+        df = pd.read_excel(filename, skiprows=2)
+        df[["CH4", "CO2", "N2O"]]= df[["CH4", "CO2", "N2O"]].fillna(0).replace("          ",0)
+        ref_gas_values = make_calibration_array(ref_gas_calibration)
+
+        gasrun = infer_values(df, ref_gas_values, gasrun)
+
+        index = makeindex(   gasrun["num_samples_per_field"],
+                             gasrun["num_flasks"],
+                             gasrun["bracket_size"],
+                             gasrun["min_between_samples"],
+                             gasrun["use_std"],
+                             gasrun["std_gases"],
+                             gasrun["purge_gas"],
+                             gasrun["std_repetitions"],
+                             gasrun["std_at_end"])
+
+        sanity = sanitycheck(df,index)
+        if all(value == True for value in sanity.values()):
+            print(sanity)
+            df = df.join(index)
+            ref_gas_values = get_ref_gas_Values(df, ref_gas_values)
+
+            for standard in gasrun["use_std"]:
+                plotgases = ["luft","CH4","CO2","N2O"]
+                fig, axs = plt.subplots(4, sharex=True)
+                df_plot = df[(df["calgas"] == True) & (df["standard"] == standard)]
+                for i, gas in enumerate(plotgases):
+                    axs[i].set_title(standard+" "+gas)
+                    axs[i].plot(df_plot[gas])
+                plt.show()
+                print(ref_gas_values[standard])
+                nplots = 18
+                fig, axs = plt.subplots(nplots,4)
+                samplegas = df[df["use_sample"]]
+                for k,plot in enumerate(samplegas["field"].unique()[:nplots]):
+                    fieldsample = samplegas[samplegas["field"]==plot]
+                    first = True
+                    for j, gas in enumerate(plotgases):
+                        if first:
+                            axs[0,j].set_title(gas)
+                            first=False
+                        axs[k,j].plot(fieldsample["time"],fieldsample[gas]*ref_gas_values[standard][gas]['gc_ppm_mean'])
+                plt.show()
+
+# root = TK.Tk()
+# app = App(root)
+# root.mainloop()
