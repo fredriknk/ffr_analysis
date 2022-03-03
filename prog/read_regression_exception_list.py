@@ -1,5 +1,5 @@
 import xlrd
-
+import pickle
 
 def parse_xls_file(filename):
     book = xlrd.open_workbook(filename)
@@ -36,3 +36,11 @@ def parse_xls_file(filename):
         ret[filename] = options
     return ret
 
+def open_pickle_file(filename):
+    with open(filename, 'rb') as handle:
+        ret = pickle.load(handle)
+    return ret
+
+def save_pickle_file(filename, dictionary):
+    with open(filename, 'wb') as handle:
+        pickle.dump(dictionary, handle, protocol=pickle.HIGHEST_PROTOCOL)

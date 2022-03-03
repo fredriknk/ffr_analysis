@@ -302,8 +302,12 @@ class Options_manager(object):
         if exopts_filename is None:
             exopts_filename = self.specific_options_file_name
         if exopts_filename:
-            self.specific_options_dict = read_regression_exception_list.parse_xls_file(
-                exopts_filename)
+            if ".pickle" in exopts_filename:
+                with open(exopts_filename, 'rb') as handle:
+                    self.specific_options_dict = pickle.load(handle)
+            else:
+                self.specific_options_dict = read_regression_exception_list.parse_xls_file(
+                    exopts_filename)
         else:
             self.specific_options_dict = {}
 

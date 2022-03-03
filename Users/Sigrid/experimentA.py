@@ -101,7 +101,7 @@ positions = [position(name) for name in all_filenames]
 x = np.array([x[0] for x in positions])
 y = np.array([x[1] for x in positions])
 offset = namedtuple('Point', ('x', 'y'))(x=5.99201e5, y=6.615259e6)
-plt.scatter(x-offset.x, y-offset.y, marker='.')
+#plt.scatter(x-offset.x, y-offset.y, marker='.')
 
 #--
 def file_belongs(filename):
@@ -160,7 +160,7 @@ rect1.rotate(.4152).move(15.2,-2.55)
 
 rectangles = rect1.grid(6,6)
 
-# polygon_utils.plot_rectangles(rectangles, textkwargs={'fontsize': 5}, linewidth=.1)
+polygon_utils.plot_rectangles(rectangles, textkwargs={'fontsize': 5}, linewidth=.1)
 
 df['nr'] = [polygon_utils.find_polygon(p[0]-offset.x, p[1]-offset.y, rectangles) + 1
             for p in  zip(df.x, df.y)]
@@ -177,7 +177,6 @@ treatments = {x[0]:x[1] for x in treatmentlist}
 
 df['treatment'] = [treatments[i] for i in df.nr]
 
-plt.cla()
 
 polygon_utils.plot_rectangles(rectangles, textkwargs={'fontsize': 5}, linewidth=.1)
 
@@ -188,7 +187,9 @@ for t in sorted(set(df.treatment)):
     d = df[df.treatment==t]
     plt.scatter(d.x-offset.x, d.y-offset.y, s=10, color=colors[t-1], marker=markers[t-1])
 
-
+plt.axis('square')
+plt.show()
+plt.cla()
  
 def finalize_df(df, precip_dt=2):
     df['Tc'] = weather_data.data.get_temp(df.t)

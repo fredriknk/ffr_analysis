@@ -6,7 +6,7 @@ Created on Fri May 18 11:50:35 2018
 """
 import sys
 import os
-
+import pickle
 import numpy as np
 import pandas as pd
 from os import walk, chdir, getcwd, stat
@@ -18,8 +18,10 @@ from matplotlib.figure import Figure
 from time import time
 from datetime import datetime
 import matplotlib.pyplot as plt
+import copy
 import datetime as DT
 from collections import defaultdict
+
 
 sys.path.append(os.path.realpath(os.path.join(os.getcwd(), '../../prog')))
 from regression import *
@@ -28,7 +30,7 @@ import bisect_find
 import utils
 import resdir
 import csv
-
+import read_regression_exception_list
 
 def slopeFromPoints(reg):
     return [[reg.start, reg.stop], [reg.intercept + reg.start * reg.slope, reg.intercept + reg.stop * reg.slope]]
@@ -127,7 +129,8 @@ class App:
         self.xint = 100  # regression window
         self.cutoff = 0.05  # cutoff percentage
         self.method = TK.StringVar(root)  # Variable for radiobox regression method
-        self.method.set("mse")  # Set default to Mse
+        self.method.set(self.options["crit"])  # Set default to Mse
+        self.CO2_guide = TK.IntVar()
         #        print (self.method)
 
         row_disp = 0
@@ -147,44 +150,60 @@ class App:
 
         self.Outs = {}
 
+        graph_unit = " (ppm)"
+
+        row_disp += 1
+
+        label = "CO2"
+        name = "CO2 Header"
+
+        self.Outs[name + "label"] = TK.Label(frame, text=label)
+        self.Outs[name + "label"].grid(row=row_disp, column=1, padx=5, pady=5)
+
+        label = "N20"
+        name = "N20 Header"
+
+        self.Outs[name + "label"] = TK.Label(frame, text=label)
+        self.Outs[name + "label"].grid(row=row_disp, column=2, padx=5, pady=5)
+
         row_disp += 1
         name = "CO2_MUG"
-        label = "MUG"
-        self.MakeTextbox(name, label, row_disp, frame, 1, width=8)
+        label = "µG/m²/h"
+        self.MakeTextbox(name, label, row_disp, frame, 1)
         name = "N2O_MUG"
-        self.MakeTextbox(name, label, row_disp, frame, 2, width=8)
+        self.MakeTextbox(name, label, row_disp, frame, 2)
 
         row_disp += 1
         name = "CO2_SLOPE"
-        label = "Slope"
+        label = "Slope"+graph_unit
         self.MakeTextbox(name, label, row_disp, frame, 1)
         name = "N2O_SLOPE"
         self.MakeTextbox(name, label, row_disp, frame, 2)
 
         row_disp += 1
         name = "mse_CO2"
-        label = "MSE"
+        label = "MSE"+graph_unit
         self.MakeTextbox(name, label, row_disp, frame, 1)
         name = "mse_N2O"
         self.MakeTextbox(name, label, row_disp, frame, 2)
 
         row_disp += 1
         name = "rsq_CO2"
-        label = "rsq"
+        label = "r² line fit"
         self.MakeTextbox(name, label, row_disp, frame, 1)
         name = "rsq_N2O"
         self.MakeTextbox(name, label, row_disp, frame, 2)
 
         row_disp += 1
         name = "diff_CO2"
-        label = "diff"
+        label = "diff" +graph_unit
         self.MakeTextbox(name, label, row_disp, frame, 1)
         name = "diff_N2O"
         self.MakeTextbox(name, label, row_disp, frame, 2)
 
         row_disp += 1
         name = "SampleNo"
-        label = "graph"
+        label = "graph #"
         self.MakeTextbox(name, label, row_disp, frame, 1)
 
         row_disp += 1
@@ -198,18 +217,18 @@ class App:
         self.MakeTextbox(name, label, row_disp, frame)
 
         row_disp += 1
-        name = "gndTemp"
-        label = "Gnd Temp"
+        name = "precip"
+        label = "Precip"
         self.MakeTextbox(name, label, row_disp, frame)
 
         row_disp += 1
-        name = "EC"
-        label = "EC"
+        name = "Plot NR"
+        label = "Plot NR"
         self.MakeTextbox(name, label, row_disp, frame)
 
         row_disp += 1
-        name = "VWC"
-        label = "Moisture"
+        name = "Treatment NO"
+        label = "Treatment NO"
         self.MakeTextbox(name, label, row_disp, frame)
 
         row_disp += 1
@@ -218,7 +237,7 @@ class App:
         # tkinter needs special variables it seems like
         self.var = TK.StringVar(root)
         # Init the scrollbox variable to 100 for regression window
-        self.var.set(100)
+        self.var.set(self.options["interval"])
         # initialize scrollbox
         self.XINT = TK.Spinbox(frame, from_=3, to=10000, width=5, increment=1, textvariable=self.var)
         # placement of scrollbox
@@ -234,26 +253,34 @@ class App:
         self.R2 = TK.Radiobutton(frame, text="Steep", variable=self.method, value='steepest', command=self.update)
         self.R2.grid(row=row_disp, column=1, padx=5, pady=5)  # Radio button for reg method
 
+        row_disp += 1
+        self.C1 = TK.Checkbutton(frame, text='CO2 Guide', variable=self.CO2_guide, onvalue=1, offvalue=0, command=self.update)
+        self.C1.grid(row=row_disp, column=0, padx=5, pady=5)  # Radio button for reg method
+
+        row_disp += 2
         self.update_button = TK.Button(frame, text="Update",
                                        command=self.update)  # Update the graph
-        self.update_button.grid(row=20, column=0)
+        self.update_button.grid(row=row_disp, column=0)
 
         self.reset_button = TK.Button(frame, text="Reset Params",
                                       command=self.reset)  # Update the graph
-        self.reset_button.grid(row=20, column=1)
+        self.reset_button.grid(row=row_disp, column=2)
+        row_disp += 1
 
         self.set_param = TK.Button(frame, text="Set Default",
                                    command=self.setDefault)  # Update the graph
-        self.set_param.grid(row=21, column=1, pady=5)
+        self.set_param.grid(row=row_disp, column=2, pady=5)
 
+        row_disp += 1
         self.save = TK.Button(frame, text="Save graph",
                               command=self.saveGraph)  # Update the graph
-        self.save.grid(row=23, column=1, pady=40)
+        self.save.grid(row=row_disp, column=2, pady=40)
 
+        row_disp += 1
         self.save = TK.Button(frame, text="Save all to excel",
                               command=self.toExcel)  # Update the graph
-        self.save.grid(row=24, column=1, pady=40)
-
+        self.save.grid(row=row_disp, column=2, pady=40)
+        row_disp += 1
         #
         self.Outs["CO2_SLOPE"].configure(state="disabled")
 
@@ -269,37 +296,27 @@ class App:
         self.ax.set_ylabel("CO2 (ppm)")
         self.fig.autofmt_xdate()  # Dont know what this does
 
-        self.CO2line, = self.ax.plot([1, 2], [1, 2], linewidth=1, color="tab:blue",
+        self.CO2line1, = self.ax.plot([1, 2], [1, 2], linewidth=1, color="tab:blue",
                                      alpha=0.5)  # Inititalise measurement graph
-        self.CO2line1, = self.ax.plot([1, 2], [1, 2], marker='o', linestyle='dashed', linewidth=2, color="tab:green",
+        self.CO2line2, = self.ax.plot([1, 2], [1, 2], marker='o', linestyle='dashed', linewidth=2, color="tab:green",
                                       alpha=0.7)
-        self.CO2line2, = self.ax.plot([1, 2], [1, 2], linewidth=3, color="tab:orange")  # Inititalize regression graph
+        self.CO2line3, = self.ax.plot([1, 2], [1, 2], linewidth=3, color="tab:orange")  # Inititalize regression graph
+        self.CO2start, = self.ax.plot([1, 2], [1, 2], linewidth=1, color="tab:red", alpha=0.5)
+        self.CO2stop, = self.ax.plot([1, 2], [1, 2], linewidth=1, color="tab:red", alpha=0.5)
 
-        self.airTempLine1, = self.ax1.plot([1, 2], [1, 2], linewidth=1, color="tab:blue", alpha=0.5)
-        self.airTempLine2, = self.ax1.plot([1, 2], [1, 2], marker='o', linestyle='dashed', linewidth=2,
+
+        self.N2Oline1, = self.ax1.plot([1, 2], [1, 2], linewidth=1, color="tab:blue", alpha=0.5)
+        self.N2Oline2, = self.ax1.plot([1, 2], [1, 2], marker='o', linestyle='dashed', linewidth=2,
                                            color="tab:green", alpha=0.7)  # Inititalize regression graph
-        self.airTempLine3, = self.ax1.plot([1, 2], [1, 2], linewidth=3,
+        self.N2Oline3, = self.ax1.plot([1, 2], [1, 2], linewidth=3,
                                            color="tab:orange")  # Inititalize regression graph
+        self.N2Ostart, = self.ax1.plot([1, 2], [1, 2], linewidth=1, color="tab:red", alpha=0.5)
+        self.N2Ostop, = self.ax1.plot([1, 2], [1, 2], linewidth=1, color="tab:red", alpha=0.5)
+        
         self.ax1.set_title("N2O")
         self.ax1.set_title("N20")
         self.ax1.set_ylabel("N2O (ppm)")
         self.ax1.set_xlabel("Time (S)")
-        #
-        # self.gndTempLine1, = self.ax2.plot([2, 1], [1, 2], linewidth=4, color="green")
-        # self.gndTempLine2, = self.ax2.plot([2, 1], [2, 1], linewidth=4, color="red")  # Inititalize regression graph
-        # self.ax2.set_title("Ground Temp")
-        # self.ax2.set_ylabel("Temp (C)")
-        #
-        # self.ECLine1, = self.ax3.plot([2, 1], [1, 2], linewidth=4, color="green")
-        # self.ECLine2, = self.ax3.plot([2, 1], [2, 1], linewidth=4, color="red")  # Inititalize regression graph
-        # self.ax3.set_title("EC")
-        # self.ax3.set_ylabel("EC")
-        #
-        # self.VWCLine1, = self.ax4.plot([1, 3], [3, 1], linewidth=4, color="green")
-        # self.VWCLine2, = self.ax4.plot([3, 1], [3, 1], linewidth=4, color="red")  # Inititalize regression graph
-        # self.ax4.set_title("Moisture")
-        # self.ax4.set_xlabel("Time (s)")
-        # self.ax4.set_ylabel("VWC")
 
         self.fig.subplots_adjust(left=0.05, right=0.95, top=0.9, bottom=0.06)
         self.canvas = FigureCanvasTkAgg(self.fig, master=master, )  # Make the canvas
@@ -310,14 +327,15 @@ class App:
         self._job = None
         self.sliderMin = TK.Scale(master, from_=0, to=180, length=sliderLength, orient=TK.HORIZONTAL)
         self.sliderMin.bind("<ButtonRelease-1>", self.updateValue)
-        self.sliderMin.set(5)
+        self.sliderMin.set(self.options["start"])
         self.sliderMin.grid(row=10, column=3)
 
         self.sliderMax = TK.Scale(master, from_=0, to=180, length=sliderLength, orient=TK.HORIZONTAL)
         self.sliderMax.bind("<ButtonRelease-1>", self.updateValue)
-        self.sliderMax.set(170)
+        self.sliderMax.set(self.options["stop"])
         self.sliderMax.grid(row=11, column=3)
 
+        self.getParams()
         self.update()
 
         frame.grid(row=0, column=0)
@@ -328,15 +346,23 @@ class App:
 
     def initializeDF(self):
         fixpath = utils.ensure_absolute_path
+        detailed_output_path = fixpath('output/detailed_regression_output_unsorted')
+        find_regressions.make_detailed_output_folders(detailed_output_path)
+        self.specific_options_filename = fixpath('specific_options.pickle')
+        slopes_filename = fixpath("output/capture_slopes.txt")
 
-        self.options = {'interval': 100,
-                        'start': 0,
-                        'stop': 180,
-                        'crit': 'steepest',
-                        'co2_guides': True,
-                        'correct_negatives': False,
-                        "reg_window": 180
-                        }
+        if  ".pickle" in self.specific_options_filename:
+            try:
+                self.specific_options = read_regression_exception_list.open_pickle_file(self.specific_options_filename)
+            except:
+                self.specific_options = specific_options
+                read_regression_exception_list.save_pickle_file(self.specific_options_filename, specific_options)
+        else:
+            self.specific_options = read_regression_exception_list.parse_xls_file(self.specific_options_filename)
+
+        self.options = copy.deepcopy(self.specific_options["ALL"])
+
+        self.options_bcp = copy.deepcopy(self.options)
 
         self.save_options = {'show_images': False,
                              'save_images': False,
@@ -353,10 +379,7 @@ class App:
             print(DATA_FILE_NAME + ' not found')
             resdir.raw_data_path = fixpath('raw_data')
 
-        detailed_output_path = fixpath('output/detailed_regression_output_unsorted')
-        find_regressions.make_detailed_output_folders(detailed_output_path)
-        specific_options_filename = fixpath('specific_options.xls')
-        slopes_filename = fixpath("output/capture_slopes.txt")
+
 
         malingnr = "1"
         currDir = getcwd()
@@ -366,9 +389,11 @@ class App:
         df_path = "output/capture_RegressionOutput.xls"
 
         self.df = pd.read_excel(df_path, index_col=0)
+
         self.df.date = pd.to_datetime(self.df.date, format="%Y%m%d-%H%M%S")
+
         self.regr = find_regressions.Regressor(slopes_filename, self.options, self.save_options,
-                                               specific_options_filename, detailed_output_path)
+                                               self.specific_options_filename, detailed_output_path)
 
     def updateValue(self, event):
         self.update()
@@ -415,14 +440,21 @@ class App:
         self.xint = int(self.XINT.get())  # Update the regression window
         self.setParams()
         self.replot()  # Replot the graph
-        print(self.df.iloc[self.nr])
 
     def reset(self):
-        self.xint = 100  # regression window
-        self.var.set(self.xint)
-        self.sliderMax.set(180)
-        self.sliderMin.set(5)
-        self.method.set("mse")
+        # self.xint = int()  # regression window
+        #self.var.set(self.specific_options["ALL"]['interval'])
+        self.sliderMax.set(self.specific_options["ALL"]["stop"])
+        self.sliderMin.set(self.specific_options["ALL"]["start"])
+        self.method.set(self.specific_options["ALL"]["crit"])
+        if (self.specific_options["ALL"]["co2_guides"] == True):
+            self.C1.select()
+        else:
+            self.C1.deselect()
+
+        if self.fname in self.specific_options:
+            del self.specific_options[self.fname]
+
         self.update()
 
     def sel2(self):
@@ -432,45 +464,62 @@ class App:
         self.method.set("mse")
 
     def getParams(self):
+        self.fname = self.df.iloc[self.nr].filename
+        if self.fname in self.specific_options.keys():
+            name = self.fname
+        else:
+            name = "ALL"
 
-        self.sliderMin.set(self.options["start"])
+        self.sliderMin.set(self.specific_options[name]["start"])
+        self.sliderMax.set(self.specific_options[name]["stop"])
+        self.method.set(self.specific_options[name]['crit'])
+        self.xint = self.specific_options[name]["interval"]
+        self.var = self.xint
+        if (self.specific_options[name]["co2_guides"] == True):
+            self.C1.select()
+        else:
+            self.C1.deselect()
+        self.update()
 
-        self.sliderMax.set(self.options["stop"])
-
-        self.method.set(self.options['crit'])
-
-        self.xint = self.options["reg_window"]
-        self.var = str(self.xint)
 
     def setParams(self):
         self.options["start"] = int(self.sliderMin.get())
         self.options["stop"] = int(self.sliderMax.get())
         self.options['crit'] = self.method.get()
-        self.options["reg_window"] = int(self.XINT.get())
+        self.options["interval"] = int(self.XINT.get())
+        self.options['co2_guides'] = int(self.CO2_guide.get())
+
+        if self.options != self.specific_options["ALL"]:
+            self.specific_options[self.fname]= copy.deepcopy(self.options)
+            if ".pickle" in self.specific_options_filename:
+                with open(self.specific_options_filename, 'wb') as handle:
+                    pickle.dump(self.specific_options, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
     def setDefault(self):
-        nr_bcp = self.nr
-        for nr_i in range(len(f)):
-            self.nr = nr_i
-            self.setParams()
-        self.nr = nr_bcp
+        self.specific_options["ALL"]["start"] = int(self.sliderMin.get())
+        self.specific_options["ALL"]["stop"] = int(self.sliderMax.get())
+        self.specific_options["ALL"]['crit'] = self.method.get()
+        self.specific_options["ALL"]["interval"] = int(self.XINT.get())
+        self.specific_options["ALL"]["co2_guides"] = int(self.CO2_guide.get())
         self.getParams()
         self.replot()
 
     def regress(self):
         self.fname = self.df.iloc[self.nr].filename
         self.df_reg = self.df.iloc[self.nr]
+
         datafilename = resdir.raw_data_path + "\\" + self.fname
         meas = find_regressions.plot_raw(datafilename)
+
         self.regressions = self.regr.find_all_slopes(filename_or_data=datafilename, do_plot=False,
-                                                     given_specific_options=False)
+                                                     given_specific_options=self.options)
 
         reg = self.regressions[self.df_reg["side"]]
 
         self.segments = find_regressions.get_regression_segments(meas, self.regressions)[self.df_reg["side"]]
 
         self.co2 = meas["CO2"]  # Get the ppm values
-        self.airTemp = meas["N2O"]
+        self.N2O = meas["N2O"]
         self.gndTemp = meas['licor_H2O']
         self.EC = meas['licor_T']
         self.VWC = meas['Wind']
@@ -483,7 +532,7 @@ class App:
 
         self.cutStart = int(self.xLen * (self.sMin / 100.))  # Select cut range as 5% of samples
         self.cutStop = int(self.xLen * (self.sMax / 100.))
-        #        print(self.cutStart,self.cutStop)
+
         self.co2Cut = [[], []]
         self.co2Cut[0] = self.co2[0][self.sliderMin.get():self.sliderMax.get()]
         self.co2Cut[1] = self.co2[1][self.sliderMin.get():self.sliderMax.get()]
@@ -493,7 +542,6 @@ class App:
             # an error box and set the regression window to sample window
             # messagebox.showinfo("ERROR", "regression window is larger than sample window")
             self.xint = (self.cutStop - self.cutStart) - 3
-        #        print(self.xint)
         # Find the best regression
 
         # Initialize the graph, we first initialize it here, then we update the values in
@@ -521,19 +569,19 @@ class App:
         self.UpdateText("SampleNo", self.nr)
         self.UpdateText("CO2_MUG", str("%.2e" % (reg["CO2"].slope * flux_units["CO2"]["factor"])))
         self.UpdateText("N2O_MUG", str("%.2e" % (reg["N2O"].slope * flux_units["N2O"]["factor"])))
-        self.UpdateText("CO2_SLOPE", reg["CO2"].slope)
-        self.UpdateText("N2O_SLOPE", reg["N2O"].slope)
-        self.UpdateText("mse_CO2", reg["CO2"].mse)
-        self.UpdateText("mse_N2O", reg["N2O"].mse)
-        self.UpdateText("rsq_CO2", reg["CO2"].rsq)
-        self.UpdateText("rsq_N2O", reg["N2O"].rsq)
-        self.UpdateText("diff_CO2", reg["CO2"].max_y - reg["CO2"].min_y)
-        self.UpdateText("diff_N2O", reg["N2O"].max_y - reg["N2O"].min_y)
+        self.UpdateText("CO2_SLOPE", str("%.2e" %(reg["CO2"].slope)))
+        self.UpdateText("N2O_SLOPE", str("%.2e" %(reg["N2O"].slope)))
+        self.UpdateText("mse_CO2", str("%.2e" %(reg["CO2"].mse)))
+        self.UpdateText("mse_N2O", str("%.2e" %(reg["N2O"].mse)))
+        self.UpdateText("rsq_CO2", str("%.2f" %(reg["CO2"].rsq)))
+        self.UpdateText("rsq_N2O", str("%.2f" %(reg["N2O"].rsq)))
+        self.UpdateText("diff_CO2", str("%.2e" %(reg["CO2"].max_y - reg["CO2"].min_y)))
+        self.UpdateText("diff_N2O", str("%.2e" %(reg["N2O"].max_y - reg["N2O"].min_y)))
         self.UpdateText("side_box", self.df_reg["side"])
-        self.UpdateText("airTemp", 1)
-        self.UpdateText("gndTemp", 2)
-        self.UpdateText("EC", 3)
-        self.UpdateText("VWC", 4)
+        self.UpdateText("airTemp", self.df_reg["Tc"])
+        self.UpdateText("precip", self.df_reg["precip"])
+        self.UpdateText("Plot NR", self.df_reg["nr"])
+        self.UpdateText("Treatment NO", self.df_reg["treatment"])
 
         # Update all of the plot lines
         self.title = (self.name +
@@ -543,21 +591,36 @@ class App:
                        2,
                        3,
                        4))
+        slopeSegments = self.segments["CO2"]
+        slopeLine = slopeFromPoints(reg["CO2"])
 
         self.fig.suptitle(self.title, fontsize=12)
-        self.CO2line.set_xdata(self.segments["CO2"][0])
-        self.CO2line.set_ydata(self.segments["CO2"][1])  # Update sample values
-        self.CO2line1.set_xdata(self.segments["CO2"][2])
-        self.CO2line1.set_ydata(self.segments["CO2"][3])
-        self.CO2line2.set_xdata(slopeFromPoints(reg["CO2"])[0])  # Update regression values
-        self.CO2line2.set_ydata(slopeFromPoints(reg["CO2"])[1])  # Update regression values
+        self.CO2line1.set_xdata(slopeSegments[0])
+        self.CO2line1.set_ydata(slopeSegments[1])  # Update sample values
+        self.CO2line2.set_xdata(slopeSegments[2])
+        self.CO2line2.set_ydata(slopeSegments[3])
+        self.CO2line3.set_xdata(slopeLine[0])  # Update regression values
+        self.CO2line3.set_ydata(slopeLine[1])  # Update regression values
 
-        self.airTempLine1.set_xdata(self.segments['N2O'][0])
-        self.airTempLine1.set_ydata(self.segments['N2O'][1])
-        self.airTempLine2.set_xdata(self.segments['N2O'][2])
-        self.airTempLine2.set_ydata(self.segments['N2O'][3])
-        self.airTempLine3.set_xdata(slopeFromPoints(reg["N2O"])[0])
-        self.airTempLine3.set_ydata(slopeFromPoints(reg["N2O"])[1])
+        self.CO2start.set_xdata([self.options["start"]]*2)
+        self.CO2start.set_ydata([np.min(slopeSegments[1]), np.max(slopeSegments[1])])
+        self.CO2stop.set_xdata([self.options["stop"]]*2)
+        self.CO2stop.set_ydata([np.min(slopeSegments[1]), np.max(slopeSegments[1])])
+
+        slopeSegments = self.segments["N2O"]
+        slopeLine = slopeFromPoints(reg["N2O"])
+
+        self.N2Oline1.set_xdata(slopeSegments[0])
+        self.N2Oline1.set_ydata(slopeSegments[1])  # Update sample values
+        self.N2Oline2.set_xdata(slopeSegments[2])
+        self.N2Oline2.set_ydata(slopeSegments[3])
+        self.N2Oline3.set_xdata(slopeLine[0])  # Update regression values
+        self.N2Oline3.set_ydata(slopeLine[1])  # Update regression values
+
+        self.N2Ostart.set_xdata([self.options["start"]] * 2)
+        self.N2Ostart.set_ydata([np.min(slopeSegments[1]), np.max(slopeSegments[1])])
+        self.N2Ostop.set_xdata([self.options["stop"]] * 2)
+        self.N2Ostop.set_ydata([np.min(slopeSegments[1]), np.max(slopeSegments[1])])
         #
         # self.gndTempLine1.set_xdata(self.gndTemp[0])
         # self.gndTempLine1.set_ydata(self.gndTemp[1])
@@ -630,7 +693,7 @@ class App:
         self.Outs[name].insert(1.0, value)
         self.Outs[name].configure(state="disabled")
 
-    def MakeTextbox(self, name, label, row_disp, frame, collumnbox=1, collumntext=0, state="disabled", width=5):
+    def MakeTextbox(self, name, label, row_disp, frame, collumnbox=1, collumntext=0, state="disabled", width=9):
         self.Outs[name + "label"] = TK.Label(frame, text=label)
         self.Outs[name + "label"].grid(row=row_disp, column=collumntext, padx=5, pady=5)
         # Regression slope text display
@@ -641,7 +704,19 @@ class App:
 
 
 if __name__ == "__main__":
-    print("Analyzer GUI")
+    flux_units = {'N2O': {'name': 'N2O_N_mug_m2h', 'factor': 2 * 14 * 1e6 * 3600},
+                  'CO2': {'name': 'CO2_C_mug_m2h', 'factor': 12 * 1e6 * 3600}}
+
+    specific_options = {
+        "ALL": {
+            'interval': 100,
+            'start': 0,
+            'stop': 180,
+            'crit': 'steepest',
+            'co2_guides': True,
+            'correct_negatives': False
+        }
+    }
 
 root = TK.Tk()
 app = App(root)
