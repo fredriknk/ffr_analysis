@@ -35,3 +35,4 @@ If downloading the FFR analysis program for the first time, a few things have to
 1. Download the Anaconda package with spyder IDE
 2. Clone the ffr_analysis repo
 3. Find your specific folder and put your raw data files in the raw_data folder 
+4. Create a file with a raw_data_path.ino file with the path to your raw data
