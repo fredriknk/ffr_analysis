@@ -1,18 +1,30 @@
+from matplotlib.widgets import Slider
+import sys
+import os
+import numpy as np
 import pandas as pd
-# plt.ioff()
-import numpy as np
 from time import time
-
-from matplotlib.backend_bases import MouseButton
-import matplotlib.pyplot as plt
-import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 from matplotlib.patches import Rectangle
 from matplotlib.text import Text
-from matplotlib.image import AxesImage
-import numpy as np
-from numpy.random import rand
+
+sys.path.append(os.path.realpath(os.path.join(os.getcwd(), '../../prog')))
+from regression import *
+import find_regressions
+import bisect_find
+import utils
+import resdir
+import csv
+import read_regression_exception_list
+import flux_calculations
+
+
+def xaligned_axes(ax, y_distance, width, **kwargs):
+    return plt.axes([ax.get_position().x0,
+                     ax.get_position().y0-y_distance,
+                     ax.get_position().width, width],
+                    **kwargs)
 
 def getN2Odata(df,plotno,tot_n2o_sum = []):
     plot = df[df['nr'] == plotno]  # select the data from plot 2
@@ -77,17 +89,18 @@ if __name__ == "__main__":
 
     start = time()
     filename = "output/capture_slopes.xls"  #filename for raw output
-    df = pd.read_excel(filename) # import excel docuument
-    df.index= df["Unnamed: 0"]
-    df['date'] = pd.to_datetime(df['date']) # make date column to datetime objects
-    df = df.sort_values(by=['date']) #sort all entries by date
+    df_b = pd.read_excel(filename) # import excel docuument
+    df_b.index= df_b["Unnamed: 0"]
+    df_b['date'] = pd.to_datetime(df_b['date']) # make date column to datetime objects
+    df_b = df_b.sort_values(by=['date']) #sort all entries by date
+    df = df_b
 
+    # fig,axs = plt.subplots(nrows=3, ncols=2,figsize=(15, 12))
+    fig = plt.figure(figsize=(6, 4))
 
-    fig,axs = plt.subplots(nrows=2, ncols=2,figsize=(15, 12))
-
-    ax1 = plt.subplot(212)
-    ax2 = plt.subplot(221)
-    ax3 = plt.subplot(222)
+    ax1 = plt.subplot(2,2,(3,4))
+    ax2 = plt.subplot(2,2,1)
+    ax3 = plt.subplot(2,2,2)
 
     treatments, plotdata = run_all_plots(df)
 
@@ -110,6 +123,13 @@ if __name__ == "__main__":
     for label in ax2.get_xticklabels():  # make the xtick labels pickable
         label.set_picker(True)
 
+    date_min = int(ax1.get_xlim()[0])
+    date_max = int(ax1.get_xlim()[1])
+
+    ax_slider1 = xaligned_axes(ax=ax1, y_distance=0.05, width=0.01, facecolor="r")
+    ax_slider2 = xaligned_axes(ax=ax1, y_distance=0.07, width=0.01, facecolor="r")
+    start_date = Slider(ax_slider1, 'Start', date_min, date_max, valinit=date_min, valstep=1,dragging=False)
+    stop_date = Slider(ax_slider2,  'Stop', date_min, date_max, valinit=date_max, valstep=1,dragging=False)
     # df = df.set_index('date')
 
     def onpick(event):
@@ -120,6 +140,9 @@ if __name__ == "__main__":
         # ind = event.ind
         # points = tuple(zip(xdata[ind], ydata[ind]))
         # print('onpick points:', points)
+        df = df_b[
+            (df_b.date > pd.Timestamp(start_date.val, unit="d")) & (df_b.date < pd.Timestamp(stop_date.val, unit="d"))]
+        print(df.date)
 
         if isinstance(event.artist, Line2D):
             thisline = event.artist
@@ -158,7 +181,40 @@ if __name__ == "__main__":
             treatment = treatment_df[treatment_df.name == text.get_text()].index[0]
 
 
+    def update(val):
+        print(pd.Timestamp(start_date.val,unit="d"),pd.Timestamp(stop_date.val,unit="d"))
+        df = df_b[(df_b.date>pd.Timestamp(start_date.val,unit="d") ) & (df_b.date< pd.Timestamp(stop_date.val,unit="d") ) ]
+        print(df.date)
+
+        treatments, plotdata = run_all_plots(df)
+
+        ax2.cla()
+        ax3.cla()
+
+        for plotno in plotdata:
+            # ax1.plot(plotdata[plotno]["data"], '-o', picker=True, pickradius=5, label=plotno)
+            ax3.plot(plotdata[plotno]["dataintsum"], '-o', picker=True, pickradius=5, label=plotno)
+        avgsum = pd.DataFrame.from_dict(treatments, orient='index').sort_index()
+        xticks = np.arange(len(avgsum.index))
+
+        ax2.set_ylabel('N2O Emissions\nµG/m²/h')
+
+        ax2.bar(xticks, avgsum.avg, yerr=avgsum.stdev, align='center', alpha=0.5, ecolor='black', capsize=6,
+                picker=True)
+        ax2.bar(xticks, avgsum.avg, yerr=avgsum.stdev, align='center', alpha=0.5, ecolor='black', capsize=6,
+                picker=True)
+        ax2.set_ylabel('N2O Emissions')
+        ax2.set_xticks(xticks)
+        ax2.set_xticklabels(avgsum.index, rotation=20, ha='right')
+
+        ax2.set_title('Treatment')
+        ax2.yaxis.grid(True)
+
+        for label in ax2.get_xticklabels():  # make the xtick labels pickable
+            label.set_picker(True)
     fig.canvas.mpl_connect('pick_event', onpick)
+    start_date.on_changed(update)
+    stop_date.on_changed(update)
     plt.show()
 
             #

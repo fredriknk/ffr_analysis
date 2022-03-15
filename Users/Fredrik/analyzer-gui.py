@@ -26,6 +26,7 @@ from matplotlib.patches import Rectangle
 from matplotlib.text import Text
 from matplotlib.widgets import Slider
 
+
 sys.path.append(os.path.realpath(os.path.join(os.getcwd(), '../../prog')))
 from regression import *
 import find_regressions
@@ -128,7 +129,7 @@ class App:
         self.master = master
         self.initializeDF()
         self.maxf = len(self.df)
-        self.nr = 1  # measurement number
+        self.nr = 0  # measurement number
         self.fname = self.df.iloc[self.nr].filename
         self.xint = 100  # regression window
         self.cutoff = 0.05  # cutoff percentage
@@ -236,6 +237,11 @@ class App:
         self.MakeTextbox(name, label, row_disp, frame)
 
         row_disp += 1
+        name = "Treatment Name"
+        label = "Treatment Name"
+        self.MakeTextbox(name, label, row_disp, frame,width=25, cspan=2)
+
+        row_disp += 1
         self.WindowLabel = TK.Label(frame, text="Regr Window")
         self.WindowLabel.grid(row=row_disp, column=0, padx=5, pady=5)
         # tkinter needs special variables it seems like
@@ -276,15 +282,15 @@ class App:
         self.set_param.grid(row=row_disp, column=2, pady=5)
 
         row_disp += 1
-        self.save = TK.Button(frame, text="Show Graph",
+        self.save = TK.Button(frame, text="Show Cumsum Plot",
                               command=self.saveGraph)  # Update the graph
         self.save.grid(row=row_disp, column=2, pady=40)
 
-        # row_disp += 1
-        # self.save = TK.Button(frame, text="Save all to excel",
-        #                       command=self.toExcel)  # Update the graph
-        # self.save.grid(row=row_disp, column=2, pady=40)
-        # row_disp += 1
+        row_disp += 1
+        self.save = TK.Button(frame, text="Drop Measurement",
+                              command=self.dropMeasurement)  # Update the graph
+        self.save.grid(row=row_disp, column=2, pady=40)
+        row_disp += 1
         #
         self.Outs["CO2_SLOPE"].configure(state="disabled")
 
@@ -373,6 +379,18 @@ class App:
                              'save_detailed_excel': False,
                              'sort_detailed_by_experiment': False
                              }
+        self.treatment_legend = {1: {'name': 'Control N1', 'plots': [9, 19, 30]},
+                            2: {'name': 'Control N2', 'plots': [2, 18, 27]},
+                            3: {'name': 'Perenial ryegrass N1', 'plots': [12, 23, 25]},
+                            4: {'name': 'Perenial ryegrass N2', 'plots': [5, 15, 28]},
+                            5: {'name': 'Italian ryegrass N1', 'plots': [10, 17, 29]},
+                            6: {'name': 'Italian ryegrass N2', 'plots': [1, 22, 32]},
+                            7: {'name': 'Summer vetch N1', 'plots': [4, 20, 36]},
+                            8: {'name': 'Winter vetch N1', 'plots': [11, 21, 35]},
+                            9: {'name': 'Oilseed radish N1', 'plots': [6, 24, 34]},
+                            10: {'name': 'Oilseed radish N2', 'plots': [8, 16, 26]},
+                            11: {'name': 'Phaselia N2', 'plots': [7, 14, 31]},
+                            12: {'name': 'Grønn bro N1', 'plots': [3, 13, 33]}}
 
         DATA_FILE_NAME = "raw_data_path.ino"
 
@@ -493,7 +511,6 @@ class App:
         self.options['crit'] = self.method.get()
         self.options["interval"] = int(self.XINT.get())
         self.options['co2_guides'] = int(self.CO2_guide.get())
-
         if self.options != self.specific_options["ALL"]:
             self.specific_options[self.fname]= copy.deepcopy(self.options)
             if ".pickle" in self.specific_options_filename:
@@ -587,7 +604,7 @@ class App:
         self.UpdateText("precip", self.df_reg["precip"])
         self.UpdateText("Plot NR", self.df_reg["nr"])
         self.UpdateText("Treatment NO", self.df_reg["treatment"])
-
+        self.UpdateText("Treatment Name", self.treatment_legend[self.df_reg["treatment"]]["name"])
         # Update all of the plot lines
         self.title = (self.name +
                       "\n" + str(self.tmpRegression) + "\n" +
@@ -626,7 +643,7 @@ class App:
         self.N2Ostart.set_ydata([np.min(slopeSegments[1]), np.max(slopeSegments[1])])
         self.N2Ostop.set_xdata([self.options["stop"]] * 2)
         self.N2Ostop.set_ydata([np.min(slopeSegments[1]), np.max(slopeSegments[1])])
-
+        #
         # self.gndTempLine1.set_xdata(self.gndTemp[0])
         # self.gndTempLine1.set_ydata(self.gndTemp[1])
         # #
@@ -690,6 +707,11 @@ class App:
                 df_1 = df[df.treatment == int(dropindex.treatment)]
 
                 plotDF(df_1, ax1, ax2, ax3, drop="S")
+                treatment_name = treatment_legend[int(dropindex.treatment)]["name"]
+                ax3.set_title(
+                    treatment_name + " from:" + df.date.min().strftime("%Y-%m-%d") + " to:" + df.date.max().strftime(
+                        "%Y-%m-%d"))
+
                 fig.canvas.draw()
 
             elif isinstance(event.artist, Rectangle):
@@ -884,6 +906,9 @@ class App:
             self.getParams()
             self.replot()
 
+    def dropMeasurement(self):
+        a = 1
+
     def UpdateText(self, name, value):
         self.Outs[name].configure(state="normal")
         # update the slope textbox
@@ -891,13 +916,13 @@ class App:
         self.Outs[name].insert(1.0, value)
         self.Outs[name].configure(state="disabled")
 
-    def MakeTextbox(self, name, label, row_disp, frame, collumnbox=1, collumntext=0, state="disabled", width=9):
+    def MakeTextbox(self, name, label, row_disp, frame, collumnbox=1, collumntext=0, state="disabled", width=9, cspan=1):
         self.Outs[name + "label"] = TK.Label(frame, text=label)
         self.Outs[name + "label"].grid(row=row_disp, column=collumntext, padx=5, pady=5)
         # Regression slope text display
         self.Outs[name] = TK.Text(frame, height=1, width=width)
         # Placement of regression text display
-        self.Outs[name].grid(row=row_disp, column=collumnbox, padx=5, pady=5)
+        self.Outs[name].grid(row=row_disp, column=collumnbox, padx=5, pady=5,columnspan = cspan)
         self.Outs[name].configure(state=state)  # Disable to prevent user input
 
 
