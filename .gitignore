@@ -133,3 +133,4 @@ dmypy.json
 **/output/
 metno_client_id.txt
 raw_data_path.ino
+metno_data.pickle
