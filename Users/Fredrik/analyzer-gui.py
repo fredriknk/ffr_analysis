@@ -702,8 +702,7 @@ class App:
             time_start = time()
             df = df_b[
                 (df_b.date > pd.Timestamp(start_date.val, unit="d")) & (
-                            df_b.date < pd.Timestamp(stop_date.val, unit="d"))]
-            print(df.date)
+                        df_b.date < pd.Timestamp(stop_date.val, unit="d"))]
 
             if isinstance(event.artist, Line2D):
                 thisline = event.artist
@@ -713,10 +712,7 @@ class App:
                 ind = event.ind
 
                 points = tuple(zip(xdata[ind], ydata[ind]))
-                print('onpick1 line:', thisline.get_label(), xdata[ind][0])
                 dropindex = df[(df.nr == int(thisline.get_label())) & (df.date == xdata[ind][0])]
-                print(dropindex.treatment)
-                print(dropindex.index)
                 # df_b.drop(dropindex.index, axis=0, inplace=True)
                 #
                 # df = df_b[
@@ -739,8 +735,10 @@ class App:
 
             elif isinstance(event.artist, Rectangle):
                 patch = event.artist
-                treatment_name = treatment_df.name.sort_values().iloc[int(patch.get_x() + (patch.get_width() / 2))]
-                treatment_no = treatment_df.name.sort_values().index[int(patch.get_x() + (patch.get_width() / 2))]
+                print(int(patch.get_x() + (patch.get_width() / 2)))
+                treatment_no = int(patch.get_x() + (patch.get_width() / 2)) + 1
+                treatment_name = treatment_legend[treatment_no]["name"]
+
                 df_1 = df[df.treatment == treatment_no]
 
                 plotDF(df_1, df_w, axs, drop="S")
@@ -751,17 +749,14 @@ class App:
 
             elif isinstance(event.artist, Text):
                 text = event.artist
-                print('onpick1 text:', text.get_text())
                 fig2, axs2 = plt.subplots(nrows=2, ncols=1, figsize=(15, 12))
                 treatment = treatment_df[treatment_df.name == text.get_text()].index[0]
-            print(time() - time_start)
 
         def update(val):
             time_start = time()
-            print(pd.Timestamp(start_date.val, unit="d"), pd.Timestamp(stop_date.val, unit="d"))
             df = df_b[
                 (df_b.date > pd.Timestamp(start_date.val, unit="d")) & (
-                            df_b.date < pd.Timestamp(stop_date.val, unit="d"))]
+                        df_b.date < pd.Timestamp(stop_date.val, unit="d"))]
             plotDF(df, df_w, axs)
             print(time() - time_start)
 
@@ -839,6 +834,7 @@ class App:
                         'N2O_N_mug_m2h']  # [avg_plot['N2O_N_mug_m2h']>0]
                     dataset.append(avg_plot)  # np.log(avg_plot))
                 axs["boxplot"].boxplot(dataset)
+                axs["boxplot"].set_ylim(1, None)
                 axs["boxplot"].set_xticklabels(avgsum.index, rotation=20, ha='right')
 
             if "P" not in drop:
