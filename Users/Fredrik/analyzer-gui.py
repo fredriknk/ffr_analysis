@@ -292,7 +292,10 @@ class App:
         self.save = TK.Button(frame, text="Drop Measurement",
                               command=self.dropMeasurement)  # Update the graph
         self.save.grid(row=row_disp, column=2, pady=40)
-        row_disp += 1
+
+        self.save = TK.Button(frame, text="Export To Excel",
+                              command=self.toExcel)  # Update the graph
+        self.save.grid(row=row_disp, column=0, pady=40)
         #
         self.Outs["CO2_SLOPE"].configure(state="disabled")
 
@@ -358,6 +361,7 @@ class App:
 
     def initializeDF(self):
         fixpath = utils.ensure_absolute_path
+        self.outpath = fixpath('output/')
         detailed_output_path = fixpath('output/detailed_regression_output_unsorted')
         find_regressions.make_detailed_output_folders(detailed_output_path)
         self.specific_options_filename = fixpath('specific_options.pickle')
@@ -438,28 +442,66 @@ class App:
         return menubar
 
     def toExcel(self):
-        self.fileSave = TK.filedialog.asksaveasfilename(initialdir=currDir, title="Save file",
+        self.fileSave = TK.filedialog.asksaveasfilename(initialdir=self.outpath, title="Save file",
                                                         filetypes=(("Excel File", ".xlsx"), ("all files", "*.*")))
 
         if self.fileSave == "":
             return
 
-        print("saved: ", str(self.fileSave))
-        self.test = []
-        nrBcp = self.nr
-        self.nr = 0
-        for file in f:
-            self.getParams()
-            self.regress()
-            self.di = frames[file].data
-            self.test.append(self.di)
-            print(frames[f[self.nr]].data)
-            self.nr += 1
-        self.nr = nrBcp
-        self.df = pd.DataFrame(self.test)
-        self.writer = pd.ExcelWriter(self.fileSave + ".xlsx")
-        self.df.to_excel(self.writer, 'Sheet1')
-        self.writer.save()
+        filename = "output/capture_slopes.xls"  # filename for raw output
+        filename_manual = "output/capture_slopes_manual.xls"  # filename for raw output
+        df_b = pd.read_excel(filename)  # import excel docuument
+        df_m = pd.read_excel(filename_manual)
+        df_b = pd.concat([df_b, df_m])
+        df_b.index = df_b["Unnamed: 0"]
+
+        df_b['date'] = pd.to_datetime(df_b['date'])  # make date column to datetime objects
+
+        df_weather = pd.DataFrame.from_dict(dict(weather_data.weather_data_from_metno.get_stored_data())).T
+        df_weather.index = pd.to_datetime(df_weather.index, unit='s')
+        df_weather = df_weather[df_b['date'].min():df_b['date'].max()]
+        df_w = df_weather
+        df_b = df_b.sort_values(by=['date'])  # sort all entries by date
+        # df_b = df_b[df_b.side == side]
+        df = df_b
+
+        print(self.fileSave)
+
+        with pd.ExcelWriter(self.fileSave+".xlsx") as writer:
+            for plotno in np.sort(df.nr.unique()):
+                plot = df[df['nr'] == plotno]
+                avg_plot = plot.groupby(pd.Grouper(key='date', freq='D')).mean()  # select the data from plot 2
+                avg_plot = avg_plot[avg_plot['N2O_N_mug_m2h'].notna()]
+                avg_plot["date"] = avg_plot.index
+
+                n2o_avg_data = avg_plot['N2O_N_mug_m2h'].dropna() * 10000 / 1e9
+                n2o_avg = n2o_avg_data.rolling(window=2).mean()
+                n2o_avg.iloc[0] = 0.
+
+                timediff = avg_plot["date"].diff() / pd.Timedelta(hours=1)
+                timediff.iloc[0] = 0.
+                timediff.name = "timediff_hours"
+
+                n2o_sum = n2o_avg * timediff
+                n2o_int = n2o_sum.cumsum()
+                n2o_int.name = "cumsum_n20"
+                # tot_n2o_sum = np.append(tot_n2o_sum, n2o_sum.sum())
+                plot.index = plot.date
+                n2o_int.index = avg_plot.date
+
+                tmp_df = pd.concat(
+                                [avg_plot['nr'],
+                                avg_plot['treatment'],
+                                avg_plot['N2O_N_mug_m2h'],
+                                avg_plot['CO2_C_mug_m2h'],
+                                timediff,
+                                n2o_int], axis=1)
+                tmp_df.to_excel(writer,str(plotno))
+
+
+        # self.writer = pd.ExcelWriter(self.fileSave + ".xlsx")
+        # self.df.to_excel(self.writer, 'Sheet1')
+        # self.writer.save()
 
     def update(self):
         self.xint = int(self.XINT.get())  # Update the regression window
@@ -725,10 +767,6 @@ class App:
                 df_1 = df[df.treatment == int(dropindex.treatment)]
 
                 plotDF(df_1, df_w, axs, drop="S")
-                treatment_name = treatment_legend[int(dropindex.treatment)]["name"]
-                axs["cumgraf"].set_title(
-                    treatment_name + " from:" + df.date.min().strftime("%Y-%m-%d") + " to:" + df.date.max().strftime(
-                        "%Y-%m-%d"))
 
                 fig.canvas.draw()
 
@@ -742,9 +780,6 @@ class App:
                 df_1 = df[df.treatment == treatment_no]
 
                 plotDF(df_1, df_w, axs, drop="S")
-                axs["cumgraf"].set_title(
-                    treatment_name + " from:" + df.date.min().strftime("%Y-%m-%d") + " to:" + df.date.max().strftime(
-                        "%Y-%m-%d"))
                 fig.canvas.draw()
 
             elif isinstance(event.artist, Text):
@@ -836,35 +871,52 @@ class App:
                 axs["boxplot"].boxplot(dataset)
                 axs["boxplot"].set_ylim(1, None)
                 axs["boxplot"].set_xticklabels(avgsum.index, rotation=20, ha='right')
+                axs["boxplot"].set_ylabel(' µG NO-N m⁻²h⁻¹')
+                title = "Average " + df.date.min().strftime(
+                    "%Y-%m-%d") + " to:" + df.date.max().strftime(
+                    "%Y-%m-%d")
+                axs["boxplot"].set_title(title)
 
             if "P" not in drop:
                 axs["samples"].cla()
                 for plotno in plotdata:
                     axs["samples"].plot(plotdata[plotno]["data"], '-o', picker=True, pickradius=5, label=plotno)
+                axs["samples"].set_ylabel(' µG NO-N m⁻²h⁻¹')
+
             if "S" not in drop:
                 axs["cumsum"].cla()
-
                 xticks = np.arange(len(avgsum.index))
-
-                axs["cumsum"].set_ylabel('N2O Emissions\nµG/m²/h')
+                axs["cumsum"].set_ylabel('kg ha⁻¹ period⁻¹')
                 axs["cumsum"].bar(xticks, avgsum.avg, yerr=avgsum.stdev, align='center', alpha=0.5, ecolor='black',
                                   capsize=6,
                                   picker=True)
-                axs["cumsum"].set_ylabel('N2O Emissions')
+
                 axs["cumsum"].set_xticks(xticks)
                 axs["cumsum"].set_xticklabels(avgsum.index, rotation=20, ha='right')
 
-                axs["cumsum"].set_title('Treatment')
+                axs["cumsum"].set_title('Cumulative N2O over %i days' % (df.date.max()-df.date.min()).days)
                 axs["cumsum"].yaxis.grid(True)
 
-            for label in axs["cumsum"].get_xticklabels():  # make the xtick labels pickable
-                label.set_picker(True)
+                for label in axs["cumsum"].get_xticklabels():  # make the xtick labels pickable
+                    label.set_picker(True)
 
             if "C" not in drop:
                 axs["cumgraf"].cla()
                 for plotno in plotdata:
                     axs["cumgraf"].plot(plotdata[plotno]["dataintsum"], '-o', picker=True, pickradius=5, label=plotno)
                 axs["cumgraf"].tick_params(axis='x', rotation=20)
+
+                treatments = df.treatment.unique()
+                if len(treatments) > 1:
+                    title = "Cumulative from:" + df.date.min().strftime("%Y-%m-%d") + " to:" + df.date.max().strftime(
+                        "%Y-%m-%d")
+                else:
+                    treatment_name = treatment_legend[treatments[0]]["name"]
+
+                    title = treatment_name+" from:" + df.date.min().strftime("%Y-%m-%d") + " to:" + df.date.max().strftime(
+                        "%Y-%m-%d")
+                axs["cumgraf"].set_title(title)
+                axs["cumgraf"].set_ylabel('kg ha⁻¹ period⁻¹')
 
             if "W" not in drop:
                 axs["rain"].cla()
@@ -877,6 +929,8 @@ class App:
                 axs["temp"].plot(temp['air_temperature'].mean(), c="r")
                 axs["temp"].fill_between(temp['air_temperature'].max().keys(), temp['air_temperature'].max(),
                                          temp['air_temperature'].min(), color="r", alpha=0.3)
+                axs["temp"].set_ylabel('Temp\n°C')
+                axs["rain"].set_ylabel('Rain\nMM day⁻¹')
 
 
         df_weather = pd.DataFrame.from_dict(dict(weather_data.weather_data_from_metno.get_stored_data())).T
@@ -924,8 +978,7 @@ class App:
         axs["samples"] = plt.subplot(3, 3, (4, 6))
         axs["rain"] = plt.subplot(3, 3, (7, 9), sharex=axs["samples"])
         axs["temp"] = axs["rain"].twinx()
-        axs["temp"].set_ylabel('Temp C', color='g')
-        axs["rain"].set_ylabel('MM/day', color='b')
+
 
         plotDF(df, df_w, axs)
 
