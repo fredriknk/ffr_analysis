@@ -1,5 +1,5 @@
 """
- Sigrids capture experiments
+ Fredriks capture experiments
 """
  
 # First, select this file's directory in the white bar up to the
@@ -27,6 +27,7 @@ import sort_results as sr
 import weather_data
 import flux_calculations
 import polygon_utils
+from weather_data_from_metno import update_weather_data
 # import ginput_show
 # import textwrap
 # import regression
@@ -41,14 +42,14 @@ import polygon_utils
 #import shutil
 #import errno
 
+update_weather_data()
 
- 
 fixpath = utils.ensure_absolute_path
- 
+
 start_date = '2021-08-19'
 stop_date =  '2099-01-01'  #YYYYMMDD  stop_date has to be one day after the last date you want
 redo_regressions =  False
- 
+
 options = {'interval': 100,
            'start':0,
            'stop':180,
@@ -56,37 +57,50 @@ options = {'interval': 100,
            'co2_guides': True,
            'correct_negatives':False
            }
- 
+
 save_options= {'show_images':False,
                'save_images':False,
                'save_detailed_excel':True,
                'sort_detailed_by_experiment':True
                }
- 
+
 remove_redoings_time = 10 #seconds
- 
+
 # flux_units = {'N2O': {'name': 'N2O_N_mmol_m2day', 'factor': 2 * 1000 * 86400},
 #              'CO2': {'name': 'CO2_C_mmol_m2day', 'factor': 1000 * 86400}}
 flux_units = {'N2O': {'name': 'N2O_N_mug_m2h', 'factor': 2 * 14 * 1e6 * 3600},
               'CO2': {'name': 'CO2_C_mug_m2h', 'factor': 12 * 1e6 * 3600}}
- 
+
 specific_options_filename = fixpath('specific_options.xls')
 
 DATA_FILE_NAME = "raw_data_path.ino"
 
 try:
-    datapath = [open(DATA_FILE_NAME).readlines()[0].strip()]
+    datapaths = open(DATA_FILE_NAME).readlines()
+    datapath = [datapaths[0].strip()]
     resdir.raw_data_path =  datapath[0]
+
+    try:
+        if "capture_slopes_manual" in datapaths[1].strip():
+            manual_path = datapaths[1].strip()
+    except:
+        print("---no manual measurement path---")
+
+    try:
+        if "Logger" in datapaths[2].strip():
+            logger_path = datapaths[2].strip()
+    except:
+        print("---no logger datapath----")
 except FileNotFoundError:
     print(DATA_FILE_NAME + ' not found')
     resdir.raw_data_path = fixpath('raw_data')
 
 detailed_output_path = fixpath('output/detailed_regression_output_unsorted')
 find_regressions.make_detailed_output_folders(detailed_output_path)
- 
+
 excel_filename_start = "output/capture"
 slopes_filename = fixpath("output/capture_slopes.txt")
- 
+
 # Finding the raw data files
 all_filenames = glob.glob(os.path.join(resdir.raw_data_path, '2*'))
 print("number of measurement files from robot: %d" % len(all_filenames))
@@ -108,21 +122,21 @@ def file_belongs(filename):
     name = os.path.split(filename)[1]
     date_ok = start_date <= name.replace('-','') <= stop_date
     x, y = position(filename)
-    pos_ok = 0 < x - offset.x < 45 and 0 < y - offset.y < 55 
+    pos_ok = 0 < x - offset.x < 45 and 0 < y - offset.y < 55
     #text_ok = name.find('Measure') > -1
     return date_ok and pos_ok
 
 filenames = [x for x in all_filenames if file_belongs(x)]
 print('number of measurement files included in this run:', len(filenames))
- 
+
 filenames.sort() # alphabetically (i.e., by date)
- 
+
 # Make the "regressor object" regr which will be used further below.
 # It contains the functions and parameters (options) for doing the regressions.
- 
+
 regr = find_regressions.Regressor(slopes_filename, options, save_options,
                                   specific_options_filename, detailed_output_path)
- 
+
 if not os.path.isfile(slopes_filename):
     open(slopes_filename, 'a').close() #creates the file
 
@@ -131,9 +145,9 @@ if redo_regressions:
 else:
     regr.update_regressions_file(filenames) #updates resfile
 
- 
+
 # plot_error_number(n, key='N2O'):
- 
+
 #%%
 """
 Preparing the data for "RegressionOutput" Excel export
@@ -141,12 +155,12 @@ Preparing the data for "RegressionOutput" Excel export
 # %%
 #Sort results according to the rectangles, put them in a Pandas dataframe
 # Read "10 minutes to pandas" to understand pandas (or spend a few hours)
- 
+
 pd.set_option('display.width', 220)
 pd.set_option('display.max_columns', 20)
- 
+
 df = sr.make_simple_df_from_slope_file(slopes_filename)
- 
+
 df.sort_values('date', inplace=True)
 #--
 # plt.ion(); plt.cla()
@@ -165,7 +179,7 @@ polygon_utils.plot_rectangles(rectangles, textkwargs={'fontsize': 5}, linewidth=
 df['nr'] = [polygon_utils.find_polygon(p[0]-offset.x, p[1]-offset.y, rectangles) + 1
             for p in  zip(df.x, df.y)]
 
-    
+
 treatmentlist = [( 1,  6), ( 2,  2), ( 3, 12), ( 4,  7), ( 5,  4), ( 6,  9),
                  ( 7, 11), ( 8, 10), ( 9,  1), (10,  5), (11,  8), (12,  3),
                  (13, 12), (14, 11), (15,  4), (16, 10), (17,  5), (18,  2),
@@ -190,7 +204,7 @@ for t in sorted(set(df.treatment)):
 plt.axis('square')
 plt.show()
 plt.cla()
- 
+
 def finalize_df(df, precip_dt=2):
     df['Tc'] = weather_data.data.get_temp(df.t)
     df['precip'] = weather_data.data.get_precip(df.t)
@@ -202,7 +216,7 @@ def finalize_df(df, precip_dt=2):
     df[Cunits['name']] = Cunits['factor'] *  df.CO2_mol_m2s
     df = sr.rearrange_df(df)
     return df
- 
+
 df = finalize_df(df)
 df['days'] = (df.t - min(df.t))/86400
 
@@ -212,7 +226,7 @@ print('to   ', df.date.max())
 openthefineapp = False
 excel_filenames = [fixpath(excel_filename_start + '_' + s + '.xls')
                    for s in 'RegressionOutput slopes all_columns'.split()]
- 
+
 # First, the main RegressionOutput file
 try:
     df.to_excel(excel_filenames[0])
@@ -222,8 +236,8 @@ try:
 except:
     print('Regression Output file(s) NOT written -- was it open?')
     pass
- 
- 
+
+
 
 # _slopes and _all_columns are additional output files with regression results sorted by date
 print(flux_units['N2O']['name'])
@@ -235,31 +249,31 @@ try:
     df2.to_excel(excel_filenames[1])
 except:
     print("didn't work todo")
- 
+
 
 def plot_something(df, key, value, what="N2O", **kwargs):
     d = df[df[key]==value]
     kwargs = {**{'linewidth': .5, 'marker':'.', 'markersize':2}, **kwargs}
     plt.plot(d.days, d.N2O_N_mug_m2h if what=="N2O" else d.CO2_C_mug_m2h,
              label=value, **kwargs)
-    
+
 def plot_treatment(df, treatment, what="N2O", **kwargs):
     plot_something(df, 'treatment', treatment, what, **kwargs)
 
 def plot_nr(df, nr, what="N2O", **kwargs):
     plot_something(df, 'nr', nr, what, **kwargs)
 
-    
-plt.cla()
 
-for x in sorted(set(treatments.values())):
-    plot_treatment(df, x )
-
-plt.legend()
-
-plt.show()
-
-plt.cla()
+# plt.cla()
+#
+# for x in sorted(set(treatments.values())):
+#     plot_treatment(df, x )
+#
+# plt.legend()
+#
+# plt.show()
+#
+# plt.cla()
 
 
 
@@ -276,4 +290,4 @@ plt.cla()
 # plt.show()
 # print(d['N2O_slope'].tail())
 # print(df.head())
- 
+

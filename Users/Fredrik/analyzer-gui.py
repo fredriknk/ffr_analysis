@@ -27,6 +27,7 @@ from matplotlib.text import Text
 from matplotlib.widgets import Slider
 from scipy.stats import gmean
 from scipy.stats import gstd
+from yaml import safe_load
 
 sys.path.append(os.path.realpath(os.path.join(os.getcwd(), '../../prog')))
 from regression import *
@@ -38,6 +39,156 @@ import resdir
 import csv
 import read_regression_exception_list
 import flux_calculations
+
+def make_dataset():
+    filename = "output/capture_slopes.xls"  # filename for raw output
+    filename_manual = "output/capture_slopes_manual.xls"  # filename for raw output
+    df_b = pd.read_excel(filename)  # import excel docuument
+    df_m = pd.read_excel(filename_manual)
+    df_b = pd.concat([df_b, df_m])
+    df_b.index = df_b["Unnamed: 0"]
+
+    df_b['date'] = pd.to_datetime(df_b['date'])  # make date column to datetime objects
+    df_b = df_b.sort_values(by=['date'])  # sort all entries by date
+    df = df_b
+
+    df_w = make_df_weather(df_b['date'].min(), df_b['date'].max())
+    df_b = df_b.sort_values(by=['date'])  # sort all entries by date
+
+    return pd.merge_asof(df_b, df_w, left_on='date', right_index=True, direction="nearest")
+
+def freezethaw(df):
+    #FREEZE
+    a = df[df.HOURS_SINCE_FREEZE >= 0]
+    plt.scatter(a.HOURS_SINCE_FREEZE,a.N2O_N_mug_m2h.values)
+
+    arr = df.groupby(df.HOURS_SINCE_FREEZE).N2O_N_mug_m2h.apply(list)
+    ax = plt.subplot()
+    ax.set_yscale('log')
+    ax.boxplot(arr)
+    plt.show()
+
+    #THAW
+    b = df[df.HOURS_SINCE_THAW >= 0]
+    plt.scatter(b.HOURS_SINCE_THAW,b.N2O_N_mug_m2h.values)
+
+    arr = df.groupby(df.HOURS_SINCE_THAW).N2O_N_mug_m2h.apply(list)
+    ax = plt.subplot()
+    ax.set_title("Hourse Since Freeze")
+    ax.set_yscale('log')
+    ax.boxplot(arr)
+    plt.show()
+
+    arr =df.groupby(df.TEMPC_GROUND.round()).N2O_N_mug_m2h.apply(list)#
+    x = df.TEMPC_GROUND
+    y = df.N2O_N_mug_m2h
+    ax = plt.subplot()
+    ax.set_title("TEMP CORR")
+    ax.scatter(x,y)
+    plt.show()
+
+def zeropass(df_, type="rising"):
+    a = df_.values[0]
+    b = df_.values[-1]
+    flag = True
+    if type == "rising":
+        if (a < 0) and (b >= 0):
+            flag = False
+        elif (a < 0) and (b <= 0):
+            flag = False
+    elif type == "falling":
+        if (a > 0) and (b <= 0):
+            flag = False
+        elif (a > 0) and (b >= 0):
+            flag = False
+
+    return flag
+
+def make_df_weather(date_min,date_max):
+    df_weather = make_logger_data()
+    df_weather = df_weather[date_min:date_max]
+    df_w = df_weather
+
+    param = "ECC_GROUND"
+    hours = 12
+    df_w[param + "_ROLLINGAVG"] = df_w[param].rolling(hours, min_periods=1).mean()
+
+    param = 'TEMPC_GROUND'
+    df_w[param + "_ROLLINGAVG"] = df_w[param].rolling(hours, min_periods=1).mean()
+
+    param = "VWC_GROUND"
+    df_w[param + "_ROLLINGAVG"] = df_w[param].rolling(hours, min_periods=1).mean()
+    # print(self.fileSave)
+
+    param = 'sum(precipitation_amount PT1H)'
+    hours = 24
+    df_w["precip" + "_ROLLINGSUM_" + str(hours) + "_H"] = df_w[param].rolling(hours, min_periods=1).sum()
+    # print(self.fileSave)
+
+    df_w["TEMPC_GROUND_FFILL"] = df_w.TEMPC_GROUND.fillna(method="ffill")
+    df_rolling = df_w.rolling(2, min_periods=1)
+    df_w["RISING_TEMP_PASS"] = df_rolling.TEMPC_GROUND_FFILL.apply(lambda x: zeropass(x, "rising")).astype("bool")
+    df_w["FALLING_TEMP_PASS"] = df_rolling.TEMPC_GROUND_FFILL.apply(lambda x: zeropass(x, "falling")).astype("bool")
+
+    a = df_w["RISING_TEMP_PASS"]
+    param = "HOURS_SINCE_THAW"
+    df_w[param] = (a.cumsum() - a.cumsum().where(~a).ffill().fillna(0).astype(int))  # .shift(-1)
+    df_w.loc[(df_w[param] == df_w[param].shift(-1)), param] = None
+    df_w.loc[(df_w[param] > 24), param] = None
+    df_w[param].iloc[0] = None
+    df_w[param].iloc[-1] = None
+
+    a = df_w["FALLING_TEMP_PASS"]
+    param = "HOURS_SINCE_FREEZE"
+    df_w[param] = (a.cumsum() - a.cumsum().where(~a).ffill().fillna(0).astype(int))  # .shift(-1)
+    df_w.loc[(df_w[param] == df_w[param].shift(-1)), param] = None
+    df_w.loc[(df_w[param] > 24), param] = None
+    df_w[["HOURS_SINCE_THAW", "HOURS_SINCE_FREEZE", "TEMPC_GROUND"]].plot()
+    df_w[param].iloc[0] = None
+    df_w[param].iloc[-1] = None
+
+    return df_w
+
+def trendline(data, order=1):
+    hours = len(data)
+    coeffs = np.polyfit(range(hours), list(data), order)
+    slope = coeffs[-2]
+    return float(slope)
+
+
+def read_yaml(file_path = "config.yml"):
+    with open(file_path, "r") as f:
+        return safe_load(f)
+
+def make_logger_data():
+    PATHS = read_yaml()["PATHS"]
+
+    df_weather = pd.DataFrame.from_dict(dict(weather_data.weather_data_from_metno.get_stored_data())).T
+    df_weather.index = pd.to_datetime(df_weather.index, unit='s')
+
+    if "LOGGER_PATH" in PATHS:
+        loggerfile = PATHS["LOGGER_PATH"]
+        df_ = pd.read_excel(loggerfile, skiprows=2)
+        df = df_[['Measurement Time']]
+        keys = df_.keys()
+        VWC = keys[[i for i, x in enumerate(keys) if "VWC" in x]]
+        TEMP = keys[[i for i, x in enumerate(keys) if "°C Temp" in x]]
+        ECC = keys[[i for i, x in enumerate(keys) if "mS/cm EC" in x]]
+
+        df_["VWC_GROUND"] = df_[VWC].mean(axis=1)
+        df_["TEMPC_GROUND"] = df_[TEMP].mean(axis=1)
+        df_["ECC_GROUND"] = df_[ECC].mean(axis=1)
+
+        df_ground = df_[["Measurement Time", "VWC_GROUND", "TEMPC_GROUND","ECC_GROUND"]]
+
+        df_ground.set_index("Measurement Time",inplace=True)
+
+
+        return pd.concat([df_weather,df_ground], axis=1, join='inner')
+
+    else:
+        print("NO LOGGER FILEPATH")
+        return df_weather
 
 def slopeFromPoints(reg):
     return [[reg.start, reg.stop], [reg.intercept + reg.start * reg.slope, reg.intercept + reg.stop * reg.slope]]
@@ -289,13 +440,20 @@ class App:
         self.save.grid(row=row_disp, column=2, pady=40)
 
         row_disp += 1
-        self.save = TK.Button(frame, text="Drop Measurement",
-                              command=self.dropMeasurement)  # Update the graph
-        self.save.grid(row=row_disp, column=2, pady=40)
+
 
         self.save = TK.Button(frame, text="Export To Excel",
                               command=self.toExcel)  # Update the graph
         self.save.grid(row=row_disp, column=0, pady=40)
+
+        self.save = TK.Button(frame, text="Export To Excel Noavg",
+                              command=self.toExcel_noavg)  # Update the graph
+        self.save.grid(row=row_disp, column=1, pady=40)
+
+        self.save = TK.Button(frame, text="Drop Measurement",
+                              command=self.dropMeasurement)  # Update the graph
+        self.save.grid(row=row_disp, column=2, pady=40)
+
         #
         self.Outs["CO2_SLOPE"].configure(state="disabled")
 
@@ -398,22 +556,12 @@ class App:
                             11: {'name': 'Phaselia N2', 'plots': [7, 14, 31]},
                             12: {'name': 'Grønn bro N1', 'plots': [3, 13, 33]}}
 
-        DATA_FILE_NAME = "raw_data_path.ino"
-
         try:
-            datapath = [open(DATA_FILE_NAME).readlines()[0].strip()]
-            resdir.raw_data_path = datapath[0]
+            resdir.raw_data_path = read_yaml()["PATHS"]['RAWDATA']
         except FileNotFoundError:
             print(DATA_FILE_NAME + ' not found')
             resdir.raw_data_path = fixpath('raw_data')
 
-
-
-        malingnr = "1"
-        currDir = getcwd()
-        # path of measurements
-
-        data_path = "raw_data/"
         df_path = "output/capture_RegressionOutput.xls"
 
         self.df = pd.read_excel(df_path, index_col=0)
@@ -422,6 +570,8 @@ class App:
 
         self.regr = find_regressions.Regressor(slopes_filename, self.options, self.save_options,
                                                self.specific_options_filename, detailed_output_path)
+
+
 
     def updateValue(self, event):
         self.update()
@@ -456,16 +606,9 @@ class App:
         df_b.index = df_b["Unnamed: 0"]
 
         df_b['date'] = pd.to_datetime(df_b['date'])  # make date column to datetime objects
-
-        df_weather = pd.DataFrame.from_dict(dict(weather_data.weather_data_from_metno.get_stored_data())).T
-        df_weather.index = pd.to_datetime(df_weather.index, unit='s')
-        df_weather = df_weather[df_b['date'].min():df_b['date'].max()]
-        df_w = df_weather
         df_b = df_b.sort_values(by=['date'])  # sort all entries by date
-        # df_b = df_b[df_b.side == side]
         df = df_b
-
-        print(self.fileSave)
+        df_w = make_df_weather(df_b['date'].min(),df_b['date'].max())
 
         with pd.ExcelWriter(self.fileSave+".xlsx") as writer:
             for plotno in np.sort(df.nr.unique()):
@@ -497,6 +640,37 @@ class App:
                                 timediff,
                                 n2o_int], axis=1)
                 tmp_df.to_excel(writer,str(plotno))
+
+    def toExcel_noavg(self):
+        self.fileSave = TK.filedialog.asksaveasfilename(initialdir=self.outpath, title="Save file",
+                                                        filetypes=(("Excel File", ".xlsx"), ("all files", "*.*")))
+
+        if self.fileSave == "":
+            return
+
+        filename = "output/capture_slopes.xls"  # filename for raw output
+        filename_manual = "output/capture_slopes_manual.xls"  # filename for raw output
+        df_b = pd.read_excel(filename)  # import excel docuument
+        df_m = pd.read_excel(filename_manual)
+        df_b = pd.concat([df_b, df_m])
+        df_b.index = df_b["Unnamed: 0"]
+
+        df_b['date'] = pd.to_datetime(df_b['date'])  # make date column to datetime objects
+        df_b = df_b.sort_values(by=['date'])  # sort all entries by date
+        df = df_b
+
+        df_w  = make_df_weather(df_b['date'].min(),df_b['date'].max())
+        df_b = df_b.sort_values(by=['date'])  # sort all entries by date
+
+        df = pd.merge_asof(df_b,df_w,left_on='date',right_index=True,direction="nearest")
+
+
+        print(self.fileSave)
+
+        with pd.ExcelWriter(self.fileSave + ".xlsx") as writer:
+            for plotno in np.sort(df.nr.unique()):
+                plot = df[df['nr'] == plotno]
+                plot.to_excel(writer, str(plotno))
 
 
         # self.writer = pd.ExcelWriter(self.fileSave + ".xlsx")
@@ -933,8 +1107,7 @@ class App:
                 axs["rain"].set_ylabel('Rain\nMM day⁻¹')
 
 
-        df_weather = pd.DataFrame.from_dict(dict(weather_data.weather_data_from_metno.get_stored_data())).T
-        df_weather.index = pd.to_datetime(df_weather.index, unit='s')
+        df_weather = make_logger_data()
 
         treatment_legend = {1: {'name': 'Control N1', 'plots': [9, 19, 30]},
                             2: {'name': 'Control N2', 'plots': [2, 18, 27]},
