@@ -28,6 +28,7 @@ import weather_data
 import flux_calculations
 import polygon_utils
 from weather_data_from_metno import update_weather_data
+from yaml import safe_load
 # import ginput_show
 # import textwrap
 # import regression
@@ -42,13 +43,17 @@ from weather_data_from_metno import update_weather_data
 #import shutil
 #import errno
 
+def read_yaml(file_path = "config.yml"):
+    with open(file_path, "r") as f:
+        return safe_load(f)
+
 update_weather_data()
 
 fixpath = utils.ensure_absolute_path
 
 start_date = '2021-08-19'
 stop_date =  '2099-01-01'  #YYYYMMDD  stop_date has to be one day after the last date you want
-redo_regressions =  False
+redo_regressions =  True#False
 
 options = {'interval': 100,
            'start':0,
@@ -71,29 +76,18 @@ remove_redoings_time = 10 #seconds
 flux_units = {'N2O': {'name': 'N2O_N_mug_m2h', 'factor': 2 * 14 * 1e6 * 3600},
               'CO2': {'name': 'CO2_C_mug_m2h', 'factor': 12 * 1e6 * 3600}}
 
-specific_options_filename = fixpath('specific_options.xls')
-
-DATA_FILE_NAME = "raw_data_path.ino"
+specific_options_filename = fixpath('specific_options.pickle')
 
 try:
-    datapaths = open(DATA_FILE_NAME).readlines()
-    datapath = [datapaths[0].strip()]
-    resdir.raw_data_path =  datapath[0]
-
-    try:
-        if "capture_slopes_manual" in datapaths[1].strip():
-            manual_path = datapaths[1].strip()
-    except:
-        print("---no manual measurement path---")
-
-    try:
-        if "Logger" in datapaths[2].strip():
-            logger_path = datapaths[2].strip()
-    except:
-        print("---no logger datapath----")
+    DATA_FILE_NAME = "config.yml"
+    paths = read_yaml(DATA_FILE_NAME)["PATHS"]
+    resdir.raw_data_path = paths["RAWDATA"]
+    logger_path = paths['LOGGER_PATH']
+    manual_path = paths['MANUAL']
 except FileNotFoundError:
     print(DATA_FILE_NAME + ' not found')
     resdir.raw_data_path = fixpath('raw_data')
+
 
 detailed_output_path = fixpath('output/detailed_regression_output_unsorted')
 find_regressions.make_detailed_output_folders(detailed_output_path)

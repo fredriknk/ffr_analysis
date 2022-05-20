@@ -1098,8 +1098,8 @@ class App:
             if "W" not in drop:
                 axs["rain"].cla()
                 axs["temp"].cla()
-                df_w = df_weather[df['date'].min():df['date'].max()]
-                temp = df_w.resample("1D")
+                df_w_ = df_w[df['date'].min():df['date'].max()]
+                temp = df_w_.resample("1D")
 
                 axs["rain"].bar(temp['sum(precipitation_amount PT1H)'].sum().keys(),
                                 temp['sum(precipitation_amount PT1H)'].sum())
@@ -1130,14 +1130,14 @@ class App:
         start = time()
         filename = "output/capture_slopes.xls"  # filename for raw output
         filename_manual = "output/capture_slopes_manual.xls"  # filename for raw output
-        df_b = pd.read_excel(filename)  # import excel docuument
+        df_a = pd.read_excel(filename)  # import excel docuument
         df_m = pd.read_excel(filename_manual)
-        df_b = pd.concat([df_b, df_m])
+        df_b = pd.concat([df_a, df_m])
         df_b.index = df_b["Unnamed: 0"]
 
         df_b['date'] = pd.to_datetime(df_b['date'])  # make date column to datetime objects
 
-        df_weather = df_weather[df_b['date'].min():df_b['date'].max()]
+        #df_weather = df_weather[df_b['date'].min():df_b['date'].max()]
         df_w = df_weather
         df_b = df_b.sort_values(by=['date'])  # sort all entries by date
         # df_b = df_b[df_b.side == side]

@@ -10,6 +10,7 @@ from matplotlib.patches import Rectangle
 from matplotlib.text import Text
 from scipy.stats import gmean
 from scipy.stats import gstd
+from matplotlib.widgets import Slider
 
 sys.path.append(os.path.realpath(os.path.join(os.getcwd(), '../../prog')))
 from regression import *
