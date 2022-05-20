@@ -132,12 +132,15 @@ def make_df_weather(date_min,date_max):
     df_rolling = df_w.rolling(2, min_periods=1)
     df_w["RISING_TEMP_PASS"] = df_rolling.TEMPC_GROUND_FFILL.apply(lambda x: zeropass(x, "rising")).astype("bool")
     df_w["FALLING_TEMP_PASS"] = df_rolling.TEMPC_GROUND_FFILL.apply(lambda x: zeropass(x, "falling")).astype("bool")
+    df_w["RISING_TEMP_PASS"].iloc[0] = False
+    df_w["FALLING_TEMP_PASS"].iloc[0] = False
+    max_hours = 24*10
 
     a = df_w["RISING_TEMP_PASS"]
     param = "HOURS_SINCE_THAW"
     df_w[param] = (a.cumsum() - a.cumsum().where(~a).ffill().fillna(0).astype(int))  # .shift(-1)
     df_w.loc[(df_w[param] == df_w[param].shift(-1)), param] = None
-    df_w.loc[(df_w[param] > 24), param] = None
+    df_w.loc[(df_w[param] > max_hours), param] = None
     df_w[param].iloc[0] = None
     df_w[param].iloc[-1] = None
 
@@ -145,7 +148,7 @@ def make_df_weather(date_min,date_max):
     param = "HOURS_SINCE_FREEZE"
     df_w[param] = (a.cumsum() - a.cumsum().where(~a).ffill().fillna(0).astype(int))  # .shift(-1)
     df_w.loc[(df_w[param] == df_w[param].shift(-1)), param] = None
-    df_w.loc[(df_w[param] > 24), param] = None
+    df_w.loc[(df_w[param] > max_hours), param] = None
     #df_w[["HOURS_SINCE_THAW", "HOURS_SINCE_FREEZE", "TEMPC_GROUND"]].plot()
     df_w[param].iloc[0] = None
     df_w[param].iloc[-1] = None
