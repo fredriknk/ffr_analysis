@@ -135,3 +135,7 @@ metno_client_id.txt
 raw_data_path.ino
 metno_data.pickle
 config.yml
+
+#Pycharm Idea folder
+/.idea
+**/specific_options.pickle

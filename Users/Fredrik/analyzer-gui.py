@@ -13,6 +13,8 @@ from os import walk, chdir, getcwd, stat
 import tkinter as TK
 from tkinter import filedialog
 from tkinter import messagebox
+import matplotlib
+matplotlib.use("Qt5Agg")
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
 from time import time
@@ -53,6 +55,7 @@ def make_dataset():
     df = df_b
 
     df_w = make_df_weather(df_b['date'].min(), df_b['date'].max())
+    #df_w[["HOURS_SINCE_THAW", "HOURS_SINCE_FREEZE", "TEMPC_GROUND"]].plot()
     df_b = df_b.sort_values(by=['date'])  # sort all entries by date
 
     return pd.merge_asof(df_b, df_w, left_on='date', right_index=True, direction="nearest")
@@ -143,7 +146,7 @@ def make_df_weather(date_min,date_max):
     df_w[param] = (a.cumsum() - a.cumsum().where(~a).ffill().fillna(0).astype(int))  # .shift(-1)
     df_w.loc[(df_w[param] == df_w[param].shift(-1)), param] = None
     df_w.loc[(df_w[param] > 24), param] = None
-    df_w[["HOURS_SINCE_THAW", "HOURS_SINCE_FREEZE", "TEMPC_GROUND"]].plot()
+    #df_w[["HOURS_SINCE_THAW", "HOURS_SINCE_FREEZE", "TEMPC_GROUND"]].plot()
     df_w[param].iloc[0] = None
     df_w[param].iloc[-1] = None
 
