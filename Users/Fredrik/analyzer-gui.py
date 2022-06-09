@@ -163,7 +163,7 @@ def trendline(data, order=1):
 
 
 def read_yaml(file_path = "config.yml"):
-    with open(file_path, "r") as f:
+    with open(file_path, "r", encoding='utf-8') as f:
         return safe_load(f)
 
 def make_logger_data():
@@ -564,6 +564,7 @@ class App:
 
         try:
             resdir.raw_data_path = read_yaml()["PATHS"]['RAWDATA']
+            self.manual =  read_yaml()["PATHS"]["MANUAL"]
         except FileNotFoundError:
             print(DATA_FILE_NAME + ' not found')
             resdir.raw_data_path = fixpath('raw_data')
@@ -605,7 +606,7 @@ class App:
             return
 
         filename = "output/capture_slopes.xls"  # filename for raw output
-        filename_manual = "output/capture_slopes_manual.xls"  # filename for raw output
+        filename_manual = self.manual  # filename for raw output
         df_b = pd.read_excel(filename)  # import excel docuument
         df_m = pd.read_excel(filename_manual)
         df_b = pd.concat([df_b, df_m])
@@ -655,7 +656,7 @@ class App:
             return
 
         filename = "output/capture_slopes.xls"  # filename for raw output
-        filename_manual = "output/capture_slopes_manual.xls"  # filename for raw output
+        filename_manual = self.manual  # filename for raw output
         df_b = pd.read_excel(filename)  # import excel docuument
         df_m = pd.read_excel(filename_manual)
         df_b = pd.concat([df_b, df_m])
