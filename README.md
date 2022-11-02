@@ -32,7 +32,7 @@ Where each user folder will represent a specific field or method for analysing d
 If downloading the FFR analysis program for the first time, a few things have to be done before you can run the program. 
 1. Download the Anaconda package with spyder IDE
 2. Clone the ffr_analysis repo
-3. Create a file with a config.yaml file with the paths to your data folders
+3. Create a file with a config.yml file with the paths to your data folders
    The yml config file should have a structure like this:
 ```
 PATHS:

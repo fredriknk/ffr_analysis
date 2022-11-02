@@ -198,6 +198,7 @@ dx = -0.3161831388845005
 dy = 0.8359158332459629
 pos.x += dx
 pos.y += dy
+
 for i,type in enumerate(pos.type.unique()):
     i =  i+ j
     pos_ = pos[pos.type == type]
