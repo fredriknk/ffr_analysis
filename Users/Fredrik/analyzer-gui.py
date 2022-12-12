@@ -564,12 +564,14 @@ class App:
 
         try:
             resdir.raw_data_path = read_yaml()["PATHS"]['RAWDATA']
+            self.raw_data = read_yaml()["PATHS"]['RAWDATA']
             self.manual =  read_yaml()["PATHS"]["MANUAL"]
         except FileNotFoundError:
             print(DATA_FILE_NAME + ' not found')
             resdir.raw_data_path = fixpath('raw_data')
 
         df_path = "output/capture_RegressionOutput.xls"
+        self.file_path = df_path
 
         self.df = pd.read_excel(df_path, index_col=0)
 
@@ -1038,6 +1040,7 @@ class App:
             avgsum = pd.DataFrame.from_dict(treatments, orient='index')
 
             if "B" not in drop:
+                #Plot boxplots
                 axs["boxplot"].cla()
                 axs["boxplot"].set_yscale('log')
 
@@ -1063,6 +1066,7 @@ class App:
                 for plotno in plotdata:
                     axs["samples"].plot(plotdata[plotno]["data"], '-o', picker=True, pickradius=5, label=plotno)
                 axs["samples"].set_ylabel(' µG NO-N m⁻²h⁻¹')
+                axs["samples"].autoscale()
 
             if "S" not in drop:
                 axs["cumsum"].cla()
@@ -1132,8 +1136,8 @@ class App:
         treatment_df = pd.DataFrame.from_dict(treatment_legend, orient='index')
 
         start = time()
-        filename = "output/capture_slopes.xls"  # filename for raw output
-        filename_manual = "output/capture_slopes_manual.xls"  # filename for raw output
+        filename =  self.file_path   # filename for raw output
+        filename_manual = self.manual  # filename for raw output
         df_a = pd.read_excel(filename)  # import excel docuument
         df_m = pd.read_excel(filename_manual)
         df_b = pd.concat([df_a, df_m])

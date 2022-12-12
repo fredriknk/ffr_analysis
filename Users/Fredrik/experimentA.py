@@ -27,7 +27,7 @@ import sort_results as sr
 import weather_data
 import flux_calculations
 import polygon_utils
-from weather_data_from_metno import update_weather_data
+from weather_data_from_metno import update_weather_data, make_data_file
 from yaml import safe_load
 # import ginput_show
 # import textwrap
@@ -47,13 +47,16 @@ def read_yaml(file_path = "config.yml"):
     with open(file_path, "r") as f:
         return safe_load(f)
 
-update_weather_data()
+try:
+    update_weather_data()
+except:
+    make_data_file()
 
 fixpath = utils.ensure_absolute_path
 
 start_date = '2021-08-19'
 stop_date =  '2099-01-01'  #YYYYMMDD  stop_date has to be one day after the last date you want
-redo_regressions =  True#False
+redo_regressions =  False#False
 
 options = {'interval': 100,
            'start':0,
