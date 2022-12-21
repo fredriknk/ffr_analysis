@@ -158,7 +158,7 @@ pd.set_option('display.max_columns', 20)
 
 df = sr.make_simple_df_from_slope_file(slopes_filename)
 
-df.sort_values('date', inplace=True)
+df = df.sort_values('date').reset_index(drop=True)
 #--
 # plt.ion(); plt.cla()
 # plt.scatter(df.x-offset.x, df.y-offset.y, s=1)
