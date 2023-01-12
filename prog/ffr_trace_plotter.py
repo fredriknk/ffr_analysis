@@ -7,7 +7,7 @@ import copy
 import itertools
 import matplotlib
 from collections import OrderedDict
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2TkAgg
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 from matplotlib.figure import Figure
 import tkinter as tk
 from tkinter import LEFT, RIGHT, CENTER, BOTH, TOP, BOTTOM, YES, NO
@@ -19,8 +19,10 @@ import traceback
 import argparse
 import find_regressions
 
-defaultfile = [
-    'd:/temp/New_folder/results/results/2015-06-15-14-38-05-x599226_260722-y6615166_83654-z0_0_right_Plot_9_']
+defaultfile = [None]
+#    'd:/temp/New_folder/results/results/2015-06-15-14-38-05-x599226_260722-y6615166_83654-z0_0_right_Plot_9_']
+defaultfile = ['/home/larsmo/div/ffr/merge/_RAWDATA/2015-06-15-14-12-23-x599265_375636-y6615206_72136-z0_0-h-2_42000000000_right_Plot_3_']
+
 resfile = 'slopes.txt'
 
 if __name__ == '__main__':
@@ -29,7 +31,7 @@ if __name__ == '__main__':
     parser.add_argument('--resfile', type=str, default=resfile,
                         help='Default: slopes.txt')
     args = parser.parse_args()
-    defaultfile[0] = args.file
+    # defaultfile[0] = args.file
 
 
 def timesleep(t):
@@ -75,6 +77,8 @@ def flux_estimate(key, b1, unit):
 class App(object):
 
     def __init__(self, master, files):
+        global test
+        test = self
         self.master = master
         self.thefiles = files
         self.resfile = args.resfile
@@ -101,9 +105,9 @@ class App(object):
         self.fig = Figure(figsize=(5, 4), dpi=100)
         self.plot_axis = self.fig.add_subplot(111)
         self.canvas = FigureCanvasTkAgg(self.fig, master=self.axis_frame)
-        self.canvas.show()
+        self.canvas.draw()
         self.canvas.get_tk_widget().pack(side=LEFT, fill=BOTH, expand=1)
-        self.toolbar = NavigationToolbar2TkAgg(self.canvas, self.axis_frame)
+        self.toolbar = NavigationToolbar2Tk(self.canvas, self.axis_frame)
         self.toolbar.update()
         self.canvas._tkcanvas.pack(side=TOP, fill=BOTH, expand=1)
 
@@ -187,8 +191,9 @@ class App(object):
         self.do_plot.set(True)
         self.use_co2_as_guide.set(True)
         self.do_estimate_flux.set(True)
-        self.master.after(1000, self.readfile)
-        self.master.mainloop()
+        self.do_estimate_flux.set(False) #todo
+        self.master.after(1000, self.readfile(defaultfile[0]))
+        # self.master.mainloop()
 
     def make_name_frame(self):
         try:
@@ -247,6 +252,9 @@ class App(object):
         if x0 == x1:
             return x
         else:
+            print(x0)
+            print(x1)
+            print("x=", x)
             return [[(a - x0) * 1.0 / (x1 - x0) for a in xi] for xi in x]
 
     def find_scaling_divisor(self, y):
@@ -305,7 +313,7 @@ class App(object):
 
     def do_the_plotting(self):
         xydata = copy.deepcopy(self.retrieved_data)
-        for key in ['aux', 'side']:
+        for key in ['aux', 'side', 'filename']:
             if key in xydata:
                 xydata.pop(key)
         try:
@@ -408,6 +416,7 @@ class App(object):
         return ret.strip('\t')
 
     def _readfile(self, filename, extra_string=''):
+        print(filename)
         with open(filename, 'rb') as f:
             a = pickle.load(f)
         self.retrieved_data = get_data.parse_saved_data(
@@ -416,14 +425,15 @@ class App(object):
         self.filename_str.set(filename + extra_string)
         if self.do_estimate_flux.get():
             s = self.find_fluxes(do_plot=self.do_plot.get())
+            with open(self.resfile, 'a') as f:
+                f.write(splitname[1] + '\t' + s + '\n')
         else:
             self.do_the_plotting()
         splitname = os.path.split(filename)
-        with open(self.resfile, 'a') as f:
-            f.write(splitname[1] + '\t' + s + '\n')
 
-    def readfile(self):
-        f = self.thefiles.findfile()
+    def readfile(self, f=None):
+        if f is None:
+            f = self.thefiles.findfile()
         self._readfile(f)
 
     def first_file(self):
@@ -511,7 +521,7 @@ class App(object):
 
 
 def selection_fun(x):
-    return x.startswith('20') or x.startswith('21') or x.startswith('punkt')
+    return x.startswith('20') or x.startswith('21') or x.startswith('22') or x.startswith('punkt')
 
 
 thefiles = findfile.File_list('', '_tobor_recent.txt',
@@ -519,12 +529,12 @@ thefiles = findfile.File_list('', '_tobor_recent.txt',
 
 
 if __name__ == "__main__":
-
+    print(sys.argv)
     root = tk.Tk()
-
     app = App(root, thefiles)
-
-
+    app.master.mainloop()
+    #self = app
+    
 # def parse_data(data):# not used, though. todo
 #     xydata = OrderedDict()
 #     if isinstance (data[0][0], str):

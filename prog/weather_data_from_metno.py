@@ -139,8 +139,7 @@ def update_weather_data(stop=None):
     if updated_data != old_data:
         pickle.dump(updated_data, open(DATA_FILE_NAME, 'wb'))
 
-if __name__ == "__main__":
-    update_weather_data()
+
 #make_data_file()
 
 #update_weather_data()

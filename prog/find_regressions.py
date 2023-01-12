@@ -17,18 +17,6 @@ sys.path.append(os.path.split(os.path.split(
 
 regression_errors = []
 
-
-# class G:  # (G for global) # todo get rid of
-#     res_file_name = 'slopes.txt'
-#     directory = ''
-#     interval = 100
-#     co2_guides = True
-#     co2_lag_time = 0
-#     startdate = False
-#     stopdate = False
-#     filter_fun = False
-
-
 def regression_quality_check_n2o(reg, side):
     try:
         reg.signal_range = reg.max_y - reg.min_y
@@ -111,7 +99,7 @@ def get_regression_segments(data, regressions):
     return res
 
 
-def plot_regressions(regressions, data=None, normalized=True):
+def plot_regressions(regressions, data=None, normalized=True, ax=None, **kw):
     """ plotting the n2o and co2 with regression lines.
     If data is None, it uses get_data.get_file_data(regressions['filename']);
     resdir.raw_data_path must be set correctly
@@ -144,9 +132,10 @@ plot_regressions(regressions, {, data=None, normalized=True})""")
         if subst == 'N2O':
             ax2.plot([], [], marker, markersize=size)
         legends.append(legend)
-
-    plt.clf()
-    ax1 = plt.gca()
+    ax1 = ax
+    if ax1 is None:
+        plt.clf()
+        ax1 = plt.gca()
     ax1.grid()
     ax2 = ax1.twinx()
     ax = defaultdict(lambda: ax2)
@@ -198,10 +187,7 @@ def xls_write_raw_data_file(filename, xls_filename, data, reg, do_open=False):
 
 
 def _write_raw(filename, worksheet,  data, reg, column_start=0):
-    #data = get_data.get_file_data(filename)
-    # reg = regr.find_all_slopes(filename, do_plot=False) #EEB can we delete do_plot here?                # EEB This is also done when make images.  Combine functions?
     segments = get_regression_segments(data, reg)
-    # print(segments)
     column = column_start
     w = worksheet
     # Row 0 gets filename
@@ -249,6 +235,8 @@ def _write_raw(filename, worksheet,  data, reg, column_start=0):
         column += 1  # Write a blank column before the next gas' columns start
     reg_attrs = ['slope', 'intercept', 'se_slope', 'se_intercept', 'mse']
     for side, regs in reg.items():
+        if isinstance(regs, str): # the filename
+            continue
         for gas in regs.keys():
             if regs[gas] is None:
                 continue
@@ -302,12 +290,8 @@ class Options_manager(object):
         if exopts_filename is None:
             exopts_filename = self.specific_options_file_name
         if exopts_filename:
-            if ".pickle" in exopts_filename:
-                with open(exopts_filename, 'rb') as handle:
-                    self.specific_options_dict = pickle.load(handle)
-            else:
-                self.specific_options_dict = read_regression_exception_list.parse_xls_file(
-                    exopts_filename)
+            self.specific_options_dict = read_regression_exception_list.parse_xls_file(
+                exopts_filename)
         else:
             self.specific_options_dict = {}
 
@@ -753,9 +737,25 @@ def plot_raw(filename, key='N2O'):
         plt.gca().set_ylabel('ppm')
     return a
 
+
 def plot_error_number(n, key='N2O'):
     name, err = regression_errors[-1][n]
     print('--------- name was: %s\nerror was:\n%s\n----------'%(name,err))
     a = plot_raw(name)
     print('shifting:', a['side'])
     return name, a
+
+
+class Reg(object):
+    def __init__(self, r):
+        self.r = r
+        self.name = r['filename']
+    def plot(self, ax=None):
+        plot_regressions(self.r, ax=ax)
+    def plot_raw(self, key='N2O'):
+        plot_raw(self.name, key)
+    def show(self):
+        print_reg(self.r)
+    def raw_data(self):
+        return get_data.get_file_data(self.name)
+        
