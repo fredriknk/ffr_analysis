@@ -18,7 +18,9 @@ import numpy as np
 import pylab as plt
 import pandas as pd
 pd.options.mode.chained_assignment = None
-sys.path.append(os.path.realpath(os.path.join(os.getcwd(), '../../prog')))
+pth = os.path.realpath(os.path.join(os.getcwd(), '../../prog'))
+if not pth in sys.path:
+    sys.path.append(pth)
 import resdir
 import get_data
 import utils
@@ -56,14 +58,16 @@ fixpath = utils.ensure_absolute_path
 
 start_date = '2021-08-19'
 stop_date =  '2099-01-01'  #YYYYMMDD  stop_date has to be one day after the last date you want
-redo_regressions =  False#False
+redo_regressions =  True
 
 options = {'interval': 100,
            'start':0,
            'stop':180,
            'crit': 'steepest',
            'co2_guides': True,
-           'correct_negatives':False
+           'correct_negatives':False,
+           'cut_beginnings':7,
+           'cut_ends':7
            }
 
 save_options= {'show_images':False,

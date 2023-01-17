@@ -18,7 +18,9 @@ import numpy as np
 import pylab as plt
 import pandas as pd
 pd.options.mode.chained_assignment = None
-sys.path.append(os.path.realpath(os.path.join(os.getcwd(), '../../prog')))
+pth = os.path.realpath(os.path.join(os.getcwd(), '../../prog'))
+if not pth in sys.path:
+    sys.path.append(pth)
 import resdir
 import get_data
 import utils
@@ -40,21 +42,21 @@ import polygon_utils
 # import xlwt
 #import shutil
 #import errno
-
-
  
 fixpath = utils.ensure_absolute_path
  
 start_date = '2021-08-19'
 stop_date =  '2099-01-01'  #YYYYMMDD  stop_date has to be one day after the last date you want
-redo_regressions =  False
+redo_regressions =  True#False
  
 options = {'interval': 100,
            'start':0,
            'stop':180,
            'crit': 'steepest',
            'co2_guides': True,
-           'correct_negatives':False
+           'correct_negatives':False,
+           'cut_beginnings':10,
+           'cut_ends':5
            }
  
 save_options= {'show_images':False,
@@ -101,13 +103,13 @@ positions = [position(name) for name in all_filenames]
 x = np.array([x[0] for x in positions])
 y = np.array([x[1] for x in positions])
 offset = namedtuple('Point', ('x', 'y'))(x=5.99201e5, y=6.615259e6)
-#plt.scatter(x-offset.x, y-offset.y, marker='.')
+plt.scatter(x-offset.x, y-offset.y, marker='.')
 
 #--
 def file_belongs(filename):
     name = os.path.split(filename)[1]
     date_ok = start_date <= name.replace('-','') <= stop_date
-    x, y = position(filename)
+    x, y=position(filename)
     pos_ok = 0 < x - offset.x < 45 and 0 < y - offset.y < 55 
     #text_ok = name.find('Measure') > -1
     return date_ok and pos_ok
@@ -154,13 +156,13 @@ df.sort_values('date', inplace=True)
 # plt.scatter(x-offset.x, y-offset.y, color="red", s=1)
 
 
-rect1 = polygon_utils.Polygon(0, 0, W=37.5, L=48)
-# rect1.rotate(.4152).move(15.2,-2.55)
-rect1.rotate(.4152).move(599216.2,6615256.5)
+rect1 = polygon_utils.Polygon(0,0,W=37.5,L=48)
+rect1.rotate(.4152).move(15.2,-2.55)
+#rect1.rotate(.4152).move(599216.2,6615256.5)
+rr = rect1.divide_rectangle(6, other_way=True)
+rectangles = sum([r.divide_rectangle(6) for r in rr], [])
 
-rectangles = rect1.grid(6,6)
-
-polygon_utils.plot_rectangles(rectangles, textkwargs={'fontsize': 5}, linewidth=.1)
+# polygon_utils.plot_rectangles(rectangles, textkwargs={'fontsize': 5}, linewidth=.1)
 
 df['nr'] = [polygon_utils.find_polygon(p[0]-offset.x, p[1]-offset.y, rectangles) + 1
             for p in  zip(df.x, df.y)]
@@ -177,6 +179,7 @@ treatments = {x[0]:x[1] for x in treatmentlist}
 
 df['treatment'] = [treatments[i] for i in df.nr]
 
+plt.cla()
 
 polygon_utils.plot_rectangles(rectangles, textkwargs={'fontsize': 5}, linewidth=.1)
 
@@ -187,9 +190,7 @@ for t in sorted(set(df.treatment)):
     d = df[df.treatment==t]
     plt.scatter(d.x-offset.x, d.y-offset.y, s=10, color=colors[t-1], marker=markers[t-1])
 
-plt.axis('square')
-plt.show()
-plt.cla()
+
  
 def finalize_df(df, precip_dt=2):
     df['Tc'] = weather_data.data.get_temp(df.t)
@@ -231,6 +232,7 @@ tokeep = ['t', 'date', 'days', 'nr', 'side', 'treatment',
           flux_units['N2O']['name'], flux_units['CO2']['name'],
           'N2O_slope', 'CO2_slope', 'filename']
 df2 = df[tokeep]
+df2 = df2.sort_values(['treatment','t'])
 try:
     df2.to_excel(excel_filenames[1])
 except:
@@ -249,7 +251,7 @@ def plot_treatment(df, treatment, what="N2O", **kwargs):
 def plot_nr(df, nr, what="N2O", **kwargs):
     plot_something(df, 'nr', nr, what, **kwargs)
 
-    
+# %%
 plt.cla()
 
 for x in sorted(set(treatments.values())):
@@ -258,8 +260,8 @@ for x in sorted(set(treatments.values())):
 plt.legend()
 
 plt.show()
+# %%
 
-plt.cla()
 
 
 

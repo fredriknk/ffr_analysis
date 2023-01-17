@@ -2,10 +2,10 @@ import os
 import sys
 
 
-class remember(object):
+class remember(object): # todo uppercase Remember
     """ usage:
     import last_directory
-    lastdir = last_directory.remember(file='test.txt',folder = None)
+    lastdir = last_directory.remember(filename, folder = None)
     print lastdir.get()
     lastdir.set('c:/temp')
     print lastdir.get()"""

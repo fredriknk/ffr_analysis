@@ -915,9 +915,11 @@ class App:
                     self.nr = newnr
                     self.getParams()
                     self.replot()
+                    self.update()
             elif newdate:
                 date = datecheck(newdate)
                 self.nr = abs((date - self.df['date'])).idxmin()
+                self.getParams()
                 self.replot()
                 self.update()
 
