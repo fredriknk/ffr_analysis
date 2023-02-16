@@ -72,8 +72,8 @@ options = {'interval': 100,
 
 save_options= {'show_images':False,
                'save_images':False,
-               'save_detailed_excel':True,
-               'sort_detailed_by_experiment':True
+               'save_detailed_excel':False,
+               'sort_detailed_by_experiment':False
                }
 
 remove_redoings_time = 10 #seconds
