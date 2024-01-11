@@ -29,8 +29,10 @@ import sort_results as sr
 import weather_data
 import flux_calculations
 import polygon_utils
+import waypoints
 from weather_data_from_metno import update_weather_data, make_data_file
 from yaml import safe_load
+
 # import ginput_show
 # import textwrap
 # import regression
@@ -58,7 +60,7 @@ fixpath = utils.ensure_absolute_path
 
 start_date = '2021-08-19'
 stop_date =  '2099-01-01'  #YYYYMMDD  stop_date has to be one day after the last date you want
-redo_regressions =  True
+redo_regressions =  False
 
 options = {'interval': 100,
            'start':0,
@@ -73,7 +75,8 @@ options = {'interval': 100,
 save_options= {'show_images':False,
                'save_images':False,
                'save_detailed_excel':False,
-               'sort_detailed_by_experiment':False
+               'sort_detailed_by_experiment':False,
+               'show_last_runs':False
                }
 
 remove_redoings_time = 10 #seconds
@@ -164,14 +167,26 @@ df = sr.make_simple_df_from_slope_file(slopes_filename)
 
 df = df.sort_values('date').reset_index(drop=True)
 #--
-# plt.ion(); plt.cla()
-# plt.scatter(df.x-offset.x, df.y-offset.y, s=1)
-# plt.scatter(x-offset.x, y-offset.y, color="red", s=1)
+plt.ion(); plt.cla()
+plt.scatter(df.x-offset.x, df.y-offset.y, s=1)
+plt.scatter(x-offset.x, y-offset.y, color="red", s=1)
+
+# Example usage
+csv_file = 'Greenmove_hel_runde.csv'
+csv_file = 'capture.csv'
+
+field_width = 12
+field_length = 2.5
+drive_track = 2.4
+
+waypoint_data = WaypointData(csv_file,expand = [field_width*2+drive_track,field_length])
+waypoint_data.visualize_waypoints(show_rotation=True)
 
 
-rect1 = polygon_utils.Polygon(0, 0, W=37.5, L=48)
-rect1.rotate(.4152).move(15.2,-2.55)
+# rect1 = polygon_utils.Polygon(0, 0, W=37.5, L=48)
+# rect1.rotate(.4152).move(15.2,-2.55)
 # rect1.rotate(.4152).move(599216.2,6615256.5)
+
 
 rectangles = rect1.grid(6,6)
 

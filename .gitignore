@@ -139,4 +139,4 @@ dmypy.json
 #Pycharm Idea folder
 /.idea
 **/specific_options.pickle
-**
+
