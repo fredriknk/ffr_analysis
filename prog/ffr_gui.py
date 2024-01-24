@@ -12,12 +12,13 @@ import tkinter as TK
 from tkinter import filedialog
 from tkinter import messagebox
 import matplotlib
+from PIL import Image, ImageTk
 
 
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
 from time import time
-from datetime import datetime
+from datetime import datetime, date, timedelta
 import matplotlib.pyplot as plt
 import copy
 import datetime as DT
@@ -390,7 +391,10 @@ class Dataframe_Filter_Popup:
 
         row = 0
         for col in self.filtered_df.columns:
-            if pd.api.types.is_datetime64_any_dtype(self.filtered_df[col]):
+            if col == 'treatment_name':
+                self.add_treatment_name_dropdown(col, row)
+                row += 1
+            elif pd.api.types.is_datetime64_any_dtype(self.filtered_df[col]):
                 self.add_date_range_entries(col, row)
                 row += 1
             elif pd.api.types.is_numeric_dtype(self.filtered_df[col]):
@@ -447,6 +451,20 @@ class Dataframe_Filter_Popup:
             self.filters_frame.pack(fill=tk.X, expand=False)
             self.toggle_filters_button.config(text="Hide Filters")
         self.filters_visible = not self.filters_visible
+
+    def add_treatment_name_dropdown(self, col, row):
+        tk.Label(self.filters_frame, text=f"{col}:").grid(row=row, column=0)
+        treatment_options = sorted(self.filtered_df[col].unique())
+
+        # Create a listbox for multiple selections
+        treatment_listbox = tk.Listbox(self.filters_frame, selectmode='multiple')
+        for item in treatment_options:
+            treatment_listbox.insert(tk.END, item)
+        treatment_listbox.grid(row=row, column=1)
+
+        # Store the listbox in filter_values
+        self.filter_values[col] = {'listbox': treatment_listbox}
+
     def add_min_max_entries(self, col, row):
         tk.Label(self.filters_frame, text=f"{col} Min:").grid(row=row, column=0)
         min_var = tk.StringVar()
@@ -461,13 +479,26 @@ class Dataframe_Filter_Popup:
     def add_date_range_entries(self, col, row):
         tk.Label(self.filters_frame, text=f"{col} Start:").grid(row=row, column=0)
         start_var = tk.StringVar()
-        tk.Entry(self.filters_frame, textvariable=start_var).grid(row=row, column=1)
+        start_entry = tk.Entry(self.filters_frame, textvariable=start_var)
+        start_entry.grid(row=row, column=1)
 
         tk.Label(self.filters_frame, text=f"{col} End:").grid(row=row, column=2)
         end_var = tk.StringVar()
-        tk.Entry(self.filters_frame, textvariable=end_var).grid(row=row, column=3)
+        end_entry = tk.Entry(self.filters_frame, textvariable=end_var)
+        end_entry.grid(row=row, column=3)
+
+        # "Today" button
+        today_button = tk.Button(self.filters_frame, text="Today",
+                                 command=lambda: self.set_today(col, start_var, end_var))
+        today_button.grid(row=row, column=4)
 
         self.filter_values[col] = {'start': start_var, 'end': end_var}
+
+    def set_today(self, col, start_var, end_var):
+        today = date.today()
+        tomorrow = today + timedelta(days=1)
+        start_var.set(today.strftime('%Y-%m-%d'))
+        end_var.set(tomorrow.strftime('%Y-%m-%d'))
 
     def update_table(self):
         # Get the search term from the search_var StringVar
@@ -499,17 +530,25 @@ class Dataframe_Filter_Popup:
         # Alternate row color configuration (if not done already in create_widgets)
         self.tree.tag_configure('oddrow', background='lightgrey')
         self.tree.tag_configure('evenrow', background='white')
+
     def apply_filters(self):
         df = self.filtered_df.copy()
         for col, filters in self.filter_values.items():
-            if 'min' in filters and filters['min'].get():
-                df = df[df[col] >= float(filters['min'].get())]
-            if 'max' in filters and filters['max'].get():
-                df = df[df[col] <= float(filters['max'].get())]
-            if 'start' in filters and filters['start'].get():
-                df = df[df[col] >= pd.to_datetime(filters['start'].get())]
-            if 'end' in filters and filters['end'].get():
-                df = df[df[col] <= pd.to_datetime(filters['end'].get())]
+            if col == 'treatment_name':
+                selected_indices = filters['listbox'].curselection()
+                selected_treatments = [filters['listbox'].get(i) for i in selected_indices]
+                if selected_treatments:
+                    df = df[df[col].isin(selected_treatments)]
+            else:
+                # Your existing filtering logic for other columns
+                if 'min' in filters and filters['min'].get():
+                    df = df[df[col] >= float(filters['min'].get())]
+                if 'max' in filters and filters['max'].get():
+                    df = df[df[col] <= float(filters['max'].get())]
+                if 'start' in filters and filters['start'].get():
+                    df = df[df[col] >= pd.to_datetime(filters['start'].get())]
+                if 'end' in filters and filters['end'].get():
+                    df = df[df[col] <= pd.to_datetime(filters['end'].get())]
         return df
 
     def on_tree_select(self, event):
@@ -551,16 +590,19 @@ class ColumnSelectionPopup:
 
 class App:
 
-    def __init__(self, master,flux_units,specific_options,treatment_legend):
+    def __init__(self, master,flux_units,specific_options,treatment_legend,persistent_column_selection):
         # Create the GUI container
         super().__init__()
-        frame = tk.Frame(master, width=2000, height=2000)
+
         self.master = master
         self.master.title("FFR Analyzer")
+
+        self.treatment_legend = treatment_legend
+
         self.initializeDF()
         self.flux_units = flux_units
         self.specific_options= specific_options
-        self.treatment_legend = treatment_legend
+
         self.maxf = len(self.df)
         self.nr = 0  # measurement number
         self.fname = self.df.iloc[self.nr].filename
@@ -570,9 +612,26 @@ class App:
         self.method.set(self.options["crit"])  # Set default to Mse
         self.CO2_guide = tk.IntVar()
         self.exclude = tk.IntVar()
-        self.persistent_column_selection = ['date', 'CO2_slope', 'CO2_rsq', 'N2O_slope', 'N2O_rsq', 'treatment', 'Tc', 'precip']
+        if persistent_column_selection == None:
+             self.persistent_column_selection = ['date', 'CO2_slope', 'CO2_rsq', 'N2O_slope', 'N2O_rsq', 'treatment', 'Tc', 'precip', 'treatment_name']
+        else:
+            self.persistent_column_selection=persistent_column_selection
+        print(os.getcwd())
+        self.set_window_icon("../../prog/resources/ffr_logo_32p.png")
+        self.create_widget()
 
+    def set_window_icon(self, icon_path):
+        # Load the icon image
+        icon_image = Image.open(icon_path)
+        icon_photo = ImageTk.PhotoImage(icon_image)
+
+        # Set the window icon
+        self.master.iconphoto(False, icon_photo)
+    def create_widget(self):
         row_disp = 0
+        frame = tk.Frame(self.master)#, width=2000, height=2000)
+        frame.grid(row=0, column=0, sticky="nsew")
+
         ##Buttons for scrolling left rigth
         self.button_left = tk.Button(frame, text="< Prev",
                                      command=self.decrease)
@@ -719,29 +778,29 @@ class App:
 
         row_disp += 1
         self.SpecificOptionsButton = tk.Button(frame, text="View Dataframe", command=self.viewDataFrame)
-        self.SpecificOptionsButton.grid(row=row_disp, column=0, pady=40)
+        self.SpecificOptionsButton.grid(row=row_disp, column=0, pady=5)
 
         self.SpecificOptionsButton = tk.Button(frame, text="View Specific Options",command=self.viewSpecificOptions)
-        self.SpecificOptionsButton.grid(row=row_disp, column=1, pady=40)
+        self.SpecificOptionsButton.grid(row=row_disp, column=1, pady=5)
 
         self.save = tk.Button(frame, text="Show Cumsum Plot",
                               command=self.saveGraph)
-        self.save.grid(row=row_disp, column=2, pady=40)
+        self.save.grid(row=row_disp, column=2, pady=5)
 
         row_disp += 1
 
 
         self.save = tk.Button(frame, text="Export To Excel",
                               command=self.toExcel)  # Update the graph
-        self.save.grid(row=row_disp, column=0, pady=40)
+        self.save.grid(row=row_disp, column=0, pady=5,sticky="ns")
 
         self.save = tk.Button(frame, text="Export To Excel Noavg",
                               command=self.toExcel_noavg)  # Update the graph
-        self.save.grid(row=row_disp, column=1, pady=40)
+        self.save.grid(row=row_disp, column=1, pady=5,sticky="ns")
 
         self.save = tk.Button(frame, text="Drop Measurement",
                               command=self.dropMeasurement)  # Update the graph
-        self.save.grid(row=row_disp, column=2, pady=40)
+        self.save.grid(row=row_disp, column=2, pady=5, sticky="ns")
 
         #
         self.Outs["CO2_SLOPE"].configure(state="disabled")
@@ -781,30 +840,35 @@ class App:
         self.ax1.set_xlabel("Time (S)")
 
         self.fig.subplots_adjust(left=0.05, right=0.95, top=0.9, bottom=0.06)
-        self.canvas = FigureCanvasTkAgg(self.fig, master=master, )  # Make the canvas
-        self.canvas.draw()  # show()#show the canvesRemoved due to breaking update
-        self.canvas.get_tk_widget().grid(row=0, column=3, rowspan=9)  # set graph position
+        self.canvas = FigureCanvasTkAgg(self.fig, master=self.master)
+        self.canvas.draw()
+        self.master.grid_rowconfigure(0, weight=1)  # Assuming the canvas is in row 0
+        self.master.grid_columnconfigure(3, weight=1)  # Assuming the canvas is in column 3
+
+        # Place the canvas in the grid
+        self.canvas.get_tk_widget().grid(row=0, column=3, rowspan=9, sticky="nsew")
 
         sliderLength = 1000
         self._job = None
-        self.sliderMin = tk.Scale(master, from_=0, to=180, length=sliderLength, orient=tk.HORIZONTAL)
+        self.sliderMin = tk.Scale(self.master, from_=0, to=180, length=sliderLength, orient=tk.HORIZONTAL)
         self.sliderMin.bind("<ButtonRelease-1>", self.updateValue)
         self.sliderMin.set(self.options["start"])
-        self.sliderMin.grid(row=10, column=3)
+        self.sliderMin.grid(row=10, column=3, sticky='ew')
 
-        self.sliderMax = tk.Scale(master, from_=0, to=180, length=sliderLength, orient=tk.HORIZONTAL)
+        self.sliderMax = tk.Scale(self.master, from_=0, to=180, length=sliderLength, orient=tk.HORIZONTAL)
         self.sliderMax.bind("<ButtonRelease-1>", self.updateValue)
         self.sliderMax.set(self.options["stop"])
-        self.sliderMax.grid(row=11, column=3)
+        self.sliderMax.grid(row=11, column=3, sticky='ew')
+
+        self.master.grid_rowconfigure(10, weight=1,minsize=50)
+        self.master.grid_rowconfigure(11, weight=1,minsize=50)
+        self.master.grid_columnconfigure(3, weight=1)
+
+        for row in range(row_disp):  # Example for 10 rows
+            self.master.grid_rowconfigure(row, weight=1)
 
         self.getParams()
         self.update()
-
-        frame.grid(row=0, column=0)
-        #
-        # self.canvas.pack()
-        # self.canvas.bind("<Left>", self.decrease)
-        # self.canvas.bind("<Right>", self.increase)
 
     def initializeDF(self):
         fixpath = utils.ensure_absolute_path
@@ -855,6 +919,9 @@ class App:
         self.df = pd.read_excel(df_path, index_col=0)
 
         self.df.date = pd.to_datetime(self.df.date, format="%Y%m%d-%H%M%S")
+
+        treatment_name_mapping = {key: value['name'] for key, value in self.treatment_legend.items()}
+        self.df['treatment_name'] = self.df['treatment'].map(treatment_name_mapping)
 
         self.regr = find_regressions.Regressor(slopes_filename, self.options, self.save_options,
                                                self.specific_options_filename, detailed_output_path)

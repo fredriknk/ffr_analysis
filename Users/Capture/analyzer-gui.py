@@ -40,6 +40,9 @@ if __name__ == "__main__":
                          11: {'name': 'Phaselia N2', 'plots': [7, 14, 31]},
                          12: {'name': 'Grønn bro N1', 'plots': [3, 13, 33]}}
 
+    persistent_column_selection = ['date', 'CO2_slope', 'CO2_rsq', 'N2O_slope', 'N2O_rsq',
+                                   'treatment', 'Tc', 'precip', 'treatment_name']
+
     root = tk.Tk()
-    app = App(root,flux_units,specific_options,treatment_legend)
+    app = App(root,flux_units,specific_options,treatment_legend,persistent_column_selection)
     root.mainloop()
