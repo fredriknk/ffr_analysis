@@ -79,8 +79,6 @@ save_options= {'show_images':False,
 
 remove_redoings_time = 10 #seconds
 
-# flux_units = {'N2O': {'name': 'N2O_N_mmol_m2day', 'factor': 2 * 1000 * 86400},
-#              'CO2': {'name': 'CO2_C_mmol_m2day', 'factor': 1000 * 86400}}
 flux_units = {'N2O': {'name': 'N2O_N_mug_m2h', 'factor': 2 * 14 * 1e6 * 3600},
               'CO2': {'name': 'CO2_C_mug_m2h', 'factor': 12 * 1e6 * 3600}}
 
@@ -239,8 +237,6 @@ except:
     print('Regression Output file(s) NOT written -- was it open?')
     pass
 
-
-
 # _slopes and _all_columns are additional output files with regression results sorted by date
 print(flux_units['N2O']['name'])
 tokeep = ['t', 'date', 'days', 'nr', 'side', 'treatment',
@@ -264,32 +260,3 @@ def plot_treatment(df, treatment, what="N2O", **kwargs):
 
 def plot_nr(df, nr, what="N2O", **kwargs):
     plot_something(df, 'nr', nr, what, **kwargs)
-
-
-# plt.cla()
-#
-# for x in sorted(set(treatments.values())):
-#     plot_treatment(df, x )
-#
-# plt.legend()
-#
-# plt.show()
-#
-# plt.cla()
-
-
-
-# todo ta med trapz og plott fra cookbook
-
-# print(df[['t', 'x', 'y', 'nr']].head(10))
-# print(df[df.treatment == 1][['t', 'x', 'y', 'nr', 'N2O_slope']].head(10))
-# pnr = df.nr.values[0]
-# print('plotting N2O slopes for plot_nr', pnr)
-# d = df[df.nr == pnr]
-# plt.cla()
-# plt.axis('auto')
-# plt.plot(d['t'], d['N2O_slope'], '.-')
-# plt.show()
-# print(d['N2O_slope'].tail())
-# print(df.head())
-
