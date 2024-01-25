@@ -7,10 +7,13 @@ Created on Fri May 18 11:50:35 2018
 import os,sys,matplotlib
 import tkinter as tk
 matplotlib.use("Qt5Agg")
+import logging
 sys.path.append(os.path.realpath(os.path.join(os.getcwd(), '../../prog')))
 from ffr_gui import App
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    logging.getLogger('matplotlib.font_manager').disabled = True
 
     flux_units = {'N2O': {'name': 'N2O_N_mug_m2h', 'factor': 2 * 14 * 1e6 * 3600},
                   'CO2': {'name': 'CO2_C_mug_m2h', 'factor': 12 * 1e6 * 3600}}

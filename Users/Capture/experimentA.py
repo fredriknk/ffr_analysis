@@ -94,7 +94,6 @@ except FileNotFoundError:
     print(DATA_FILE_NAME + ' not found')
     resdir.raw_data_path = fixpath('raw_data')
 
-
 detailed_output_path = fixpath('output/detailed_regression_output_unsorted')
 find_regressions.make_detailed_output_folders(detailed_output_path)
 

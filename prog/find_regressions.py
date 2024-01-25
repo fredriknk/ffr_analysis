@@ -12,6 +12,10 @@ import time
 from collections import defaultdict
 import numpy as np
 import pickle
+import logging
+
+logger = logging.getLogger(__name__)
+
 sys.path.append(os.path.split(os.path.split(
     os.path.realpath(__file__))[0])[0])  # sorry
 
@@ -547,9 +551,9 @@ class Regressor(object):
             return t0, n_on_line
 
         if not files:
-            print('\nNo regressions to do\n')
+            logger.info('\nNo regressions to do\n')
             return dict(), []
-        print('Doing regressions')
+        logger.info('Doing regressions')
         n = len(files)
         t0 = time.time()
         resdict = {}
@@ -581,11 +585,11 @@ class Regressor(object):
                     errors.append([name, traceback.format_exc()])
                     # continue
         print_info_maybe(i, n, 0, 100000)
-        print('Regression done on %d files with %d errors' %
+        logger.info('Regression done on %d files with %d errors' %
               (len(files), len(errors)))
         if len(errors):
             regression_errors.append(errors)
-            print('See find_regressions.regression_errors[-1]')
+            logger.info('See find_regressions.regression_errors[-1]')
         return resdict, errors
 
     def show_and_save_images(self, reg, data):
@@ -604,7 +608,7 @@ class Regressor(object):
         plt.title(title_filename + '\n' + title_options + '\n' + title_left_QC + '\n' + title_right_QC )
         if self.save_options['save_images']:
             image_name = os.path.join(self.detailed_output_path,"Images", title_filename +'.png')
-            print(image_name)
+            logger.info(image_name)
             plt.savefig(image_name)
             if left_QC:
                 plt.savefig(os.path.join(self.detailed_output_path, "Check", left_QC,  "LEFT " + left_QC  +" "+ title_filename +'.png'))
@@ -634,14 +638,14 @@ class Regressor(object):
         must_be_done = [(x, self.options.get_options_string(x)) for x in files]
         rest = sorted(set(must_be_done) - set(done))
         q = (len(must_be_done), len(must_be_done) - len(rest))
-        print('Regressions: %d files, %d already done with the same options' % q)
+        logger.info('Regressions: %d files, %d already done with the same options' % q)
         files = [x[0] for x in rest]
         resdict, errors = self.do_regressions(files, 'a')
         pickle_name = os.path.splitext(self.slopes_file_name)[0] + '.pickle'
         try:
             old_dict = pickle.load(open(pickle_name), 'rb')
         except:
-            print('File ', pickle_name, 'not found. Starting empty')
+            logger.error(f'File {pickle_name} not found. Starting empty')
             old_dict = {}
         resdict = {**old_dict, **resdict}
         with open(pickle_name, 'wb') as f:
@@ -671,12 +675,11 @@ class Regressor(object):
             if all(ok):
                 f.write(s + '\n')
             elif any(ok):
-                print('\n******************************')
-                print('In %s, %s:'%(name, side))
-                print(""" 
-Regressions found for at least one substance, but not all. 
-This in not yet handled by this software. Line not written to file""")
-                print('******************************\n')
+                logger.info(f"\n******************************\n"
+                            f"In {name}, {side}:\n"
+                            "\nRegressions found for at least one substance, but not all. \n"
+                            "This in not yet handled by this software. Line not written to file\n"
+                            "******************************\n")
 
     def __repr__(self):
         s = "Regressor with \nslopes_file_name = %s\noptions = %s"\
@@ -688,10 +691,10 @@ def print_reg(regres):
     for k, dct in regres.items():
         if k == 'filename':
             continue
-        print(k)
+        logger.debug(k)
         for subst, reg in dct.items():
-            print(subst)
-            print(reg)
+            logger.debug(subst)
+            logger.debug(reg)
 
 
 def make_detailed_output_folders(detailed_output_path):
@@ -705,7 +708,7 @@ def make_detailed_output_folders(detailed_output_path):
              ["Check", "Probably zero slope"]]
     for p in paths:
         path = os.path.join(detailed_output_path, *p)
-        print(path)
+        logger.debug(path)
         if not os.path.exists(path):
             os.makedirs(path)
 
@@ -722,9 +725,9 @@ def plot_raw(filename, key='N2O'):
 
 def plot_error_number(n, key='N2O'):
     name, err = regression_errors[-1][n]
-    print('--------- name was: %s\nerror was:\n%s\n----------'%(name,err))
     a = plot_raw(name)
-    print('shifting:', a['side'])
+    logging.error(f'--------- name was: {name}\nerror was:\n{err}\n----------\n'
+                  f'shifting: {a["side"]}')
     return name, a
 
 

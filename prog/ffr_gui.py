@@ -1,17 +1,8 @@
-import tkinter as tk
 from tkinter import ttk
 import pickle
 import pandas as pd
-import sys
-import os
-import pickle
-import numpy as np
-import pandas as pd
-from os import walk, chdir, getcwd, stat
-import tkinter as TK
+import tkinter as tk
 from tkinter import filedialog
-from tkinter import messagebox
-import matplotlib
 from PIL import Image, ImageTk
 
 
@@ -21,8 +12,6 @@ from time import time
 from datetime import datetime, date, timedelta
 import matplotlib.pyplot as plt
 import copy
-import datetime as DT
-from collections import defaultdict
 from matplotlib.lines import Line2D
 from matplotlib.patches import Rectangle
 from matplotlib.text import Text
@@ -31,17 +20,17 @@ from scipy.stats import gmean
 from scipy.stats import gstd
 from yaml import safe_load
 
+import logging
 
 from regression import *
 import weather_data
 import find_regressions
-import bisect_find
 import utils
 import resdir
-import csv
 import read_regression_exception_list
 import flux_calculations
-from pandas.api.types import is_numeric_dtype, is_datetime64_any_dtype
+
+logger = logging.getLogger(__name__)
 
 def make_dataset():
     filename = "output/capture_slopes.xls"  # filename for raw output
@@ -122,12 +111,10 @@ def make_df_weather(date_min,date_max):
 
     param = "VWC_GROUND"
     df_w[param + "_ROLLINGAVG"] = df_w[param].rolling(hours, min_periods=1).mean()
-    # print(self.fileSave)
 
     param = 'sum(precipitation_amount PT1H)'
     hours = 24
     df_w["precip" + "_ROLLINGSUM_" + str(hours) + "_H"] = df_w[param].rolling(hours, min_periods=1).sum()
-    # print(self.fileSave)
 
     df_w["TEMPC_GROUND_FFILL"] = df_w.TEMPC_GROUND.fillna(method="ffill")
     df_rolling = df_w.rolling(2, min_periods=1)
@@ -194,7 +181,7 @@ def make_logger_data():
         return pd.concat([df_weather,df_ground], axis=1, join='inner')
 
     else:
-        print("NO LOGGER FILEPATH")
+        logger.debug("NO LOGGER FILEPATH")
         return df_weather
 
 def slopeFromPoints(reg):
@@ -230,7 +217,7 @@ def datecheck(newdate="2022-01-12 12:03:30", dateFormatList=None):
             pass
 
     if date == None:
-        print("""Parsing error, please use one of theese formats: ['%Y-%m-%dT%H:%M:%S', '%Y-%m-%d %H:%M:%S', '%Y.%m.%d %H:%M:%S', '%Y.%m.%d', '%y.%m.%d', '%Y-%m-%d',
+        logger.info("""Parsing error, please use one of theese formats: ['%Y-%m-%dT%H:%M:%S', '%Y-%m-%d %H:%M:%S', '%Y.%m.%d %H:%M:%S', '%Y.%m.%d', '%y.%m.%d', '%Y-%m-%d',
                       '%Y-%m-%d', '%Y%m%d', '%Y%m'""")
         date = datetime.now()
 
@@ -243,31 +230,31 @@ class popupWindow(object):
         px = 5
         py = 5
 
-        top = self.top = TK.Toplevel(master)
+        top = self.top = tk.Toplevel(master)
 
-        self.text1 = TK.Label(top, text="Goto #")
+        self.text1 = tk.Label(top, text="Goto #")
         self.text1.grid(row=0, column=0, padx=px, pady=py)
         # self.text1.pack()
 
-        self.gotoNo = TK.Entry(top)
+        self.gotoNo = tk.Entry(top)
         self.gotoNo.grid(row=0, column=2, padx=px, pady=py)
         # self.entry1.pack()
 
-        self.text2 = TK.Label(top, text="Goto YYYY-MM-DD HH:MM:SS")
+        self.text2 = tk.Label(top, text="Goto YYYY-MM-DD HH:MM:SS")
         self.text2.grid(row=1, column=0, padx=px, pady=py)
         # self.text2.pack()
 
-        self.datetext = TK.Entry(top)
+        self.datetext = tk.Entry(top)
         self.datetext.grid(row=1, column=2, padx=px, pady=py)
         # self.entry2.pack()
 
-        self.button = TK.Button(top, text='Ok', command=self.cleanup)
+        self.button = tk.Button(top, text='Ok', command=self.cleanup)
         self.button.grid(row=2, column=0, padx=px, pady=py)
 
-        self.cancel = TK.Button(top, text='Last Entry', command=self.cleanup)
+        self.cancel = tk.Button(top, text='Last Entry', command=self.cleanup)
         self.cancel.grid(row=2, column=1, padx=px, pady=py)
 
-        self.cancel = TK.Button(top, text='Cancel', command=self.cancel)
+        self.cancel = tk.Button(top, text='Cancel', command=self.cancel)
         self.cancel.grid(row=2, column=2, padx=px, pady=py)
 
 
@@ -293,15 +280,17 @@ class SpecificOptionsPopup:
 
     def create_widgets(self):
         # Search bar
+        dict_copy = copy.deepcopy(self.specific_options)
+        dict_copy.pop("settings", None)
         self.search_var =tk.StringVar()
         self.search_var.trace("w", lambda name, index, mode, sv=self.search_var: self.update_table())
         tk.Entry(self.top, textvariable=self.search_var).pack()
 
         # Determine if specific_options is a DataFrame or dict and set up columns
-        if isinstance(self.specific_options, pd.DataFrame):
-            columns = tuple(self.specific_options.columns)
+        if isinstance(dict_copy, pd.DataFrame):
+            columns = tuple(dict_copy.columns)
         else:  # It's a dict
-            columns = ('Key',) + tuple(next(iter(self.specific_options.values())).keys())
+            columns = ('Key',) + tuple(next(iter(dict_copy.values())).keys())
 
         # Treeview
         self.tree = ttk.Treeview(self.top, columns=columns, show='headings')
@@ -365,29 +354,30 @@ class Dataframe_Filter_Popup:
 
     def create_widgets(self):
         self.search_var = tk.StringVar()
-        self.search_var.trace("w", lambda name, index, mode, sv=self.search_var: self.update_table())
-        tk.Entry(self.top, textvariable=self.search_var).pack()
-        # Checkbox for column filtering
-        self.column_filter_var = tk.BooleanVar()
-        tk.Checkbutton(self.top, text="Filter Columns", variable=self.column_filter_var).pack()
+        # Frame for Search and Column Filtering
+        filter_frame = tk.Frame(self.top)
+        filter_frame.pack(fill=tk.X, padx=10, pady=5)
 
-        # Export button
-        self.export_button = tk.Button(self.top, text="Export Data", command=self.export_data)
-        self.export_button.pack()
-
-        first_row = self.filtered_df.iloc[0]
-
-        # Create a toggle button for showing/hiding filters
-        self.toggle_filters_button = tk.Button(self.top, text="Show Filters", command=self.toggle_filters)
-        self.toggle_filters_button.pack()
-
-        # Create a frame for filters, initially hidden
+        # Frame for Filter Controls
         self.filters_frame = tk.Frame(self.top)
-        self.filters_frame.pack(fill=tk.X, expand=False)
-        self.filters_visible = False  # Initially, filters are not visible
+        self.filters_frame.pack(fill=tk.X, padx=10, pady=5)
+        self.filters_visible = False  # Initially hidden
 
-        self.apply_filters_button = tk.Button(self.top, text="Apply Filters", command=self.update_table)
-        self.apply_filters_button.pack()
+        # Frame for Action Buttons
+        action_frame = tk.Frame(self.top)
+        action_frame.pack(fill=tk.X, padx=10, pady=5)
+
+        # Export Button
+        self.export_button = tk.Button(action_frame, text="Export Data", command=self.export_data)
+        self.export_button.grid(row=0, column=0, padx=5)
+
+        # Toggle Filters Button
+        self.toggle_filters_button = tk.Button(action_frame, text="Show Filters", command=self.toggle_filters)
+        self.toggle_filters_button.grid(row=0, column=1, padx=5)
+
+        # Apply Filters Button
+        self.apply_filters_button = tk.Button(action_frame, text="Apply Filters", command=self.update_table)
+        self.apply_filters_button.grid(row=0, column=2, padx=5)
 
         row = 0
         for col in self.filtered_df.columns:
@@ -435,7 +425,7 @@ class Dataframe_Filter_Popup:
         if self.column_filter_var.get():
             # Apply column filtering logic here (if needed)
             # For example, you can filter out columns based on some criteria
-            filtered_columns = [col for col in self.filtered_df.columns if some_condition]
+            filtered_columns = [col for col in self.filtered_df.columns]
             export_df = self.filtered_df[filtered_columns]
         else:
             export_df = self.filtered_df
@@ -554,7 +544,7 @@ class Dataframe_Filter_Popup:
     def on_tree_select(self, event):
         selected_item = self.tree.item(self.tree.selection())
         if selected_item:
-            print(selected_item)  # This will now include the DataFrame index
+            logger.debug(selected_item)  # This will now include the DataFrame index
             selected_index = selected_item['values'][0]  # This is the DataFrame index
             self.on_select_callback(selected_index)
 
@@ -588,20 +578,19 @@ class ColumnSelectionPopup:
         self.on_submit_callback(selected)
         self.top.destroy()
 
-class App:
+class App():
 
     def __init__(self, master,flux_units,specific_options,treatment_legend,persistent_column_selection):
         # Create the GUI container
         super().__init__()
-
         self.master = master
         self.master.title("FFR Analyzer")
 
         self.treatment_legend = treatment_legend
-
+        self.specific_options = specific_options
         self.initializeDF()
         self.flux_units = flux_units
-        self.specific_options= specific_options
+
 
         self.maxf = len(self.df)
         self.nr = 0  # measurement number
@@ -616,9 +605,51 @@ class App:
              self.persistent_column_selection = ['date', 'CO2_slope', 'CO2_rsq', 'N2O_slope', 'N2O_rsq', 'treatment', 'Tc', 'precip', 'treatment_name']
         else:
             self.persistent_column_selection=persistent_column_selection
-        print(os.getcwd())
+
         self.set_window_icon("../../prog/resources/ffr_logo_32p.png")
         self.create_widget()
+        self.create_menu()
+
+
+    def create_menu(self):
+        # Create the menu bar
+        menu_bar = tk.Menu(self.master)
+        # File menu
+        file_menu = tk.Menu(menu_bar, tearoff=0)
+        file_menu.add_command(label="Open", command=self.open_file)
+        file_menu.add_command(label="Save", command=self.save_file)
+        file_menu.add_separator()
+        file_menu.add_command(label="Exit", command=self.quit)
+        menu_bar.add_cascade(label="File", menu=file_menu)
+
+        # Settings menu
+        settings_menu = tk.Menu(menu_bar, tearoff=0)
+        settings_menu.add_command(label="Column Selection", command=self.column_selection)
+        menu_bar.add_cascade(label="Settings", menu=settings_menu)
+
+        self.master.config(menu=menu_bar)
+
+    # Example functions for menu commands
+    def open_file(self):
+        logger.info("Open File")
+
+    def save_file(self):
+        logger.info("Save File")
+
+    def column_selection(self):
+        try:
+            self.persistent_column_selection = self.specific_options["settings"]["columnselection"]
+        except:
+            logger.info("No column selection in config file")
+        column_selection_popup = ColumnSelectionPopup(
+            self.master,
+            self.df.columns,
+            self.on_columns_selected,
+            preselected_columns=self.persistent_column_selection
+        )
+
+    def quit(self):
+        logger.info("Open Settings")
 
     def set_window_icon(self, icon_path):
         # Load the icon image
@@ -783,24 +814,24 @@ class App:
         self.SpecificOptionsButton = tk.Button(frame, text="View Specific Options",command=self.viewSpecificOptions)
         self.SpecificOptionsButton.grid(row=row_disp, column=1, pady=5)
 
-        self.save = tk.Button(frame, text="Show Cumsum Plot",
-                              command=self.saveGraph)
-        self.save.grid(row=row_disp, column=2, pady=5)
+        self.cumsum = tk.Button(frame, text="Show Cumsum Plot",
+                                command=self.cumsumgraph)
+        self.cumsum.grid(row=row_disp, column=2, pady=5)
 
         row_disp += 1
 
 
-        self.save = tk.Button(frame, text="Export To Excel",
+        self.exportex = tk.Button(frame, text="Export To Excel",
                               command=self.toExcel)  # Update the graph
-        self.save.grid(row=row_disp, column=0, pady=5,sticky="ns")
+        self.exportex.grid(row=row_disp, column=0, pady=5,sticky="ns")
 
-        self.save = tk.Button(frame, text="Export To Excel Noavg",
+        self.noavgbut = tk.Button(frame, text="Export To Excel Noavg",
                               command=self.toExcel_noavg)  # Update the graph
-        self.save.grid(row=row_disp, column=1, pady=5,sticky="ns")
+        self.noavgbut.grid(row=row_disp, column=1, pady=5,sticky="ns")
 
-        self.save = tk.Button(frame, text="Drop Measurement",
+        self.dropmesbut = tk.Button(frame, text="Drop Measurement",
                               command=self.dropMeasurement)  # Update the graph
-        self.save.grid(row=row_disp, column=2, pady=5, sticky="ns")
+        self.dropmesbut.grid(row=row_disp, column=2, pady=5, sticky="ns")
 
         #
         self.Outs["CO2_SLOPE"].configure(state="disabled")
@@ -875,25 +906,28 @@ class App:
         self.outpath = fixpath('output/')
         detailed_output_path = fixpath('output/detailed_regression_output_unsorted')
         find_regressions.make_detailed_output_folders(detailed_output_path)
+
         self.specific_options_filename = fixpath('specific_options.pickle')
-        print(self.specific_options_filename)
+
+        logger.info(self.specific_options_filename)
+
         slopes_filename = fixpath("output/capture_slopes.txt")
 
         if  ".pickle" in self.specific_options_filename:
             try:
                 self.specific_options = read_regression_exception_list.open_pickle_file(self.specific_options_filename)
-                print("Loaded specific options from pickle file")
+                logger.info("Loaded specific options from pickle file")
             except:
-                self.specific_options = specific_options
-                read_regression_exception_list.save_pickle_file(self.specific_options_filename, specific_options)
-                print("Saved default specific options to new pickle file")
+                read_regression_exception_list.save_pickle_file(self.specific_options_filename,  self.specific_options)
+                logger.info("Saved default specific options to new pickle file")
         else:
             self.specific_options = read_regression_exception_list.parse_xls_file(self.specific_options_filename)
 
         #Adding exclude to all entries for backwards compatibility
         for entry in self.specific_options:
-            if 'exclude' not in self.specific_options[entry]:
-                self.specific_options[entry]['exclude'] = False
+            if entry != "settings":
+                if 'exclude' not in self.specific_options[entry]:
+                    self.specific_options[entry]['exclude'] = False
 
         self.options = copy.deepcopy(self.specific_options["ALL"])
 
@@ -910,7 +944,7 @@ class App:
             self.raw_data = read_yaml()["PATHS"]['RAWDATA']
             self.manual =  read_yaml()["PATHS"]["MANUAL"]
         except FileNotFoundError:
-            print(resdir.raw_data_path + ' not found')
+            logger.info(resdir.raw_data_path + ' not found')
             resdir.raw_data_path = fixpath('raw_data')
 
         df_path = "output/capture_RegressionOutput.xls"
@@ -922,7 +956,7 @@ class App:
 
         treatment_name_mapping = {key: value['name'] for key, value in self.treatment_legend.items()}
         self.df['treatment_name'] = self.df['treatment'].map(treatment_name_mapping)
-
+        self.df_untouched = self.df.copy()
         self.regr = find_regressions.Regressor(slopes_filename, self.options, self.save_options,
                                                self.specific_options_filename, detailed_output_path)
 
@@ -931,7 +965,7 @@ class App:
     def updateValue(self, event):
         self.update()
 
-    def saveGraph(self):
+    def cumsumgraph(self):
         # self.fileSave = tk.filedialog.asksaveasfilename(initialdir=currDir, initialfile=f[self.nr], title="Save Graph",
         #                                                 filetypes=(("PNG", ".png"), ("all files", "*.*")))
         # if self.fileSave == "":
@@ -1025,7 +1059,7 @@ class App:
         self.fileSave = self.fileSave.replace(".xlsx", "")
         self.fileSave = self.fileSave.replace(".xls", "")
 
-        print(self.fileSave)
+        logger.info(self.fileSave)
 
         with pd.ExcelWriter(self.fileSave + ".xlsx") as writer:
             for plotno in np.sort(df.nr.unique()):
@@ -1095,10 +1129,12 @@ class App:
         self.options['co2_guides'] = int(self.CO2_guide.get())
         self.options['exclude'] = int(self.exclude.get())
         if self.options != self.specific_options["ALL"]:
-            self.specific_options[self.fname]= copy.deepcopy(self.options)
-            if ".pickle" in self.specific_options_filename:
-                with open(self.specific_options_filename, 'wb') as handle:
-                    pickle.dump(self.specific_options, handle, protocol=pickle.HIGHEST_PROTOCOL)
+            self.specific_options[self.fname] = copy.deepcopy(self.options)
+            self.save_specific_options()
+    def save_specific_options(self):
+        if ".pickle" in self.specific_options_filename:
+            with open(self.specific_options_filename, 'wb') as handle:
+                pickle.dump(self.specific_options, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
     def setDefault(self):
         self.specific_options["ALL"]["start"] = int(self.sliderMin.get())
@@ -1239,7 +1275,6 @@ class App:
         self.w = popupWindow(self.master)
         self.master.wait_window(self.w.top)
         if not self.w.cancel:
-            print(self.w.value, self.w.date)
             newnr = self.w.value
             newdate = self.w.date
             if newnr:
@@ -1294,7 +1329,6 @@ class App:
 
             elif isinstance(event.artist, Rectangle):
                 patch = event.artist
-                print(int(patch.get_x() + (patch.get_width() / 2)))
                 treatment_no = int(patch.get_x() + (patch.get_width() / 2)) + 1
                 treatment_name = treatment_legend[treatment_no]["name"]
 
@@ -1314,7 +1348,6 @@ class App:
                 (df_b.date > pd.Timestamp(start_date.val, unit="d")) & (
                         df_b.date < pd.Timestamp(stop_date.val, unit="d"))]
             plotDF(df, df_w, axs)
-            print(time() - time_start)
 
         def xaligned_axes(ax, y_distance, width, **kwargs):
             return plt.axes([ax.get_position().x0,
@@ -1454,8 +1487,7 @@ class App:
                                          temp['air_temperature'].min(), color="r", alpha=0.3)
                 axs["temp"].set_ylabel('Temp\n°C')
                 axs["rain"].set_ylabel('Rain\nMM day⁻¹')
-
-
+                axs["rain"].set_xlabel('Date')
         df_weather = make_logger_data()
         treatment_legend = self.treatment_legend
         treatment_df = pd.DataFrame.from_dict(treatment_legend, orient='index')
@@ -1524,35 +1556,27 @@ class App:
         a = 1
     def viewSpecificOptions(self):
         popup = SpecificOptionsPopup(self.master, self.specific_options, self.on_specific_option_selected)
+    def on_columns_selected(self, selected):
+        logger.info(f"Selected: {selected}")
+        if "settings" not in self.specific_options:
+            self.specific_options["settings"] = {}
+        self.specific_options["settings"]["columnselection"]=selected
+        self.save_specific_options()
 
     def viewDataFrame(self):
-        # Always open the column selection popup, passing the current selection if it exists
-        column_selection_popup = ColumnSelectionPopup(
-            self.master,
-            self.df.columns,
-            self.on_columns_selected,
-            preselected_columns=self.persistent_column_selection
-        )
-    def on_columns_selected(self, selected_columns):
-        # Update the stored selection
-        self.persistent_column_selection = selected_columns
-        print(selected_columns)
-        # Open the Dataframe_Filter_Popup with the selected columns
-        popup = Dataframe_Filter_Popup(self.master, self.df[selected_columns], self.on_DF_selected)
+        popup = Dataframe_Filter_Popup(self.master, self.df[self.specific_options["settings"]["columnselection"]], self.on_DF_selected)
     def on_DF_selected(self, selected_key):
         # Handle the selected key here
-        print(f"Selected file: {selected_key}")
-        # You can now use selected_key as needed in your main application
-        print(selected_key)
+        logger.debug(f"Selected file: {selected_key}")
         self.nr = selected_key
         self.getParams()
         self.replot()
         self.update()
     def on_specific_option_selected(self, selected_key):
         # Handle the selected key here
-        print(f"Selected file: {selected_key}")
+        logger.debug(f"Selected file: {selected_key}")
         # You can now use selected_key as needed in your main application
-        print(self.find_by_filename(selected_key))
+        logger.debug(self.find_by_filename(selected_key))
         self.nr = self.find_by_filename(selected_key)
         self.getParams()
         self.replot()
