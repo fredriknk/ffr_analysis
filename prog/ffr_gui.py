@@ -2,7 +2,7 @@ from tkinter import ttk
 import pickle
 import pandas as pd
 import tkinter as tk
-from tkinter import filedialog
+from tkinter import filedialog, simpledialog,messagebox
 from PIL import Image, ImageTk
 
 
@@ -31,6 +31,36 @@ import read_regression_exception_list
 import flux_calculations
 
 logger = logging.getLogger(__name__)
+
+def convert_dict_values(input_dict):
+    """
+    Convert a dictionary with Tkinter StringVar and Listbox objects to a dictionary with string and list values.
+
+    Args:
+    input_dict (dict): A dictionary potentially containing StringVar and Listbox objects.
+
+    Returns:
+    dict: A dictionary with string or list values instead of Tkinter objects.
+    """
+    output_dict = {}
+    for key, value in input_dict.items():
+        if isinstance(value, dict):
+            # Recursively handle nested dictionaries
+            output_dict[key] = convert_dict_values(value)
+        elif isinstance(value, tk.StringVar):
+            # Extract string from StringVar
+            output_dict[key] = value.get()
+        elif isinstance(value, tk.Listbox):
+            # Extract list of selected items from Listbox
+            selected_indices = value.curselection()
+            selected_items = [value.get(i) for i in selected_indices]
+            output_dict[key] = selected_items
+        elif isinstance(value, tk.BooleanVar):
+            output_dict[key] = value.get()
+        else:
+            # Leave other values unchanged
+            output_dict[key] = value
+    return output_dict
 
 def make_dataset():
     filename = "output/capture_slopes.xls"  # filename for raw output
@@ -344,11 +374,16 @@ class SpecificOptionsPopup:
         self.tree.heading(col, command=lambda: self.treeview_sort_column(col, not reverse))
 
 class Dataframe_Filter_Popup:
-    def __init__(self, master, data_frame, on_select_callback):
+    def __init__(self, master, data_frame, on_select_callback,original_df = None, exportbuttons=False, export_callback=None,graphing_callback=None):
         self.top = tk.Toplevel(master)
-        self.original_df = data_frame.copy()  # Store the original DataFrame
+        if original_df is None:
+            self.original_df = data_frame.copy()
+        else:
+            self.original_df = original_df.copy()  # Store the original DataFrame
         self.filtered_df = data_frame  # This will hold the filtered DataFrame
+        self.exportbuttons = exportbuttons
         self.on_select_callback = on_select_callback
+        self.graphing_callback = graphing_callback
         self.filter_values = {}
         self.create_widgets()
 
@@ -361,35 +396,55 @@ class Dataframe_Filter_Popup:
         # Frame for Filter Controls
         self.filters_frame = tk.Frame(self.top)
         self.filters_frame.pack(fill=tk.X, padx=10, pady=5)
-        self.filters_visible = False  # Initially hidden
+        self.filters_visible = True  # Initially open
 
         # Frame for Action Buttons
         action_frame = tk.Frame(self.top)
         action_frame.pack(fill=tk.X, padx=10, pady=5)
+        if self.exportbuttons:
+            # Export Button
+            self.export_button = tk.Button(action_frame, text="Export Data", command=self.export_data)
+            self.export_button.grid(row=0, column=0, padx=5)
+            # Cumsum Button
+            self.cumsum_button = tk.Button(action_frame, text="Show Cumulative Sum", command=self.show_cumsum)
+            self.cumsum_button.grid(row=0, column=1, padx=5)
 
-        # Export Button
-        self.export_button = tk.Button(action_frame, text="Export Data", command=self.export_data)
-        self.export_button.grid(row=0, column=0, padx=5)
 
         # Toggle Filters Button
-        self.toggle_filters_button = tk.Button(action_frame, text="Show Filters", command=self.toggle_filters)
-        self.toggle_filters_button.grid(row=0, column=1, padx=5)
+        self.toggle_filters_button = tk.Button(action_frame, text="Hide Filters", command=self.toggle_filters)
+        self.toggle_filters_button.grid(row=0, column=2, padx=5)
 
         # Apply Filters Button
         self.apply_filters_button = tk.Button(action_frame, text="Apply Filters", command=self.update_table)
-        self.apply_filters_button.grid(row=0, column=2, padx=5)
+        self.apply_filters_button.grid(row=0, column=3, padx=5)
 
-        row = 0
+        self.row = 0
+        logging.debug(f"Filtered DataFrame columns: {self.filtered_df.columns}")
+
         for col in self.filtered_df.columns:
-            if col == 'treatment_name':
-                self.add_treatment_name_dropdown(col, row)
-                row += 1
+            unique_vals = pd.Series(self.filtered_df[col].dropna().unique())
+            logging.debug(f"Unique values for {col}: {unique_vals}")
+            # Check if the column is binary (having exactly two unique values)
+
+            # if col == 'treatment_name':
+            #     logging.debug(f"Adding treatment name dropdown for {col}")
+            #     self.add_treatment_name_dropdown(col, self.row)
+            #     self.row += 1
+            if len(unique_vals) < 15:
+                # Directly call add_checkbox_filter for binary columns
+                logging.debug(f"Adding checkbox filter for {col} with original values")
+                self.add_checkbox_filter(col, self.row)
+                self.row += 1
             elif pd.api.types.is_datetime64_any_dtype(self.filtered_df[col]):
-                self.add_date_range_entries(col, row)
-                row += 1
+                logging.debug(f"Adding date range entries for {col}")
+                self.add_date_range_entries(col, self.row)
+                self.row += 1
             elif pd.api.types.is_numeric_dtype(self.filtered_df[col]):
-                self.add_min_max_entries(col, row)
-                row += 1
+                logging.debug(f"Adding min/max entries for {col}")
+                self.add_min_max_entries(col, self.row)
+                self.row += 1
+            else:
+                logging.debug(f"Skipping column {col} as it is not numeric or datetime")
 
         # Treeview setup
         # Convert column names to string and remove any special characters if needed
@@ -421,17 +476,24 @@ class Dataframe_Filter_Popup:
         self.update_table()
 
     def export_data(self):
-        # Check if column filter is selected
-        if self.column_filter_var.get():
-            # Apply column filtering logic here (if needed)
-            # For example, you can filter out columns based on some criteria
-            filtered_columns = [col for col in self.filtered_df.columns]
-            export_df = self.filtered_df[filtered_columns]
-        else:
-            export_df = self.filtered_df
-
+        # Apply the filters to get the filtered DataFrame
+        filtered_df = self.apply_filters()
         # Call the callback function with the filtered DataFrame
-        self.on_select_callback(export_df)
+        #self.on_select_callback(filtered_df)
+
+        output_dict = convert_dict_values(self.filter_values)
+
+        logging.info(f"Data passed to callback function {output_dict}")
+        logging.debug(f'Filtered DataFrame:\n{filtered_df.iloc[0]}\n...\n{filtered_df.iloc[-1]}')
+
+    def show_cumsum(self):
+        # Apply the filters to get the filtered DataFrame
+        filtered_df = self.apply_filters(self.original_df,no_culumn_filter=True)
+        # Call the callback function with the filtered DataFrame
+        output_dict = convert_dict_values(self.filter_values)
+        logging.info(f"Data passed to callback function {output_dict}")
+        logging.debug(f'Filtered DataFrame:\n{filtered_df.iloc[0]}\n...\n{filtered_df.iloc[-1]}')
+        self.graphing_callback(filtered_df)
     def toggle_filters(self):
         # Toggle the visibility of the filters frame
         if self.filters_visible:
@@ -484,11 +546,49 @@ class Dataframe_Filter_Popup:
 
         self.filter_values[col] = {'start': start_var, 'end': end_var}
 
+    def add_checkbox_filter(self, col, row):
+        tk.Label(self.filters_frame, text=f"{col}:").grid(row=row, column=0, sticky='w')
+
+        # Get the two unique binary values
+        binary_values = sorted(self.filtered_df[col].dropna().unique())
+
+        # Initialize a dictionary to store the variables associated with the checkboxes
+        checkbox_vars = {}
+
+        # Starting column position for checkboxes
+        col_position = 1
+        # Starting column position for checkboxes
+        col_position = 1
+
+        # Counter to track the number of checkboxes in the current row
+        checkboxes_in_row = 0
+
+        for value in binary_values:
+            # Create a variable to track the state of the checkbox
+            var = tk.BooleanVar()
+            # Use the actual value as the label for the checkbox
+            if value == False:
+                value = 0
+            if value == True:
+                value = 1
+            checkbox = tk.Checkbutton(self.filters_frame, text=str(value), variable=var, onvalue=True, offvalue=False)
+            checkbox.grid(row=row, column=col_position, sticky='w')
+            checkbox_vars[str(value)] = var  # Store the variable for later reference
+            col_position += 1  # Increment column position for the next checkbox
+            checkboxes_in_row += 1
+
+            # Check if we've added three checkboxes in the current row
+            if checkboxes_in_row == 3:
+                # Move to the next row and reset the column position and counter
+                row += 1
+                col_position = 1
+                checkboxes_in_row = 0
+        self.row =row+1  # Increment the row counter for the next filter
+        # Store the checkbox variables in filter_values
+        self.filter_values[col] = {'checkboxes': checkbox_vars}
     def set_today(self, col, start_var, end_var):
         today = date.today()
-        tomorrow = today + timedelta(days=1)
         start_var.set(today.strftime('%Y-%m-%d'))
-        end_var.set(tomorrow.strftime('%Y-%m-%d'))
 
     def update_table(self):
         # Get the search term from the search_var StringVar
@@ -521,14 +621,20 @@ class Dataframe_Filter_Popup:
         self.tree.tag_configure('oddrow', background='lightgrey')
         self.tree.tag_configure('evenrow', background='white')
 
-    def apply_filters(self):
-        df = self.filtered_df.copy()
+    def apply_filters(self,df_input = None,no_culumn_filter=False):
+        if df_input is None:
+            df = self.filtered_df.copy()
+        else:
+            df = df_input.copy()
+        logging.debug(f"Applying filters to DataFrame with { self.filter_values.items()} rows")
         for col, filters in self.filter_values.items():
-            if col == 'treatment_name':
-                selected_indices = filters['listbox'].curselection()
-                selected_treatments = [filters['listbox'].get(i) for i in selected_indices]
-                if selected_treatments:
-                    df = df[df[col].isin(selected_treatments)]
+            if 'checkboxes' in filters:
+                # Handle checkbox filters
+
+                selected_values = [self.convert_to_numeric(value) for value, var in filters['checkboxes'].items() if var.get()]
+                logging.debug(f"Selected values for {col}: {selected_values}")
+                if selected_values:
+                    df = df[df[col].isin(selected_values)]
             else:
                 # Your existing filtering logic for other columns
                 if 'min' in filters and filters['min'].get():
@@ -541,6 +647,14 @@ class Dataframe_Filter_Popup:
                     df = df[df[col] <= pd.to_datetime(filters['end'].get())]
         return df
 
+    def convert_to_numeric(self, value):
+        try:
+            # Attempt to convert the value to a numeric type
+            numeric_value = float(value)
+            return numeric_value
+        except (ValueError, TypeError):
+            # If conversion fails, return the original value
+            return value
     def on_tree_select(self, event):
         selected_item = self.tree.item(self.tree.selection())
         if selected_item:
@@ -549,9 +663,10 @@ class Dataframe_Filter_Popup:
             self.on_select_callback(selected_index)
 
 class ColumnSelectionPopup:
-    def __init__(self, master, all_columns, on_submit_callback, preselected_columns=None):
+    def __init__(self, master, all_columns, on_submit_callback, preselected_columns=None,default_columns=None):
         self.top = tk.Toplevel(master)
         self.all_columns = all_columns
+        self.default_columns = default_columns if preselected_columns is not None else []
         self.preselected_columns = preselected_columns if preselected_columns is not None else []
         self.on_submit_callback = on_submit_callback
         self.selected_columns = []
@@ -571,23 +686,174 @@ class ColumnSelectionPopup:
 
         # Place the submit button at the bottom of the grid
         submit_button = tk.Button(self.top, text="Submit", command=self.submit)
-        submit_button.grid(row=num_rows, column=0, columnspan=num_cols)
-
+        submit_button.grid(row=num_rows, column=0)
+        default_button = tk.Button(self.top, text="Set to Default", command=self.default_settings)
+        default_button.grid(row=num_rows, column=1)
+        deselect_button = tk.Button(self.top, text="Deselect All", command=self.deselect)
+        deselect_button.grid(row=num_rows, column=2)
+    def deselect(self):
+        self.on_submit_callback([])
+        self.top.destroy()
+    def default_settings(self):
+        self.on_submit_callback(self.default_columns)
+        self.top.destroy()
     def submit(self):
         selected = [col for col, var in self.selected_columns if var.get()]
         self.on_submit_callback(selected)
         self.top.destroy()
 
+import tkinter as tk
+from tkinter import filedialog
+
+class FileDialogHelper:
+    def __init__(self):
+        self.default_location = ""
+
+    def open_file_dialog(self, default_location=None, filetypes=(("All files", "*.*"),)):
+        """
+        Opens a file dialog and returns the selected file path. Allows specifying a default location.
+
+        Args:
+        default_location (str): Optional. A path to a directory that will be the file dialog's starting location.
+        filetypes (tuple): File types for the file dialog.
+
+        Returns:
+        str: The selected file path.
+        """
+        # Update the default location if a new one is provided
+        if default_location:
+            self.default_location = default_location
+
+        # Open the file dialog
+        root = tk.Tk()
+        root.withdraw()  # Hide the main window
+        file_path = filedialog.askopenfilename(initialdir=self.default_location, filetypes=filetypes)
+        root.destroy()  # Close the hidden main window
+
+        return file_path
+
+    def save_file_dialog(self, default_location=None, default_filename="", default_extension="", filetypes=(("All files", "*.*"),)):
+        """
+        Opens a save file dialog and returns the selected file path. Allows specifying a default location and filename.
+
+        Args:
+        default_location (str): Optional. A path to a directory that will be the file dialog's starting location.
+        default_filename (str): Default filename to use in the save dialog.
+        default_extension (str): Default file extension.
+        filetypes (tuple): File types for the file dialog.
+
+        Returns:
+        str: The selected file path for saving.
+        """
+        # Update the default location if a new one is provided
+        if default_location:
+            self.default_location = default_location
+
+        # Open the save file dialog
+        root = tk.Tk()
+        root.withdraw()  # Hide the main window
+        file_path = filedialog.asksaveasfilename(
+            initialdir=self.default_location,
+            initialfile=default_filename,
+            defaultextension=default_extension,
+            filetypes=filetypes
+        )
+        root.destroy()  # Close the hidden main window
+
+        return file_path
+class ExportSettingsPopup:
+    def __init__(self, master, specific_options, on_confirm):
+        self.top = tk.Toplevel(master)
+        self.top.title("Export Settings")
+        self.specific_options = specific_options
+        self.on_confirm = on_confirm
+
+        # Retrieve or initialize export settings
+        self.export_settings = self.specific_options.setdefault("settings", {}).setdefault("exportsettings", {})
+
+        # Example checkbox (add more widgets as needed)
+        self.avg_var = tk.BooleanVar(value=self.export_settings.get('average', False))
+        tk.Checkbutton(self.top, text="Average", variable=self.avg_var).pack()
+        self.byplot_var = tk.BooleanVar(value=self.export_settings.get('by_plot', False))
+        tk.Checkbutton(self.top, text="By plot", variable=self.byplot_var).pack()
+
+        # Example confirm button
+        confirm_button = tk.Button(self.top, text="Confirm", command=self.confirm_settings)
+        confirm_button.pack()
+
+    def confirm_settings(self):
+        # Update export settings based on user input
+        self.export_settings['average'] = self.avg_var.get()
+        self.export_settings['by_plot'] = self.byplot_var.get()
+        # Notify the main application
+        self.on_confirm()
+
+        # Close the popup
+        self.top.destroy()
+
+class ExcelExporter:
+    def __init__(self, initial_dir='/', filename="default.xlsx"):
+        self.default_dir = initial_dir
+        self.default_filename = filename
+
+    def save_file_dialog(self):
+        """
+        Opens a file save dialog with a semi-persistent default location and filename.
+        """
+        root = tk.Tk()
+        root.withdraw()  # Hide the Tkinter root window
+        filepath = filedialog.asksaveasfilename(
+            initialdir=self.default_dir,
+            initialfile=self.default_filename,
+            title="Save file",
+            filetypes=(("Excel files", "*.xlsx"), ("All files", "*.*"))
+        )
+        root.destroy()
+        if not filepath:
+            return None
+        if not filepath.endswith('.xlsx'):
+            filepath += '.xlsx'
+        return filepath
+
+    def to_excel(self, df, average=True):
+        """
+        Export data to an Excel file, with optional averaging.
+
+        Args:
+        df (pd.DataFrame): The DataFrame to export.
+        average (bool): Whether to average the data by day.
+        """
+        filepath = self.save_file_dialog()
+        if not filepath:
+            print("File save cancelled.")
+            return
+
+        # Combine your data processing here
+        # Assuming `df` is your DataFrame to be exported
+
+        with pd.ExcelWriter(filepath) as writer:
+            if average:
+                # Perform your averaging and export logic here
+                pass  # Replace with actual logic
+            else:
+                # Export without averaging logic here
+                pass  # Replace with actual logic
+
+    # Example methods `to_excel_with_avg` and `to_excel_no_avg` can be specific implementations
+    # or simply call `to_excel(df, average=True/False)` with appropriate parameters.
 class App():
 
-    def __init__(self, master,flux_units,specific_options,treatment_legend,persistent_column_selection):
+    def __init__(self, master,flux_units,specific_options,treatment_legend,persistent_column_selection,project_name=""):
         # Create the GUI container
         super().__init__()
         self.master = master
-        self.master.title("FFR Analyzer")
+        self.master.title(f"FFR Analyzer 1.0 - {project_name}")
+        self.project_name = project_name
+        self.file_dialog_helper = FileDialogHelper()
 
         self.treatment_legend = treatment_legend
         self.specific_options = specific_options
+        self.default_specific_options = specific_options.copy()
         self.initializeDF()
         self.flux_units = flux_units
 
@@ -598,18 +864,19 @@ class App():
         self.xint = 100  # regression window
         self.cutoff = 0.05  # cutoff percentage
         self.method = tk.StringVar(self.master)  # Variable for radiobox regression method
-        self.method.set(self.options["crit"])  # Set default to Mse
+        self.method.set(self.options["crit"])  # Set default to specific_options_all
         self.CO2_guide = tk.IntVar()
         self.exclude = tk.IntVar()
         if persistent_column_selection == None:
              self.persistent_column_selection = ['date', 'CO2_slope', 'CO2_rsq', 'N2O_slope', 'N2O_rsq', 'treatment', 'Tc', 'precip', 'treatment_name']
+             self.default_persistent_column_selection=self.persistent_column_selection
         else:
             self.persistent_column_selection=persistent_column_selection
+            self.default_persistent_column_selection = persistent_column_selection
 
         self.set_window_icon("../../prog/resources/ffr_logo_32p.png")
         self.create_widget()
         self.create_menu()
-
 
     def create_menu(self):
         # Create the menu bar
@@ -625,42 +892,19 @@ class App():
         # Settings menu
         settings_menu = tk.Menu(menu_bar, tearoff=0)
         settings_menu.add_command(label="Column Selection", command=self.column_selection)
+        settings_menu.add_command(label="Export Settings", command=self.open_export_settings)
         menu_bar.add_cascade(label="Settings", menu=settings_menu)
+
+        debug_menu = tk.Menu(menu_bar, tearoff=0)
+        debug_menu.add_command(label="Print Dataframe", command=self.debugprint_dataframe)
+        debug_menu.add_command(label="Print specific_options", command=self.debugprint_specific_options)
+        menu_bar.add_cascade(label="Debug", menu=debug_menu)
 
         self.master.config(menu=menu_bar)
 
-    # Example functions for menu commands
-    def open_file(self):
-        logger.info("Open File")
-
-    def save_file(self):
-        logger.info("Save File")
-
-    def column_selection(self):
-        try:
-            self.persistent_column_selection = self.specific_options["settings"]["columnselection"]
-        except:
-            logger.info("No column selection in config file")
-        column_selection_popup = ColumnSelectionPopup(
-            self.master,
-            self.df.columns,
-            self.on_columns_selected,
-            preselected_columns=self.persistent_column_selection
-        )
-
-    def quit(self):
-        logger.info("Open Settings")
-
-    def set_window_icon(self, icon_path):
-        # Load the icon image
-        icon_image = Image.open(icon_path)
-        icon_photo = ImageTk.PhotoImage(icon_image)
-
-        # Set the window icon
-        self.master.iconphoto(False, icon_photo)
     def create_widget(self):
         row_disp = 0
-        frame = tk.Frame(self.master)#, width=2000, height=2000)
+        frame = tk.Frame(self.master)  # , width=2000, height=2000)
         frame.grid(row=0, column=0, sticky="nsew")
 
         ##Buttons for scrolling left rigth
@@ -704,14 +948,14 @@ class App():
 
         row_disp += 1
         name = "CO2_SLOPE"
-        label = "Slope (ppm/s)"#+graph_unit
+        label = "Slope (ppm/s)"  # +graph_unit
         self.MakeTextbox(name, label, row_disp, frame, 1)
         name = "N2O_SLOPE"
         self.MakeTextbox(name, label, row_disp, frame, 2)
 
         row_disp += 1
         name = "mse_CO2"
-        label = "MSE"+graph_unit
+        label = "MSE" + graph_unit
         self.MakeTextbox(name, label, row_disp, frame, 1)
         name = "mse_N2O"
         self.MakeTextbox(name, label, row_disp, frame, 2)
@@ -725,7 +969,7 @@ class App():
 
         row_disp += 1
         name = "diff_CO2"
-        label = "diff" +graph_unit
+        label = "diff" + graph_unit
         self.MakeTextbox(name, label, row_disp, frame, 1)
         name = "diff_N2O"
         self.MakeTextbox(name, label, row_disp, frame, 2)
@@ -763,7 +1007,7 @@ class App():
         row_disp += 1
         name = "Treatment Name"
         label = "Treatment Name"
-        self.MakeTextbox(name, label, row_disp, frame,width=25, cspan=2)
+        self.MakeTextbox(name, label, row_disp, frame, width=25, cspan=2)
 
         row_disp += 1
         self.WindowLabel = tk.Label(frame, text="Regr Window")
@@ -788,9 +1032,11 @@ class App():
         self.R2.grid(row=row_disp, column=1, padx=5, pady=5)  # Radio button for reg method
 
         row_disp += 1
-        self.C1 = tk.Checkbutton(frame, text='CO2 Guide', variable=self.CO2_guide, onvalue=1, offvalue=0, command=self.update)
+        self.C1 = tk.Checkbutton(frame, text='CO2 Guide', variable=self.CO2_guide, onvalue=1, offvalue=0,
+                                 command=self.update)
         self.C1.grid(row=row_disp, column=0, padx=5, pady=5)  # Radio button for reg method
-        self.C2 = tk.Checkbutton(frame, text='Exclude', variable=self.exclude, onvalue=1, offvalue=0, command=self.update)
+        self.C2 = tk.Checkbutton(frame, text='Exclude', variable=self.exclude, onvalue=1, offvalue=0,
+                                 command=self.update)
         self.C2.grid(row=row_disp, column=1, padx=5, pady=5)  # Radio button for reg method
 
         row_disp += 2
@@ -811,7 +1057,7 @@ class App():
         self.SpecificOptionsButton = tk.Button(frame, text="View Dataframe", command=self.viewDataFrame)
         self.SpecificOptionsButton.grid(row=row_disp, column=0, pady=5)
 
-        self.SpecificOptionsButton = tk.Button(frame, text="View Specific Options",command=self.viewSpecificOptions)
+        self.SpecificOptionsButton = tk.Button(frame, text="View Specific Options", command=self.viewSpecificOptions)
         self.SpecificOptionsButton.grid(row=row_disp, column=1, pady=5)
 
         self.cumsum = tk.Button(frame, text="Show Cumsum Plot",
@@ -819,19 +1065,6 @@ class App():
         self.cumsum.grid(row=row_disp, column=2, pady=5)
 
         row_disp += 1
-
-
-        self.exportex = tk.Button(frame, text="Export To Excel",
-                              command=self.toExcel)  # Update the graph
-        self.exportex.grid(row=row_disp, column=0, pady=5,sticky="ns")
-
-        self.noavgbut = tk.Button(frame, text="Export To Excel Noavg",
-                              command=self.toExcel_noavg)  # Update the graph
-        self.noavgbut.grid(row=row_disp, column=1, pady=5,sticky="ns")
-
-        self.dropmesbut = tk.Button(frame, text="Drop Measurement",
-                              command=self.dropMeasurement)  # Update the graph
-        self.dropmesbut.grid(row=row_disp, column=2, pady=5, sticky="ns")
 
         #
         self.Outs["CO2_SLOPE"].configure(state="disabled")
@@ -849,19 +1082,18 @@ class App():
         self.fig.autofmt_xdate()  # Dont know what this does
 
         self.CO2line1, = self.ax.plot([1, 2], [1, 2], linewidth=1, color="tab:blue",
-                                     alpha=0.5)  # Inititalise measurement graph
+                                      alpha=0.5)  # Inititalise measurement graph
         self.CO2line2, = self.ax.plot([1, 2], [1, 2], marker='o', linestyle='dashed', linewidth=2, color="tab:green",
                                       alpha=0.7)
         self.CO2line3, = self.ax.plot([1, 2], [1, 2], linewidth=3, color="tab:orange")  # Inititalize regression graph
         self.CO2start, = self.ax.plot([1, 2], [1, 2], linewidth=1, color="tab:red", alpha=0.5)
         self.CO2stop, = self.ax.plot([1, 2], [1, 2], linewidth=1, color="tab:red", alpha=0.5)
 
-
         self.N2Oline1, = self.ax1.plot([1, 2], [1, 2], linewidth=1, color="tab:blue", alpha=0.5)
         self.N2Oline2, = self.ax1.plot([1, 2], [1, 2], marker='o', linestyle='dashed', linewidth=2,
-                                           color="tab:green", alpha=0.7)  # Inititalize regression graph
+                                       color="tab:green", alpha=0.7)  # Inititalize regression graph
         self.N2Oline3, = self.ax1.plot([1, 2], [1, 2], linewidth=3,
-                                           color="tab:orange")  # Inititalize regression graph
+                                       color="tab:orange")  # Inititalize regression graph
         self.N2Ostart, = self.ax1.plot([1, 2], [1, 2], linewidth=1, color="tab:red", alpha=0.5)
         self.N2Ostop, = self.ax1.plot([1, 2], [1, 2], linewidth=1, color="tab:red", alpha=0.5)
 
@@ -891,8 +1123,8 @@ class App():
         self.sliderMax.set(self.options["stop"])
         self.sliderMax.grid(row=11, column=3, sticky='ew')
 
-        self.master.grid_rowconfigure(10, weight=1,minsize=50)
-        self.master.grid_rowconfigure(11, weight=1,minsize=50)
+        self.master.grid_rowconfigure(10, weight=1, minsize=50)
+        self.master.grid_rowconfigure(11, weight=1, minsize=50)
         self.master.grid_columnconfigure(3, weight=1)
 
         for row in range(row_disp):  # Example for 10 rows
@@ -900,6 +1132,85 @@ class App():
 
         self.getParams()
         self.update()
+
+    def open_export_settings(self):
+        # Open the export settings popup
+        ExportSettingsPopup(self.master, self.specific_options, self.on_export_settings_confirmed)
+
+    def on_export_settings_confirmed(self):
+        # Handle confirmed settings
+        self.save_specific_options()
+
+    def open_file(self):
+        open_file_path = self.file_dialog_helper.open_file_dialog(default_location="./picklebackup",
+                                                                  filetypes=(("Pickle Files", "*.pickle"),("all files", "*.*"))
+                                                                  )
+        logger.info(open_file_path)
+        if open_file_path:
+            answer = messagebox.askyesno("Import  Specific Option file",
+                                         "Are you sure you want to import a specific options file? "
+                                         "This will overwrite the current file, "
+                                         "if unsure, press NO and save the current file first.")
+            if answer:
+                self.specific_options = read_regression_exception_list.open_pickle_file(open_file_path)
+                self.check_specific_options()
+                self.getParams()
+                self.update()
+                self.save_specific_options()
+                logger.info(f"Open File {open_file_path}")
+
+    def save_file(self):
+        filename = f"{datetime.now().strftime('%Y%m%d-%H%M%S')}_{self.project_name}_specific_options.pickle"
+        save_file_path = self.file_dialog_helper.save_file_dialog(default_location="./picklebackup",
+                                                                    default_filename=filename,
+                                                                    default_extension=".pickle",
+                                                                    filetypes=(("Pickle Files", "*.pickle"),))
+        logger.info(save_file_path)
+        if save_file_path:
+            self.setParams()
+            self.save_specific_options(save_file_path)
+    def check_specific_options(self):
+        # Check if the specific options dictionary has the necessary keys
+        # If not, add the missing keys with default values
+        required_keys = ["ALL", "settings"]
+        for key in required_keys:
+            if key not in self.specific_options:
+                self.specific_options[key] = {}
+        if "exportsettings" not in self.specific_options["settings"]:
+            self.specific_options["settings"]["exportsettings"] = {}
+        if "columnselection" not in self.specific_options["settings"]:
+            self.specific_options["settings"]["columnselection"] = self.default_persistent_column_selection
+        for entry in self.specific_options:
+            if entry != "settings":
+                for specific_options_keys in self.default_specific_options["ALL"]:
+                    if specific_options_keys not in self.specific_options[entry]:
+                        self.specific_options[entry][specific_options_keys] = self.default_specific_options["ALL"][
+                            specific_options_keys]
+
+    def column_selection(self):
+        try:
+            self.persistent_column_selection = self.specific_options["settings"]["columnselection"]
+        except:
+            logger.info("No column selection in config file")
+        column_selection_popup = ColumnSelectionPopup(
+            self.master,
+            self.df.columns,
+            self.on_columns_selected,
+            preselected_columns=self.persistent_column_selection,
+            default_columns=self.default_persistent_column_selection
+        )
+
+    def quit(self):
+        logger.info("Quitting application")
+        self.master.quit()  # Stop the main loop
+
+    def set_window_icon(self, icon_path):
+        # Load the icon image
+        icon_image = Image.open(icon_path)
+        icon_photo = ImageTk.PhotoImage(icon_image)
+
+        # Set the window icon
+        self.master.iconphoto(False, icon_photo)
 
     def initializeDF(self):
         fixpath = utils.ensure_absolute_path
@@ -960,8 +1271,6 @@ class App():
         self.regr = find_regressions.Regressor(slopes_filename, self.options, self.save_options,
                                                self.specific_options_filename, detailed_output_path)
 
-
-
     def updateValue(self, event):
         self.update()
 
@@ -980,6 +1289,33 @@ class App():
         menubar.add_cascade(label="PageOne", menu=pageMenu)
         return menubar
 
+    def excelWriter(self,df=None):
+        filename = "output/capture_slopes.xls"  # filename for raw output
+        filename_manual = self.manual  # filename for raw output
+        if df is None:
+            df = pd.read_excel(filename)
+        else:
+            df_b = df.copy()
+
+        df_m = pd.read_excel(filename_manual)
+
+        df_b = pd.concat([df_b, df_m])
+        df_b.index = df_b["Unnamed: 0"]
+
+        df_b['date'] = pd.to_datetime(df_b['date'])  # make date column to datetime objects
+        df_b = df_b.sort_values(by=['date'])  # sort all entries by date
+        df = df_b
+
+        df_w  = make_df_weather(df_b['date'].min(),df_b['date'].max())
+        df_b = df_b.sort_values(by=['date'])  # sort all entries by date
+
+    def debugprint_dataframe(self):
+        print("Dataframe:\n")
+        print(self.df)
+
+    def debugprint_specific_options(self):
+        print("Specific options:\n")
+        print(self.specific_options)
     def toExcel(self):
         self.fileSave = tk.filedialog.asksaveasfilename(initialdir=self.outpath, title="Save file",
                                                         filetypes=(("Excel File", ".xlsx"), ("all files", "*.*")))
@@ -1072,13 +1408,11 @@ class App():
         # self.writer.save()
 
     def update(self):
-        self.xint = int(self.XINT.get())  # Update the regression window
         self.setParams()
         self.replot()  # Replot the graph
 
     def reset(self):
-        # self.xint = int()  # regression window
-        #self.var.set(self.specific_options["ALL"]['interval'])
+        self.var.set(self.specific_options["ALL"]['interval'])
         self.sliderMax.set(self.specific_options["ALL"]["stop"])
         self.sliderMin.set(self.specific_options["ALL"]["start"])
         self.method.set(self.specific_options["ALL"]["crit"])
@@ -1087,16 +1421,16 @@ class App():
         else:
             self.C1.deselect()
 
+        if (self.specific_options["ALL"]['exclude'] == True):
+            self.C2.select()
+        else:
+            self.C2.deselect()
+
         if self.fname in self.specific_options:
             del self.specific_options[self.fname]
 
         self.update()
-
-    def sel2(self):
-        self.method.set("steepest")
-
-    def sel1(self):
-        self.method.set("mse")
+        logging.debug("Resetting to default values")
 
     def getParams(self):
         self.fname = self.df.loc[self.nr].filename
@@ -1109,7 +1443,7 @@ class App():
         self.sliderMax.set(self.specific_options[name]["stop"])
         self.method.set(self.specific_options[name]['crit'])
         self.xint = self.specific_options[name]["interval"]
-        self.var = self.xint
+        self.var.set(self.xint)
         if (self.specific_options[name]["co2_guides"] == True):
             self.C1.select()
         else:
@@ -1122,6 +1456,7 @@ class App():
 
 
     def setParams(self):
+        self.xint = int(self.XINT.get())  # Update the regression window
         self.options["start"] = int(self.sliderMin.get())
         self.options["stop"] = int(self.sliderMax.get())
         self.options['crit'] = self.method.get()
@@ -1131,20 +1466,30 @@ class App():
         if self.options != self.specific_options["ALL"]:
             self.specific_options[self.fname] = copy.deepcopy(self.options)
             self.save_specific_options()
-    def save_specific_options(self):
+        else: #pop the key if it is the same as the default
+            if self.fname in self.specific_options:
+                del self.specific_options[self.fname]
+                self.save_specific_options()
+
+    def save_specific_options(self, filepath=None):
+        if filepath == None:
+            filepath = self.specific_options_filename
         if ".pickle" in self.specific_options_filename:
-            with open(self.specific_options_filename, 'wb') as handle:
+            with open(filepath, 'wb') as handle:
                 pickle.dump(self.specific_options, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
     def setDefault(self):
-        self.specific_options["ALL"]["start"] = int(self.sliderMin.get())
-        self.specific_options["ALL"]["stop"] = int(self.sliderMax.get())
-        self.specific_options["ALL"]['crit'] = self.method.get()
-        self.specific_options["ALL"]["interval"] = int(self.XINT.get())
-        self.specific_options["ALL"]["co2_guides"] = int(self.CO2_guide.get())
-        self.specific_options["ALL"]["exclude"] = int(self.exclude.get())
-        self.getParams()
-        self.replot()
+        answer = messagebox.askyesno( "Set Default",
+                         "Are you sure you want to set the current settings as default for all?")
+        if answer:
+            self.specific_options["ALL"]["start"] = int(self.sliderMin.get())
+            self.specific_options["ALL"]["stop"] = int(self.sliderMax.get())
+            self.specific_options["ALL"]['crit'] = self.method.get()
+            self.specific_options["ALL"]["interval"] = int(self.XINT.get())
+            self.specific_options["ALL"]["co2_guides"] = int(self.CO2_guide.get())
+            self.specific_options["ALL"]["exclude"] = int(self.exclude.get())
+            self.getParams()
+            self.replot()
 
     def regress(self):
         self.fname = self.df.loc[self.nr].filename
@@ -1296,7 +1641,7 @@ class App():
                 self.replot()
                 self.update()
 
-    def allplot(self):
+    def allplot(self, opt_df=None):
         def onpick(event):
             time_start = time()
             df = df_b[
@@ -1495,7 +1840,12 @@ class App():
         start = time()
         filename =  self.file_path   # filename for raw output
         filename_manual = self.manual  # filename for raw output
-        df_a = pd.read_excel(filename)  # import excel docuument
+        if opt_df is not None:
+            df_a = opt_df
+            mindate =  pd.to_datetime(df_a.date.min())
+            maxdate =  pd.to_datetime(df_a.date.max())
+        else:
+            df_a = pd.read_excel(filename)  # import excel document
         df_m = pd.read_excel(filename_manual)
         df_b = pd.concat([df_a, df_m])
         df_b.index = df_b["Unnamed: 0"]
@@ -1507,7 +1857,8 @@ class App():
         df_b = df_b.sort_values(by=['date'])  # sort all entries by date
         # df_b = df_b[df_b.side == side]
         df = df_b
-
+        if opt_df is not None:
+            df = df[df["date"]>mindate]
         # fig,axs = plt.subplots(nrows=3, ncols=2,figsize=(15, 12))
         fig = plt.figure(figsize=(15, 10))
         axs = {}
@@ -1541,6 +1892,7 @@ class App():
     def decrease(self):
         # If the measurement counter is above zero, increment with one
         if self.nr > 0:
+            self.setParams()
             self.nr -= 1
             self.getParams()
             self.replot()
@@ -1548,14 +1900,21 @@ class App():
     def increase(self):
         # If the measurement counter is below number of measurements, becrement with one
         if self.nr < self.maxf - 1:
+            self.setParams()
             self.nr += 1
             self.getParams()
             self.replot()
 
-    def dropMeasurement(self):
-        a = 1
     def viewSpecificOptions(self):
-        popup = SpecificOptionsPopup(self.master, self.specific_options, self.on_specific_option_selected)
+        clean_options = self.specific_options.copy()
+        clean_options.pop("settings")
+        SO_df = pd.DataFrame.from_dict(clean_options, orient='index')
+        popup = Dataframe_Filter_Popup(self.master,
+                                       SO_df,
+                                       on_select_callback=self.on_specific_option_selected,
+                                       exportbuttons=False)
+
+
     def on_columns_selected(self, selected):
         logger.info(f"Selected: {selected}")
         if "settings" not in self.specific_options:
@@ -1564,20 +1923,16 @@ class App():
         self.save_specific_options()
 
     def viewDataFrame(self):
-        popup = Dataframe_Filter_Popup(self.master, self.df[self.specific_options["settings"]["columnselection"]], self.on_DF_selected)
+        popup = Dataframe_Filter_Popup(self.master,
+                                       self.df[self.specific_options["settings"]["columnselection"]],
+                                       self.on_DF_selected,
+                                       original_df = self.df,
+                                       exportbuttons=True,
+                                       graphing_callback=self.allplot)
     def on_DF_selected(self, selected_key):
         # Handle the selected key here
         logger.debug(f"Selected file: {selected_key}")
         self.nr = selected_key
-        self.getParams()
-        self.replot()
-        self.update()
-    def on_specific_option_selected(self, selected_key):
-        # Handle the selected key here
-        logger.debug(f"Selected file: {selected_key}")
-        # You can now use selected_key as needed in your main application
-        logger.debug(self.find_by_filename(selected_key))
-        self.nr = self.find_by_filename(selected_key)
         self.getParams()
         self.replot()
         self.update()

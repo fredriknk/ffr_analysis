@@ -12,8 +12,10 @@ sys.path.append(os.path.realpath(os.path.join(os.getcwd(), '../../prog')))
 from ffr_gui import App
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
     logging.getLogger('matplotlib.font_manager').disabled = True
+
+    project_name = 'Capture'
 
     flux_units = {'N2O': {'name': 'N2O_N_mug_m2h', 'factor': 2 * 14 * 1e6 * 3600},
                   'CO2': {'name': 'CO2_C_mug_m2h', 'factor': 12 * 1e6 * 3600}}
@@ -47,5 +49,5 @@ if __name__ == "__main__":
                                    'treatment', 'Tc', 'precip', 'treatment_name']
 
     root = tk.Tk()
-    app = App(root,flux_units,specific_options,treatment_legend,persistent_column_selection)
+    app = App(root,flux_units,specific_options,treatment_legend,persistent_column_selection,project_name)
     root.mainloop()
