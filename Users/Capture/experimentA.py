@@ -17,6 +17,7 @@ from collections import namedtuple
 import numpy as np
 import pylab as plt
 import pandas as pd
+import logging
 pd.options.mode.chained_assignment = None
 pth = os.path.realpath(os.path.join(os.getcwd(), '../../prog'))
 if not pth in sys.path:
@@ -31,19 +32,10 @@ import flux_calculations
 import polygon_utils
 from weather_data_from_metno import update_weather_data, make_data_file
 from yaml import safe_load
-# import ginput_show
-# import textwrap
-# import regression
-# import divide_left_and_right
-# from polygon_utils import plot_rectangles
-# import scipy.stats
-# from statsmodels.formula.api import ols#, rlm
-# from statsmodels.stats.anova import anova_lm
-# import statsmodels.api as sm
-# from scipy.stats import norm
-# import xlwt
-#import shutil
-#import errno
+from ffr_gui import make_dataset
+
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logging.getLogger('matplotlib.font_manager').disabled = True
 
 def read_yaml(file_path = "config.yml"):
     with open(file_path, "r") as f:
@@ -58,7 +50,7 @@ fixpath = utils.ensure_absolute_path
 
 start_date = '2021-08-19'
 stop_date =  '2099-01-01'  #YYYYMMDD  stop_date has to be one day after the last date you want
-redo_regressions =  False
+redo_regressions = False
 
 options = {'interval': 100,
            'start':0,
@@ -200,9 +192,9 @@ for t in sorted(set(df.treatment)):
     d = df[df.treatment==t]
     plt.scatter(d.x-offset.x, d.y-offset.y, s=10, color=colors[t-1], marker=markers[t-1])
 
-plt.axis('square')
-plt.show()
-plt.cla()
+# plt.axis('square')
+# plt.show()
+# plt.cla()
 
 def finalize_df(df, precip_dt=2):
     df['Tc'] = weather_data.data.get_temp(df.t)
@@ -242,6 +234,15 @@ tokeep = ['t', 'date', 'days', 'nr', 'side', 'treatment',
           flux_units['N2O']['name'], flux_units['CO2']['name'],
           'N2O_slope', 'CO2_slope', 'filename']
 df2 = df[tokeep]
+
+print("Making complete dataset")
+df['index1'] = df.index
+df_all,df_weather = make_dataset(df)
+df_all.index=df_all.index1
+#write dataframe to pickle file
+df_all.to_pickle('./output/df_all.pkl')
+df_weather.to_pickle('./output/df_weather.pkl')
+
 try:
     df2.to_excel(excel_filenames[1])
 except:
@@ -259,3 +260,4 @@ def plot_treatment(df, treatment, what="N2O", **kwargs):
 
 def plot_nr(df, nr, what="N2O", **kwargs):
     plot_something(df, 'nr', nr, what, **kwargs)
+

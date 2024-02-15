@@ -1,6 +1,7 @@
 from tkinter import ttk
 import pickle
 import pandas as pd
+from multiprocessing import Process, Queue
 import tkinter as tk
 from tkinter import filedialog, simpledialog,messagebox
 from PIL import Image, ImageTk
@@ -62,23 +63,35 @@ def convert_dict_values(input_dict):
             output_dict[key] = value
     return output_dict
 
-def make_dataset():
-    filename = "output/capture_slopes.xls"  # filename for raw output
-    filename_manual = "output/capture_slopes_manual.xls"  # filename for raw output
-    df_b = pd.read_excel(filename)  # import excel docuument
+def make_dataset(df_in = None,filename_manual=None):
+    if filename_manual is  None:
+        try:
+            filename_manual = read_yaml()["PATHS"]["MANUAL"]
+        except FileNotFoundError:
+            logger.info(resdir.raw_data_path + ' not found')
+            filename_manual = "output/capture_slopes_manual.xls"  # filename for raw output
+    if df_in is None:
+        filename = "output/capture_slopes.xls"
+        df_b = pd.read_excel(filename)  # import excel docuument
+    else:
+        df_b = df_in
+
     df_m = pd.read_excel(filename_manual)
+    df_m["date"]=pd.to_datetime(df_m['date'])+timedelta(hours=12)
+    df_m["type"] = "manual"
+    df_b["type"] = "robot"
     df_b = pd.concat([df_b, df_m])
     df_b.index = df_b["Unnamed: 0"]
 
     df_b['date'] = pd.to_datetime(df_b['date'])  # make date column to datetime objects
     df_b = df_b.sort_values(by=['date'])  # sort all entries by date
     df = df_b
-
+    logging.debug(f"date selection: {df_b['date'].min()} - {df_b['date'].max()}")
     df_w = make_df_weather(df_b['date'].min(), df_b['date'].max())
     #df_w[["HOURS_SINCE_THAW", "HOURS_SINCE_FREEZE", "TEMPC_GROUND"]].plot()
     df_b = df_b.sort_values(by=['date'])  # sort all entries by date
 
-    return pd.merge_asof(df_b, df_w, left_on='date', right_index=True, direction="nearest")
+    return pd.merge_asof(df_b, df_w, left_on='date', right_index=True, direction="nearest"), df_w
 
 def freezethaw(df):
     #FREEZE
@@ -144,8 +157,13 @@ def make_df_weather(date_min,date_max):
 
     param = 'sum(precipitation_amount PT1H)'
     hours = 24
-    df_w["precip" + "_ROLLINGSUM_" + str(hours) + "_H"] = df_w[param].rolling(hours, min_periods=1).sum()
+    precip_column = "precip_ROLLINGSUM_" + str(hours) + "_H"  # Construct the new column name based on 'hours'
 
+    # Calculate the rolling sum and store it in the new column
+    df_w[precip_column] = df_w[param].rolling(hours, min_periods=1).sum()
+
+    # Replace values smaller than 0.1 in the new column with 0
+    df_w[precip_column] = df_w[precip_column].apply(lambda x: 0 if x < 0.1 else x)
     df_w["TEMPC_GROUND_FFILL"] = df_w.TEMPC_GROUND.fillna(method="ffill")
     df_rolling = df_w.rolling(2, min_periods=1)
     df_w["RISING_TEMP_PASS"] = df_rolling.TEMPC_GROUND_FFILL.apply(lambda x: zeropass(x, "rising")).astype("bool")
@@ -185,15 +203,16 @@ def read_yaml(file_path = "config.yml"):
         return safe_load(f)
 
 def make_logger_data():
+    st=time()
     PATHS = read_yaml()["PATHS"]
 
     df_weather = pd.DataFrame.from_dict(dict(weather_data.weather_data_from_metno.get_stored_data())).T
     df_weather.index = pd.to_datetime(df_weather.index, unit='s')
-
+    logger.debug(f"df_loaded took {time() - st} seconds")
     if "LOGGER_PATH" in PATHS:
         loggerfile = PATHS["LOGGER_PATH"]
         df_ = pd.read_excel(loggerfile, skiprows=2)
-        df = df_[['Measurement Time']]
+        logger.debug(f"readexcel@  {time() - st} seconds")
         keys = df_.keys()
         VWC = keys[[i for i, x in enumerate(keys) if "VWC" in x]]
         TEMP = keys[[i for i, x in enumerate(keys) if "°C Temp" in x]]
@@ -207,12 +226,14 @@ def make_logger_data():
 
         df_ground.set_index("Measurement Time",inplace=True)
 
+        logger.debug(f"make_logger_data took {time() - st} seconds")
 
         return pd.concat([df_weather,df_ground], axis=1, join='inner')
 
     else:
         logger.debug("NO LOGGER FILEPATH")
         return df_weather
+
 
 def slopeFromPoints(reg):
     return [[reg.start, reg.stop], [reg.intercept + reg.start * reg.slope, reg.intercept + reg.stop * reg.slope]]
@@ -660,6 +681,8 @@ class Dataframe_Filter_Popup:
         if selected_item:
             logger.debug(selected_item)  # This will now include the DataFrame index
             selected_index = selected_item['values'][0]  # This is the DataFrame index
+            selected_index = float(selected_index)  # Convert string to float
+            selected_index = int(selected_index)  # Convert float to int
             self.on_select_callback(selected_index)
 
 class ColumnSelectionPopup:
@@ -856,8 +879,6 @@ class App():
         self.default_specific_options = specific_options.copy()
         self.initializeDF()
         self.flux_units = flux_units
-
-
         self.maxf = len(self.df)
         self.nr = 0  # measurement number
         self.fname = self.df.iloc[self.nr].filename
@@ -1259,10 +1280,11 @@ class App():
             resdir.raw_data_path = fixpath('raw_data')
 
         df_path = "output/capture_RegressionOutput.xls"
+        df_path = "output/df_all.pkl"
         self.file_path = df_path
 
-        self.df = pd.read_excel(df_path, index_col=0)
-
+        #self.df = pd.read_excel(df_path, index_col=0)
+        self.df = pd.read_pickle(df_path)
         self.df.date = pd.to_datetime(self.df.date, format="%Y%m%d-%H%M%S")
 
         treatment_name_mapping = {key: value['name'] for key, value in self.treatment_legend.items()}
@@ -1642,6 +1664,7 @@ class App():
                 self.update()
 
     def allplot(self, opt_df=None):
+        starttime = time()
         def onpick(event):
             time_start = time()
             df = df_b[
@@ -1833,13 +1856,14 @@ class App():
                 axs["temp"].set_ylabel('Temp\n°C')
                 axs["rain"].set_ylabel('Rain\nMM day⁻¹')
                 axs["rain"].set_xlabel('Date')
-        df_weather = make_logger_data()
+        df_weather = self.df_weather
         treatment_legend = self.treatment_legend
         treatment_df = pd.DataFrame.from_dict(treatment_legend, orient='index')
 
         start = time()
         filename =  self.file_path   # filename for raw output
         filename_manual = self.manual  # filename for raw output
+
         if opt_df is not None:
             df_a = opt_df
             mindate =  pd.to_datetime(df_a.date.min())
@@ -1858,8 +1882,8 @@ class App():
         # df_b = df_b[df_b.side == side]
         df = df_b
         if opt_df is not None:
-            df = df[df["date"]>mindate]
-        # fig,axs = plt.subplots(nrows=3, ncols=2,figsize=(15, 12))
+            df = df[(df["date"] > mindate) & (df["date"] < maxdate)]
+            # df_w = df_w[(df_w["date"] > mindate) & (df_w["date"] < maxdate)]
         fig = plt.figure(figsize=(15, 10))
         axs = {}
 
@@ -1871,8 +1895,10 @@ class App():
         axs["rain"] = plt.subplot(3, 3, (7, 9), sharex=axs["samples"])
         axs["temp"] = axs["rain"].twinx()
 
+        logger.debug(f"Time to make dataset: {time()-start}")
 
         plotDF(df, df_w, axs)
+        logger.debug(f"Time to plot: {time()-start}")
 
         date_min = int(axs["samples"].get_xlim()[0])
         date_max = int(axs["samples"].get_xlim()[1])
@@ -1933,6 +1959,15 @@ class App():
         # Handle the selected key here
         logger.debug(f"Selected file: {selected_key}")
         self.nr = selected_key
+        self.getParams()
+        self.replot()
+        self.update()
+    def on_specific_option_selected(self, selected_key):
+        # Handle the selected key here
+        logger.debug(f"Selected file: {selected_key}")
+        # You can now use selected_key as needed in your main application
+        logger.debug(self.find_by_filename(selected_key))
+        self.nr = self.find_by_filename(selected_key)
         self.getParams()
         self.replot()
         self.update()

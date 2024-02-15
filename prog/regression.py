@@ -21,7 +21,8 @@ class Regression():
                  rsq,
                  pval,
                  min_y,
-                 max_y):
+                 max_y,
+                 first_y=None,):
         self.intercept = intercept
         self.slope = slope
         self.se_intercept = se_intercept
@@ -33,6 +34,7 @@ class Regression():
         self.pval = pval
         self.min_y = min_y
         self.max_y = max_y
+        self.first_y = first_y
 
     def set_start_and_stop(self, start, stop):
         self.start = start
@@ -40,12 +42,16 @@ class Regression():
 
     def __str__(self):
         def f(x):
-            return '{:.5g}'.format(x)
-        s = 'Regr(slope:{}, intercept: {}, se_intercept: {}, se_slope: {}, mse: {}'
-        s += ', start: {}, stop: {}, rsq: {}, pval: {}, min_y: {}, max_y: {})'
-        return s.format(f(self.slope), f(self.intercept), f(self.se_intercept),
-                        f(self.se_slope), f(self.mse), self.start, self.stop,
-                        self.rsq, self.pval, self.min_y, self.max_y)
+            return f'{x:.5g}'
+
+        s = (
+            f'Regr(slope: {f(self.slope)}, intercept: {f(self.intercept)}, '
+            f'se_intercept: {f(self.se_intercept)}, se_slope: {f(self.se_slope)}, '
+            f'mse: {f(self.mse)}, start: {self.start}, stop: {self.stop}, '
+            f'rsq: {self.rsq}, pval: {self.pval}, min_y: {self.min_y}, '
+            f'max_y: {self.max_y}, first_y: {self.first_y})'
+        )
+        return s
 
     def __repr__(self):
         return self.__str__()
@@ -53,7 +59,7 @@ class Regression():
     def to_dict(self): # for saving as json later todo
         return {x: get(self, x) for x in
                 ('intercept', 'slope', 'se_intercept', 'se_slope', 'mse',
-                 'start', 'stop', 'rsq', 'pval', 'min_y', 'max_y')}
+                 'start', 'stop', 'rsq', 'pval', 'min_y', 'max_y', 'first_y')}
 
     
 def mean(x):
@@ -73,6 +79,7 @@ def regression2(x, y, plotfun=False):
     xc = x - mx
     xcxc = np.dot(xc, xc)
     se_intercept = mse * np.sqrt(1.0 / n + mx**2 / xcxc)
+    first_y = y[0]
     se_slope = mse * np.sqrt(1.0 / xcxc)
     min_y = min(y)
     max_y = max(y)
@@ -89,7 +96,7 @@ def regression2(x, y, plotfun=False):
     rsq=r*r #r-squared
     if plotfun:
         plotfun(x, y, '.', x, intercept + slope * x)
-    return Regression(intercept, slope, se_intercept, se_slope, mse, x[0], x[-1], rsq, pval, min_y, max_y)
+    return Regression(intercept, slope, se_intercept, se_slope, mse, x[0], x[-1], rsq, pval, min_y, max_y, first_y)
 
 
 def find_best_regression(x, y, xint, crit='mse', jump=1, plotfun=False):

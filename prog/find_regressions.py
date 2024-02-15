@@ -670,6 +670,7 @@ class Regressor(object):
                 s += '\t{0}_intercept\t{1}'.format(key, regres.intercept)
                 s += '\t{0}_min\t{1}'.format(key, regres.min_y)
                 s += '\t{0}_max\t{1}'.format(key, regres.max_y)
+                s += '\t{0}_first\t{1}'.format(key, regres.first_y)
                 if key=='N2O':
                     s += '\t{0}_quality_check\t{1}'.format(key, regres.quality_check)
             if all(ok):
