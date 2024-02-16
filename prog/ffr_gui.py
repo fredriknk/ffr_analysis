@@ -1,18 +1,17 @@
-from tkinter import ttk
+import copy
+import logging
 import pickle
+from datetime import datetime, date, timedelta
+from time import time
+from tkinter import filedialog, messagebox
+from tkinter import ttk
+import ast
+
+import matplotlib.pyplot as plt
 import pandas as pd
-from multiprocessing import Process, Queue
-import tkinter as tk
-from tkinter import filedialog, simpledialog,messagebox
 from PIL import Image, ImageTk
-
-
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
-from time import time
-from datetime import datetime, date, timedelta
-import matplotlib.pyplot as plt
-import copy
 from matplotlib.lines import Line2D
 from matplotlib.patches import Rectangle
 from matplotlib.text import Text
@@ -21,18 +20,29 @@ from scipy.stats import gmean
 from scipy.stats import gstd
 from yaml import safe_load
 
-import logging
-
-from regression import *
-import weather_data
 import find_regressions
-import utils
-import resdir
-import read_regression_exception_list
 import flux_calculations
+import read_regression_exception_list
+import resdir
+import utils
+import weather_data
+from regression import *
 
 logger = logging.getLogger(__name__)
 
+def check_exclude(option):
+    try:
+        # Safely evaluate the string to a tuple of dictionaries
+        options_tuple = ast.literal_eval(option)
+        # Check each dictionary in the tuple
+        for option_dict in options_tuple:
+            # Check if "exclude" is in the dictionary and its value is 1 or True
+            if "exclude" in option_dict and (option_dict["exclude"] == 1 or option_dict["exclude"] == True):
+                return True
+        return False
+    except:
+        # In case of evaluation error or if the structure is not as expected, do not exclude
+        return False
 def convert_dict_values(input_dict):
     """
     Convert a dictionary with Tkinter StringVar and Listbox objects to a dictionary with string and list values.
@@ -63,8 +73,9 @@ def convert_dict_values(input_dict):
             output_dict[key] = value
     return output_dict
 
-def make_dataset(df_in = None,filename_manual=None):
-    if filename_manual is  None:
+
+def make_dataset(df_in=None, filename_manual=None):
+    if filename_manual is None:
         try:
             filename_manual = read_yaml()["PATHS"]["MANUAL"]
         except FileNotFoundError:
@@ -77,7 +88,7 @@ def make_dataset(df_in = None,filename_manual=None):
         df_b = df_in
 
     df_m = pd.read_excel(filename_manual)
-    df_m["date"]=pd.to_datetime(df_m['date'])+timedelta(hours=12)
+    df_m["date"] = pd.to_datetime(df_m['date']) + timedelta(hours=12)
     df_m["type"] = "manual"
     df_b["type"] = "robot"
     df_b = pd.concat([df_b, df_m])
@@ -88,15 +99,16 @@ def make_dataset(df_in = None,filename_manual=None):
     df = df_b
     logging.debug(f"date selection: {df_b['date'].min()} - {df_b['date'].max()}")
     df_w = make_df_weather(df_b['date'].min(), df_b['date'].max())
-    #df_w[["HOURS_SINCE_THAW", "HOURS_SINCE_FREEZE", "TEMPC_GROUND"]].plot()
+    # df_w[["HOURS_SINCE_THAW", "HOURS_SINCE_FREEZE", "TEMPC_GROUND"]].plot()
     df_b = df_b.sort_values(by=['date'])  # sort all entries by date
 
     return pd.merge_asof(df_b, df_w, left_on='date', right_index=True, direction="nearest"), df_w
 
+
 def freezethaw(df):
-    #FREEZE
+    # FREEZE
     a = df[df.HOURS_SINCE_FREEZE >= 0]
-    plt.scatter(a.HOURS_SINCE_FREEZE,a.N2O_N_mug_m2h.values)
+    plt.scatter(a.HOURS_SINCE_FREEZE, a.N2O_N_mug_m2h.values)
 
     arr = df.groupby(df.HOURS_SINCE_FREEZE).N2O_N_mug_m2h.apply(list)
     ax = plt.subplot()
@@ -104,9 +116,9 @@ def freezethaw(df):
     ax.boxplot(arr)
     plt.show()
 
-    #THAW
+    # THAW
     b = df[df.HOURS_SINCE_THAW >= 0]
-    plt.scatter(b.HOURS_SINCE_THAW,b.N2O_N_mug_m2h.values)
+    plt.scatter(b.HOURS_SINCE_THAW, b.N2O_N_mug_m2h.values)
 
     arr = df.groupby(df.HOURS_SINCE_THAW).N2O_N_mug_m2h.apply(list)
     ax = plt.subplot()
@@ -115,13 +127,14 @@ def freezethaw(df):
     ax.boxplot(arr)
     plt.show()
 
-    arr =df.groupby(df.TEMPC_GROUND.round()).N2O_N_mug_m2h.apply(list)#
+    arr = df.groupby(df.TEMPC_GROUND.round()).N2O_N_mug_m2h.apply(list)  #
     x = df.TEMPC_GROUND
     y = df.N2O_N_mug_m2h
     ax = plt.subplot()
     ax.set_title("TEMP CORR")
-    ax.scatter(x,y)
+    ax.scatter(x, y)
     plt.show()
+
 
 def zeropass(df_, type="rising"):
     a = df_.values[0]
@@ -140,7 +153,8 @@ def zeropass(df_, type="rising"):
 
     return flag
 
-def make_df_weather(date_min,date_max):
+
+def make_df_weather(date_min, date_max):
     df_weather = make_logger_data()
     df_weather = df_weather[date_min:date_max]
     df_w = df_weather
@@ -170,7 +184,7 @@ def make_df_weather(date_min,date_max):
     df_w["FALLING_TEMP_PASS"] = df_rolling.TEMPC_GROUND_FFILL.apply(lambda x: zeropass(x, "falling")).astype("bool")
     df_w["RISING_TEMP_PASS"].iloc[0] = False
     df_w["FALLING_TEMP_PASS"].iloc[0] = False
-    max_hours = 24*10
+    max_hours = 24 * 10
 
     a = df_w["RISING_TEMP_PASS"]
     param = "HOURS_SINCE_THAW"
@@ -185,11 +199,12 @@ def make_df_weather(date_min,date_max):
     df_w[param] = (a.cumsum() - a.cumsum().where(~a).ffill().fillna(0).astype(int))  # .shift(-1)
     df_w.loc[(df_w[param] == df_w[param].shift(-1)), param] = None
     df_w.loc[(df_w[param] > max_hours), param] = None
-    #df_w[["HOURS_SINCE_THAW", "HOURS_SINCE_FREEZE", "TEMPC_GROUND"]].plot()
+    # df_w[["HOURS_SINCE_THAW", "HOURS_SINCE_FREEZE", "TEMPC_GROUND"]].plot()
     df_w[param].iloc[0] = None
     df_w[param].iloc[-1] = None
 
     return df_w
+
 
 def trendline(data, order=1):
     hours = len(data)
@@ -198,12 +213,13 @@ def trendline(data, order=1):
     return float(slope)
 
 
-def read_yaml(file_path = "config.yml"):
+def read_yaml(file_path="config.yml"):
     with open(file_path, "r", encoding='utf-8') as f:
         return safe_load(f)
 
+
 def make_logger_data():
-    st=time()
+    st = time()
     PATHS = read_yaml()["PATHS"]
 
     df_weather = pd.DataFrame.from_dict(dict(weather_data.weather_data_from_metno.get_stored_data())).T
@@ -222,13 +238,13 @@ def make_logger_data():
         df_["TEMPC_GROUND"] = df_[TEMP].mean(axis=1)
         df_["ECC_GROUND"] = df_[ECC].mean(axis=1)
 
-        df_ground = df_[["Measurement Time", "VWC_GROUND", "TEMPC_GROUND","ECC_GROUND"]]
+        df_ground = df_[["Measurement Time", "VWC_GROUND", "TEMPC_GROUND", "ECC_GROUND"]]
 
-        df_ground.set_index("Measurement Time",inplace=True)
+        df_ground.set_index("Measurement Time", inplace=True)
 
         logger.debug(f"make_logger_data took {time() - st} seconds")
 
-        return pd.concat([df_weather,df_ground], axis=1, join='inner')
+        return pd.concat([df_weather, df_ground], axis=1, join='inner')
 
     else:
         logger.debug("NO LOGGER FILEPATH")
@@ -267,7 +283,7 @@ def datecheck(newdate="2022-01-12 12:03:30", dateFormatList=None):
         except ValueError:
             pass
 
-    if date == None:
+    if date is None:
         logger.info("""Parsing error, please use one of theese formats: ['%Y-%m-%dT%H:%M:%S', '%Y-%m-%d %H:%M:%S', '%Y.%m.%d %H:%M:%S', '%Y.%m.%d', '%y.%m.%d', '%Y-%m-%d',
                       '%Y-%m-%d', '%Y%m%d', '%Y%m'""")
         date = datetime.now()
@@ -275,8 +291,7 @@ def datecheck(newdate="2022-01-12 12:03:30", dateFormatList=None):
     return date
 
 
-
-class popupWindow(object):
+class PopupWindow(object):
     def __init__(self, master):
         px = 5
         py = 5
@@ -308,7 +323,6 @@ class popupWindow(object):
         self.cancel = tk.Button(top, text='Cancel', command=self.cancel)
         self.cancel.grid(row=2, column=2, padx=px, pady=py)
 
-
         # self.button.pack()
 
     def cancel(self):
@@ -333,7 +347,7 @@ class SpecificOptionsPopup:
         # Search bar
         dict_copy = copy.deepcopy(self.specific_options)
         dict_copy.pop("settings", None)
-        self.search_var =tk.StringVar()
+        self.search_var = tk.StringVar()
         self.search_var.trace("w", lambda name, index, mode, sv=self.search_var: self.update_table())
         tk.Entry(self.top, textvariable=self.search_var).pack()
 
@@ -373,13 +387,13 @@ class SpecificOptionsPopup:
         for key, values in self.specific_options.items():
             if search_term in key.lower():
                 row_data = [values[col] for col in self.tree['columns'][1:]]  # Skip the first 'Key' column
-                self.tree.insert('',tk.END, values=[key] + row_data)
+                self.tree.insert('', tk.END, values=[key] + row_data)
 
     def update_table_from_dataframe(self, search_term):
         for index, row in self.specific_options.iterrows():
             if search_term in str(row['Key']).lower():
                 row_data = [row[col] for col in self.tree['columns']]
-                self.tree.insert('',tk.END, values=row_data)
+                self.tree.insert('', tk.END, values=row_data)
 
     def on_tree_select(self, event):
         selected_item = self.tree.item(self.tree.selection())
@@ -394,8 +408,10 @@ class SpecificOptionsPopup:
             self.tree.move(k, '', index)
         self.tree.heading(col, command=lambda: self.treeview_sort_column(col, not reverse))
 
+
 class Dataframe_Filter_Popup:
-    def __init__(self, master, data_frame, on_select_callback,original_df = None, exportbuttons=False, export_callback=None,graphing_callback=None):
+    def __init__(self, master, data_frame, on_select_callback, original_df=None, exportbuttons=False,
+                 export_callback=None, graphing_callback=None):
         self.top = tk.Toplevel(master)
         if original_df is None:
             self.original_df = data_frame.copy()
@@ -404,6 +420,7 @@ class Dataframe_Filter_Popup:
         self.filtered_df = data_frame  # This will hold the filtered DataFrame
         self.exportbuttons = exportbuttons
         self.on_select_callback = on_select_callback
+        self.export_callback = export_callback
         self.graphing_callback = graphing_callback
         self.filter_values = {}
         self.create_widgets()
@@ -429,7 +446,6 @@ class Dataframe_Filter_Popup:
             # Cumsum Button
             self.cumsum_button = tk.Button(action_frame, text="Show Cumulative Sum", command=self.show_cumsum)
             self.cumsum_button.grid(row=0, column=1, padx=5)
-
 
         # Toggle Filters Button
         self.toggle_filters_button = tk.Button(action_frame, text="Hide Filters", command=self.toggle_filters)
@@ -500,7 +516,7 @@ class Dataframe_Filter_Popup:
         # Apply the filters to get the filtered DataFrame
         filtered_df = self.apply_filters()
         # Call the callback function with the filtered DataFrame
-        #self.on_select_callback(filtered_df)
+        self.export_callback(filtered_df)
 
         output_dict = convert_dict_values(self.filter_values)
 
@@ -509,12 +525,13 @@ class Dataframe_Filter_Popup:
 
     def show_cumsum(self):
         # Apply the filters to get the filtered DataFrame
-        filtered_df = self.apply_filters(self.original_df,no_culumn_filter=True)
+        filtered_df = self.apply_filters(self.original_df, no_culumn_filter=True)
         # Call the callback function with the filtered DataFrame
         output_dict = convert_dict_values(self.filter_values)
         logging.info(f"Data passed to callback function {output_dict}")
         logging.debug(f'Filtered DataFrame:\n{filtered_df.iloc[0]}\n...\n{filtered_df.iloc[-1]}')
         self.graphing_callback(filtered_df)
+
     def toggle_filters(self):
         # Toggle the visibility of the filters frame
         if self.filters_visible:
@@ -578,8 +595,6 @@ class Dataframe_Filter_Popup:
 
         # Starting column position for checkboxes
         col_position = 1
-        # Starting column position for checkboxes
-        col_position = 1
 
         # Counter to track the number of checkboxes in the current row
         checkboxes_in_row = 0
@@ -604,9 +619,10 @@ class Dataframe_Filter_Popup:
                 row += 1
                 col_position = 1
                 checkboxes_in_row = 0
-        self.row =row+1  # Increment the row counter for the next filter
+        self.row = row + 1  # Increment the row counter for the next filter
         # Store the checkbox variables in filter_values
         self.filter_values[col] = {'checkboxes': checkbox_vars}
+
     def set_today(self, col, start_var, end_var):
         today = date.today()
         start_var.set(today.strftime('%Y-%m-%d'))
@@ -629,7 +645,7 @@ class Dataframe_Filter_Popup:
                 # Format numbers based on their value
                 row_data = [index] + [
                     f"{val:.1f}" if isinstance(val, float) and abs(val) == 0 else
-                    f"{val:.0f}" if isinstance(val, int ) else
+                    f"{val:.0f}" if isinstance(val, int) else
                     f"{val:.2e}" if isinstance(val, (int, float)) and abs(val) < minval else
                     f"{val:.2f}" if isinstance(val, (int, float)) else val
                     for val in row
@@ -642,17 +658,18 @@ class Dataframe_Filter_Popup:
         self.tree.tag_configure('oddrow', background='lightgrey')
         self.tree.tag_configure('evenrow', background='white')
 
-    def apply_filters(self,df_input = None,no_culumn_filter=False):
+    def apply_filters(self, df_input=None, no_culumn_filter=False):
         if df_input is None:
             df = self.filtered_df.copy()
         else:
             df = df_input.copy()
-        logging.debug(f"Applying filters to DataFrame with { self.filter_values.items()} rows")
+        logging.debug(f"Applying filters to DataFrame with {self.filter_values.items()} rows")
         for col, filters in self.filter_values.items():
             if 'checkboxes' in filters:
                 # Handle checkbox filters
 
-                selected_values = [self.convert_to_numeric(value) for value, var in filters['checkboxes'].items() if var.get()]
+                selected_values = [self.convert_to_numeric(value) for value, var in filters['checkboxes'].items() if
+                                   var.get()]
                 logging.debug(f"Selected values for {col}: {selected_values}")
                 if selected_values:
                     df = df[df[col].isin(selected_values)]
@@ -676,33 +693,39 @@ class Dataframe_Filter_Popup:
         except (ValueError, TypeError):
             # If conversion fails, return the original value
             return value
+
     def on_tree_select(self, event):
         selected_item = self.tree.item(self.tree.selection())
         if selected_item:
             logger.debug(selected_item)  # This will now include the DataFrame index
             selected_index = selected_item['values'][0]  # This is the DataFrame index
-            selected_index = float(selected_index)  # Convert string to float
-            selected_index = int(selected_index)  # Convert float to int
             self.on_select_callback(selected_index)
 
+
 class ColumnSelectionPopup:
-    def __init__(self, master, all_columns, on_submit_callback, preselected_columns=None,default_columns=None):
+    def __init__(self, master, all_columns, on_submit_callback, preselected_columns=None, default_columns=None,
+                 non_uncheckable_columns=None):
         self.top = tk.Toplevel(master)
         self.all_columns = all_columns
-        self.default_columns = default_columns if preselected_columns is not None else []
+        self.default_columns = default_columns if default_columns is not None else []
         self.preselected_columns = preselected_columns if preselected_columns is not None else []
+        self.non_uncheckable_columns = non_uncheckable_columns if non_uncheckable_columns is not None else {}
         self.on_submit_callback = on_submit_callback
         self.selected_columns = []
         self.create_widgets()
+
     def create_widgets(self):
         # Determine grid layout dimensions
-        num_cols = 3  # You can adjust the number of columns as needed
+        num_cols = 3  # Adjust the number of columns as needed
         num_rows = (len(self.all_columns) + num_cols - 1) // num_cols
 
         for index, col in enumerate(self.all_columns):
-            is_checked = col in self.preselected_columns
+            is_checked = col in self.preselected_columns or col in self.non_uncheckable_columns
             var = tk.BooleanVar(value=is_checked)
-            chk = tk.Checkbutton(self.top, text=col, variable=var)
+            chk = tk.Checkbutton(self.top, text=col, variable=var, onvalue=True, offvalue=False)
+            if col in self.non_uncheckable_columns:
+                # Disable the checkbutton for non-uncheckable columns
+                chk.configure(state='disabled')
             # Arrange checkboxes in a grid
             chk.grid(row=index // num_cols, column=index % num_cols, sticky='w')
             self.selected_columns.append((col, var))
@@ -714,19 +737,24 @@ class ColumnSelectionPopup:
         default_button.grid(row=num_rows, column=1)
         deselect_button = tk.Button(self.top, text="Deselect All", command=self.deselect)
         deselect_button.grid(row=num_rows, column=2)
+
     def deselect(self):
         self.on_submit_callback([])
         self.top.destroy()
+
     def default_settings(self):
         self.on_submit_callback(self.default_columns)
         self.top.destroy()
+
     def submit(self):
-        selected = [col for col, var in self.selected_columns if var.get()]
+        selected = [col for col, var in self.selected_columns if var.get() or col in self.non_uncheckable_columns]
         self.on_submit_callback(selected)
         self.top.destroy()
 
+
 import tkinter as tk
 from tkinter import filedialog
+
 
 class FileDialogHelper:
     def __init__(self):
@@ -755,7 +783,8 @@ class FileDialogHelper:
 
         return file_path
 
-    def save_file_dialog(self, default_location=None, default_filename="", default_extension="", filetypes=(("All files", "*.*"),)):
+    def save_file_dialog(self, default_location=None, default_filename="", default_extension="",
+                         filetypes=(("All files", "*.*"),)):
         """
         Opens a save file dialog and returns the selected file path. Allows specifying a default location and filename.
 
@@ -784,6 +813,8 @@ class FileDialogHelper:
         root.destroy()  # Close the hidden main window
 
         return file_path
+
+
 class ExportSettingsPopup:
     def __init__(self, master, specific_options, on_confirm):
         self.top = tk.Toplevel(master)
@@ -814,6 +845,7 @@ class ExportSettingsPopup:
         # Close the popup
         self.top.destroy()
 
+
 class ExcelExporter:
     def __init__(self, initial_dir='/', filename="default.xlsx"):
         self.default_dir = initial_dir
@@ -838,7 +870,27 @@ class ExcelExporter:
             filepath += '.xlsx'
         return filepath
 
-    def to_excel(self, df, average=True):
+    def show_saving_window(self):
+        """
+        Displays a window indicating that the file is currently being saved.
+        """
+        self.saving_window = tk.Tk()
+        self.saving_window.title("Saving...")
+        tk.Label(self.saving_window, text="Saving the Excel file, please wait...").pack(padx=20, pady=20)
+        # Use `after` method to run the saving process after the window is displayed
+        self.saving_window.after(100, self.to_excel, self.df, self.average)
+        self.saving_window.mainloop()
+
+    def update_saving_window(self, message):
+        """
+        Updates the saving window with a new message and then destroys it after a short delay.
+        """
+        for widget in self.saving_window.winfo_children():
+            widget.destroy()
+        tk.Label(self.saving_window, text=message).pack(padx=20, pady=20)
+        self.saving_window.after(2000, self.saving_window.destroy)
+
+    def to_excel(self, df, average=False, byplot=False):
         """
         Export data to an Excel file, with optional averaging.
 
@@ -846,34 +898,80 @@ class ExcelExporter:
         df (pd.DataFrame): The DataFrame to export.
         average (bool): Whether to average the data by day.
         """
+        self.df = df
+        self.average = average
+        self.byplot = byplot
         filepath = self.save_file_dialog()
         if not filepath:
             print("File save cancelled.")
+            self.update_saving_window("File save cancelled.")
             return
 
-        # Combine your data processing here
-        # Assuming `df` is your DataFrame to be exported
+        self.saving_window = tk.Toplevel()
+        self.saving_window.title("Saving...")
+        label = tk.Label(self.saving_window, text="Saving the Excel file, please wait...")
+        label.pack(padx=20, pady=20)
 
-        with pd.ExcelWriter(filepath) as writer:
-            if average:
-                # Perform your averaging and export logic here
-                pass  # Replace with actual logic
-            else:
-                # Export without averaging logic here
-                pass  # Replace with actual logic
+        try:
+            self.update_saving_window("Writing to file!")
+            with pd.ExcelWriter(filepath) as writer:
+                if self.byplot:
+                    if self.average:
+                        for plotno in np.sort(df.nr.unique()):
+                            logging.info(f"Writing plot {plotno} to Excel file.")
+                            plot = df[df['nr'] == plotno]
+                            avg_plot = plot.groupby(
+                                pd.Grouper(key='date', freq='D')).mean()  # select the data from plot 2
+                            avg_plot = avg_plot[avg_plot['N2O_N_mug_m2h'].notna()]
+                            avg_plot["date"] = avg_plot.index
 
-    # Example methods `to_excel_with_avg` and `to_excel_no_avg` can be specific implementations
-    # or simply call `to_excel(df, average=True/False)` with appropriate parameters.
+                            n2o_avg_data = avg_plot['N2O_N_mug_m2h'].dropna() * 10000 / 1e9
+                            n2o_avg = n2o_avg_data.rolling(window=2).mean()
+                            n2o_avg.iloc[0] = 0.
+
+                            timediff = avg_plot["date"].diff() / pd.Timedelta(hours=1)
+                            timediff.iloc[0] = 0.
+                            timediff.name = "timediff_hours"
+
+                            n2o_sum = n2o_avg * timediff
+                            n2o_int = n2o_sum.cumsum()
+                            n2o_int.name = "cumsum_n20"
+                            # tot_n2o_sum = np.append(tot_n2o_sum, n2o_sum.sum())
+                            plot.index = plot.date
+                            n2o_int.index = avg_plot.date
+
+                            tmp_df = pd.concat(
+                                [avg_plot['nr'],
+                                 avg_plot['treatment'],
+                                 avg_plot['N2O_N_mug_m2h'],
+                                 avg_plot['CO2_C_mug_m2h'],
+                                 timediff,
+                                 n2o_int], axis=1)
+                            tmp_df.to_excel(writer, str(plotno))
+                    else:
+                        for plotno in np.sort(df.nr.unique()):
+                            logging.info(f"Writing plot {plotno} to Excel file.")
+                            plot = df[df['nr'] == plotno]
+                            plot.to_excel(writer, str(plotno))
+                else:
+                    df.to_excel(writer, "All Data")
+                logging.info("Data saved to Excel file.")
+        except Exception as e:
+            # Handle exceptions and display error message
+            logging.error(f"Error saving data to Excel file: {e}")
+
+
 class App():
 
-    def __init__(self, master,flux_units,specific_options,treatment_legend,persistent_column_selection,project_name=""):
+    def __init__(self, master, flux_units, specific_options, treatment_legend, persistent_column_selection,
+                 project_name="", non_uncheckable_columns=None):
         # Create the GUI container
         super().__init__()
         self.master = master
         self.master.title(f"FFR Analyzer 1.0 - {project_name}")
         self.project_name = project_name
         self.file_dialog_helper = FileDialogHelper()
-
+        self.non_uncheckable_columns = non_uncheckable_columns
         self.treatment_legend = treatment_legend
         self.specific_options = specific_options
         self.default_specific_options = specific_options.copy()
@@ -889,10 +987,11 @@ class App():
         self.CO2_guide = tk.IntVar()
         self.exclude = tk.IntVar()
         if persistent_column_selection == None:
-             self.persistent_column_selection = ['date', 'CO2_slope', 'CO2_rsq', 'N2O_slope', 'N2O_rsq', 'treatment', 'Tc', 'precip', 'treatment_name']
-             self.default_persistent_column_selection=self.persistent_column_selection
+            self.persistent_column_selection = ['date', 'CO2_slope', 'CO2_rsq', 'N2O_slope', 'N2O_rsq', 'treatment',
+                                                'Tc', 'precip', 'treatment_name']
+            self.default_persistent_column_selection = self.persistent_column_selection
         else:
-            self.persistent_column_selection=persistent_column_selection
+            self.persistent_column_selection = persistent_column_selection
             self.default_persistent_column_selection = persistent_column_selection
 
         self.set_window_icon("../../prog/resources/ffr_logo_32p.png")
@@ -1164,7 +1263,9 @@ class App():
 
     def open_file(self):
         open_file_path = self.file_dialog_helper.open_file_dialog(default_location="./picklebackup",
-                                                                  filetypes=(("Pickle Files", "*.pickle"),("all files", "*.*"))
+                                                                  filetypes=(
+                                                                      ("Pickle Files", "*.pickle"),
+                                                                      ("all files", "*.*"))
                                                                   )
         logger.info(open_file_path)
         if open_file_path:
@@ -1183,13 +1284,14 @@ class App():
     def save_file(self):
         filename = f"{datetime.now().strftime('%Y%m%d-%H%M%S')}_{self.project_name}_specific_options.pickle"
         save_file_path = self.file_dialog_helper.save_file_dialog(default_location="./picklebackup",
-                                                                    default_filename=filename,
-                                                                    default_extension=".pickle",
-                                                                    filetypes=(("Pickle Files", "*.pickle"),))
+                                                                  default_filename=filename,
+                                                                  default_extension=".pickle",
+                                                                  filetypes=(("Pickle Files", "*.pickle"),))
         logger.info(save_file_path)
         if save_file_path:
             self.setParams()
             self.save_specific_options(save_file_path)
+
     def check_specific_options(self):
         # Check if the specific options dictionary has the necessary keys
         # If not, add the missing keys with default values
@@ -1211,14 +1313,15 @@ class App():
     def column_selection(self):
         try:
             self.persistent_column_selection = self.specific_options["settings"]["columnselection"]
-        except:
-            logger.info("No column selection in config file")
+        except KeyError as e:
+            logger.info(f"No column selection in config file error:{e}")
         column_selection_popup = ColumnSelectionPopup(
             self.master,
             self.df.columns,
             self.on_columns_selected,
             preselected_columns=self.persistent_column_selection,
-            default_columns=self.default_persistent_column_selection
+            default_columns=self.default_persistent_column_selection,
+            non_uncheckable_columns=self.non_uncheckable_columns
         )
 
     def quit(self):
@@ -1245,17 +1348,17 @@ class App():
 
         slopes_filename = fixpath("output/capture_slopes.txt")
 
-        if  ".pickle" in self.specific_options_filename:
+        if ".pickle" in self.specific_options_filename:
             try:
                 self.specific_options = read_regression_exception_list.open_pickle_file(self.specific_options_filename)
                 logger.info("Loaded specific options from pickle file")
-            except:
-                read_regression_exception_list.save_pickle_file(self.specific_options_filename,  self.specific_options)
-                logger.info("Saved default specific options to new pickle file")
+            except FileNotFoundError as e:
+                read_regression_exception_list.save_pickle_file(self.specific_options_filename, self.specific_options)
+                logger.info(f"Saved default specific options to new pickle file, error{e}")
         else:
             self.specific_options = read_regression_exception_list.parse_xls_file(self.specific_options_filename)
 
-        #Adding exclude to all entries for backwards compatibility
+        # Adding exclude to all entries for backwards compatibility
         for entry in self.specific_options:
             if entry != "settings":
                 if 'exclude' not in self.specific_options[entry]:
@@ -1274,7 +1377,7 @@ class App():
         try:
             resdir.raw_data_path = read_yaml()["PATHS"]['RAWDATA']
             self.raw_data = read_yaml()["PATHS"]['RAWDATA']
-            self.manual =  read_yaml()["PATHS"]["MANUAL"]
+            self.manual = read_yaml()["PATHS"]["MANUAL"]
         except FileNotFoundError:
             logger.info(resdir.raw_data_path + ' not found')
             resdir.raw_data_path = fixpath('raw_data')
@@ -1283,13 +1386,12 @@ class App():
         df_path = "output/df_all.pkl"
         self.file_path = df_path
 
-        #self.df = pd.read_excel(df_path, index_col=0)
+        # self.df = pd.read_excel(df_path, index_col=0)
         self.df = pd.read_pickle(df_path)
         self.df.date = pd.to_datetime(self.df.date, format="%Y%m%d-%H%M%S")
-
+        self.weather_df = pd.read_pickle("./output/df_weather.pkl")
         treatment_name_mapping = {key: value['name'] for key, value in self.treatment_legend.items()}
         self.df['treatment_name'] = self.df['treatment'].map(treatment_name_mapping)
-        self.df_untouched = self.df.copy()
         self.regr = find_regressions.Regressor(slopes_filename, self.options, self.save_options,
                                                self.specific_options_filename, detailed_output_path)
 
@@ -1297,12 +1399,7 @@ class App():
         self.update()
 
     def cumsumgraph(self):
-        # self.fileSave = tk.filedialog.asksaveasfilename(initialdir=currDir, initialfile=f[self.nr], title="Save Graph",
-        #                                                 filetypes=(("PNG", ".png"), ("all files", "*.*")))
-        # if self.fileSave == "":
-        #     return
-        # self.fig.savefig(self.fileSave + ".png")
-        self.allplot()
+        self.allplot(self.df, self.weather_df)
 
     def menubar(self, root):
         menubar = tk.Menu(root)
@@ -1311,26 +1408,6 @@ class App():
         menubar.add_cascade(label="PageOne", menu=pageMenu)
         return menubar
 
-    def excelWriter(self,df=None):
-        filename = "output/capture_slopes.xls"  # filename for raw output
-        filename_manual = self.manual  # filename for raw output
-        if df is None:
-            df = pd.read_excel(filename)
-        else:
-            df_b = df.copy()
-
-        df_m = pd.read_excel(filename_manual)
-
-        df_b = pd.concat([df_b, df_m])
-        df_b.index = df_b["Unnamed: 0"]
-
-        df_b['date'] = pd.to_datetime(df_b['date'])  # make date column to datetime objects
-        df_b = df_b.sort_values(by=['date'])  # sort all entries by date
-        df = df_b
-
-        df_w  = make_df_weather(df_b['date'].min(),df_b['date'].max())
-        df_b = df_b.sort_values(by=['date'])  # sort all entries by date
-
     def debugprint_dataframe(self):
         print("Dataframe:\n")
         print(self.df)
@@ -1338,97 +1415,6 @@ class App():
     def debugprint_specific_options(self):
         print("Specific options:\n")
         print(self.specific_options)
-    def toExcel(self):
-        self.fileSave = tk.filedialog.asksaveasfilename(initialdir=self.outpath, title="Save file",
-                                                        filetypes=(("Excel File", ".xlsx"), ("all files", "*.*")))
-
-        if self.fileSave == "":
-            return
-
-        filename = "output/capture_slopes.xls"  # filename for raw output
-        filename_manual = self.manual  # filename for raw output
-        df_b = pd.read_excel(filename)  # import excel docuument
-        df_m = pd.read_excel(filename_manual)
-        df_b = pd.concat([df_b, df_m])
-        df_b.index = df_b["Unnamed: 0"]
-
-        df_b['date'] = pd.to_datetime(df_b['date'])  # make date column to datetime objects
-        df_b = df_b.sort_values(by=['date'])  # sort all entries by date
-        df = df_b
-        df_w = make_df_weather(df_b['date'].min(),df_b['date'].max())
-
-        self.fileSave = self.fileSave.replace(".xlsx", "")
-        self.fileSave = self.fileSave.replace(".xls", "")
-
-        with pd.ExcelWriter(self.fileSave+".xlsx") as writer:
-            for plotno in np.sort(df.nr.unique()):
-                plot = df[df['nr'] == plotno]
-                avg_plot = plot.groupby(pd.Grouper(key='date', freq='D')).mean()  # select the data from plot 2
-                avg_plot = avg_plot[avg_plot['N2O_N_mug_m2h'].notna()]
-                avg_plot["date"] = avg_plot.index
-
-                n2o_avg_data = avg_plot['N2O_N_mug_m2h'].dropna() * 10000 / 1e9
-                n2o_avg = n2o_avg_data.rolling(window=2).mean()
-                n2o_avg.iloc[0] = 0.
-
-                timediff = avg_plot["date"].diff() / pd.Timedelta(hours=1)
-                timediff.iloc[0] = 0.
-                timediff.name = "timediff_hours"
-
-                n2o_sum = n2o_avg * timediff
-                n2o_int = n2o_sum.cumsum()
-                n2o_int.name = "cumsum_n20"
-                # tot_n2o_sum = np.append(tot_n2o_sum, n2o_sum.sum())
-                plot.index = plot.date
-                n2o_int.index = avg_plot.date
-
-                tmp_df = pd.concat(
-                                [avg_plot['nr'],
-                                avg_plot['treatment'],
-                                avg_plot['N2O_N_mug_m2h'],
-                                avg_plot['CO2_C_mug_m2h'],
-                                timediff,
-                                n2o_int], axis=1)
-                tmp_df.to_excel(writer,str(plotno))
-
-    def toExcel_noavg(self):
-        self.fileSave = tk.filedialog.asksaveasfilename(initialdir=self.outpath, title="Save file",
-                                                        filetypes=(("Excel File", ".xlsx"), ("all files", "*.*")))
-
-        if self.fileSave == "":
-            return
-
-        filename = "output/capture_slopes.xls"  # filename for raw output
-        filename_manual = self.manual  # filename for raw output
-        df_b = pd.read_excel(filename)  # import excel docuument
-        df_m = pd.read_excel(filename_manual)
-        df_b = pd.concat([df_b, df_m])
-        df_b.index = df_b["Unnamed: 0"]
-
-        df_b['date'] = pd.to_datetime(df_b['date'])  # make date column to datetime objects
-        df_b = df_b.sort_values(by=['date'])  # sort all entries by date
-        df = df_b
-
-        df_w  = make_df_weather(df_b['date'].min(),df_b['date'].max())
-        df_b = df_b.sort_values(by=['date'])  # sort all entries by date
-
-        df = pd.merge_asof(df_b,df_w,left_on='date',right_index=True,direction="nearest")
-
-        self.fileSave = self.fileSave.replace(".xlsx", "")
-        self.fileSave = self.fileSave.replace(".xls", "")
-
-        logger.info(self.fileSave)
-
-        with pd.ExcelWriter(self.fileSave + ".xlsx") as writer:
-            for plotno in np.sort(df.nr.unique()):
-                plot = df[df['nr'] == plotno]
-                plot.to_excel(writer, str(plotno))
-
-
-        # self.writer = pd.ExcelWriter(self.fileSave + ".xlsx")
-        # self.df.to_excel(self.writer, 'Sheet1')
-        # self.writer.save()
-
     def update(self):
         self.setParams()
         self.replot()  # Replot the graph
@@ -1438,12 +1424,12 @@ class App():
         self.sliderMax.set(self.specific_options["ALL"]["stop"])
         self.sliderMin.set(self.specific_options["ALL"]["start"])
         self.method.set(self.specific_options["ALL"]["crit"])
-        if (self.specific_options["ALL"]["co2_guides"] == True):
+        if self.specific_options["ALL"]["co2_guides"]:
             self.C1.select()
         else:
             self.C1.deselect()
 
-        if (self.specific_options["ALL"]['exclude'] == True):
+        if self.specific_options["ALL"]['exclude']:
             self.C2.select()
         else:
             self.C2.deselect()
@@ -1466,16 +1452,15 @@ class App():
         self.method.set(self.specific_options[name]['crit'])
         self.xint = self.specific_options[name]["interval"]
         self.var.set(self.xint)
-        if (self.specific_options[name]["co2_guides"] == True):
+        if self.specific_options[name]["co2_guides"]:
             self.C1.select()
         else:
             self.C1.deselect()
-        if (self.specific_options[name]["exclude"] == True):
+        if self.specific_options[name]["exclude"]:
             self.C2.select()
         else:
             self.C2.deselect()
         self.update()
-
 
     def setParams(self):
         self.xint = int(self.XINT.get())  # Update the regression window
@@ -1485,10 +1470,11 @@ class App():
         self.options["interval"] = int(self.XINT.get())
         self.options['co2_guides'] = int(self.CO2_guide.get())
         self.options['exclude'] = int(self.exclude.get())
+        self.df.loc[self.nr]["exclude"] = int(self.exclude.get())
         if self.options != self.specific_options["ALL"]:
             self.specific_options[self.fname] = copy.deepcopy(self.options)
             self.save_specific_options()
-        else: #pop the key if it is the same as the default
+        else:  # pop the key if it is the same as the default
             if self.fname in self.specific_options:
                 del self.specific_options[self.fname]
                 self.save_specific_options()
@@ -1501,8 +1487,8 @@ class App():
                 pickle.dump(self.specific_options, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
     def setDefault(self):
-        answer = messagebox.askyesno( "Set Default",
-                         "Are you sure you want to set the current settings as default for all?")
+        answer = messagebox.askyesno("Set Default",
+                                     "Are you sure you want to set the current settings as default for all?")
         if answer:
             self.specific_options["ALL"]["start"] = int(self.sliderMin.get())
             self.specific_options["ALL"]["stop"] = int(self.sliderMax.get())
@@ -1576,16 +1562,18 @@ class App():
 
         # Update all of the text boxes
         self.UpdateText("SampleNo", self.nr)
-        self.UpdateText("CO2_MUG", str("%.1f" % (flux_calculations.calc_flux(reg["CO2"].slope,self.df_reg["Tc"]) * self.flux_units["CO2"]["factor"])))
-        self.UpdateText("N2O_MUG", str("%.3f" % (flux_calculations.calc_flux(reg["N2O"].slope,self.df_reg["Tc"]) * self.flux_units["N2O"]["factor"])))
-        self.UpdateText("CO2_SLOPE", str("%.2e" %(reg["CO2"].slope)))
-        self.UpdateText("N2O_SLOPE", str("%.2e" %(reg["N2O"].slope)))
-        self.UpdateText("mse_CO2", str("%.2e" %(reg["CO2"].mse)))
-        self.UpdateText("mse_N2O", str("%.2e" %(reg["N2O"].mse)))
-        self.UpdateText("rsq_CO2", str("%.2f" %(reg["CO2"].rsq)))
-        self.UpdateText("rsq_N2O", str("%.2f" %(reg["N2O"].rsq)))
-        self.UpdateText("diff_CO2", str("%.2e" %(reg["CO2"].max_y - reg["CO2"].min_y)))
-        self.UpdateText("diff_N2O", str("%.2e" %(reg["N2O"].max_y - reg["N2O"].min_y)))
+        self.UpdateText("CO2_MUG",
+                        f"{flux_calculations.calc_flux(reg['CO2'].slope, self.df_reg['Tc']) * self.flux_units['CO2']['factor']:.1f}")
+        self.UpdateText("N2O_MUG",
+                        f"{flux_calculations.calc_flux(reg['N2O'].slope, self.df_reg['Tc']) * self.flux_units['N2O']['factor']:.3f}")
+        self.UpdateText("CO2_SLOPE", f"{reg['CO2'].slope:.2e}")
+        self.UpdateText("N2O_SLOPE", f"{reg['N2O'].slope:.2e}")
+        self.UpdateText("mse_CO2", f"{reg['CO2'].mse:.2e}")
+        self.UpdateText("mse_N2O", f"{reg['N2O'].mse:.2e}")
+        self.UpdateText("rsq_CO2", f"{reg['CO2'].rsq:.2f}")
+        self.UpdateText("rsq_N2O", f"{reg['N2O'].rsq:.2f}")
+        self.UpdateText("diff_CO2", f"{reg['CO2'].max_y - reg['CO2'].min_y:.2e}")
+        self.UpdateText("diff_N2O", f"{reg['N2O'].max_y - reg['N2O'].min_y:.2e}")
         self.UpdateText("side_box", self.df_reg["side"])
         self.UpdateText("airTemp", self.df_reg["Tc"])
         self.UpdateText("precip", self.df_reg["precip"])
@@ -1593,13 +1581,10 @@ class App():
         self.UpdateText("Treatment NO", self.df_reg["treatment"])
         self.UpdateText("Treatment Name", self.treatment_legend[self.df_reg["treatment"]]["name"])
         # Update all of the plot lines
-        self.title = (self.name +
-                      "\n" + str(self.tmpRegression) + "\n" +
-                      "AirTemp: %.1f degC     GroundTemp: %.1f degC         EC: %.3f          VWC: %.3f" %
-                      (1,
-                       2,
-                       3,
-                       4))
+        self.title = (f"{self.name}\n"
+                      f"{str(self.tmpRegression)}\n"
+                      f"AirTemp: {1:.1f} degC     GroundTemp: {2:.1f} degC         EC: {3:.3f}          VWC: {4:.3f}")
+
         slopeSegments = self.segments["CO2"]
         slopeLine = slopeFromPoints(reg["CO2"])
 
@@ -1611,9 +1596,9 @@ class App():
         self.CO2line3.set_xdata(slopeLine[0])  # Update regression values
         self.CO2line3.set_ydata(slopeLine[1])  # Update regression values
 
-        self.CO2start.set_xdata([self.options["start"]]*2)
+        self.CO2start.set_xdata([self.options["start"]] * 2)
         self.CO2start.set_ydata([np.min(slopeSegments[1]), np.max(slopeSegments[1])])
-        self.CO2stop.set_xdata([self.options["stop"]]*2)
+        self.CO2stop.set_xdata([self.options["stop"]] * 2)
         self.CO2stop.set_ydata([np.min(slopeSegments[1]), np.max(slopeSegments[1])])
 
         slopeSegments = self.segments["N2O"]
@@ -1639,7 +1624,7 @@ class App():
         self.canvas.draw()  # Draw the figure
 
     def goto(self):
-        self.w = popupWindow(self.master)
+        self.w = PopupWindow(self.master)
         self.master.wait_window(self.w.top)
         if not self.w.cancel:
             newnr = self.w.value
@@ -1658,13 +1643,14 @@ class App():
                 self.replot()
                 self.update()
             else:
-                self.nr = abs((datetime.now()-self.df['date'])).idxmin()
+                self.nr = abs((datetime.now() - self.df['date'])).idxmin()
                 self.getParams()
                 self.replot()
                 self.update()
 
-    def allplot(self, opt_df=None):
+    def allplot(self, opt_df=None, df_w=None):
         starttime = time()
+
         def onpick(event):
             time_start = time()
             df = df_b[
@@ -1764,12 +1750,20 @@ class App():
                         "data": plot_n2o,
                         "dataintsum": n2o_int
                     }
+                try:
+                    geometric_mean = gmean(df[(df["treatment"] == treatment) & (df.N2O_N_mug_m2h > 0.)].N2O_N_mug_m2h)
+                except:
+                    geometric_mean = np.mean(df[(df["treatment"] == treatment)].N2O_N_mug_m2h)
+                try:
+                    geometric_std = gstd(df[(df["treatment"] == treatment) & (df.N2O_N_mug_m2h > 0.)].N2O_N_mug_m2h)
+                except:
+                    geometric_std = np.std(df[(df["treatment"] == treatment)].N2O_N_mug_m2h)
 
                 treatments[treatment_legend[treatment]["name"]] = {
                     "avg": np.average(tot_n2o_sum),
                     "stdev": np.std(tot_n2o_sum),
-                    "gmean": gmean(df[(df["treatment"] == treatment) & (df.N2O_N_mug_m2h > 0.)].N2O_N_mug_m2h),
-                    "gstd": gstd(df[(df["treatment"] == treatment) & (df.N2O_N_mug_m2h > 0.)].N2O_N_mug_m2h)
+                    "gmean": geometric_mean,
+                    "gstd": geometric_std
                 }
 
             return treatments, plotdata
@@ -1779,7 +1773,7 @@ class App():
             avgsum = pd.DataFrame.from_dict(treatments, orient='index')
 
             if "B" not in drop:
-                #Plot boxplots
+                # Plot boxplots
                 axs["boxplot"].cla()
                 axs["boxplot"].set_yscale('log')
 
@@ -1818,7 +1812,7 @@ class App():
                 axs["cumsum"].set_xticks(xticks)
                 axs["cumsum"].set_xticklabels(avgsum.index, rotation=20, ha='right')
 
-                axs["cumsum"].set_title('Cumulative N2O over %i days' % (df.date.max()-df.date.min()).days)
+                axs["cumsum"].set_title('Cumulative N2O over %i days' % (df.date.max() - df.date.min()).days)
                 axs["cumsum"].yaxis.grid(True)
 
                 for label in axs["cumsum"].get_xticklabels():  # make the xtick labels pickable
@@ -1837,7 +1831,8 @@ class App():
                 else:
                     treatment_name = treatment_legend[treatments[0]]["name"]
 
-                    title = treatment_name+" from:" + df.date.min().strftime("%Y-%m-%d") + " to:" + df.date.max().strftime(
+                    title = treatment_name + " from:" + df.date.min().strftime(
+                        "%Y-%m-%d") + " to:" + df.date.max().strftime(
                         "%Y-%m-%d")
                 axs["cumgraf"].set_title(title)
                 axs["cumgraf"].set_ylabel('kg ha⁻¹ period⁻¹')
@@ -1856,34 +1851,20 @@ class App():
                 axs["temp"].set_ylabel('Temp\n°C')
                 axs["rain"].set_ylabel('Rain\nMM day⁻¹')
                 axs["rain"].set_xlabel('Date')
-        df_weather = self.df_weather
+
         treatment_legend = self.treatment_legend
         treatment_df = pd.DataFrame.from_dict(treatment_legend, orient='index')
 
         start = time()
-        filename =  self.file_path   # filename for raw output
+        filename = self.file_path  # filename for raw output
         filename_manual = self.manual  # filename for raw output
 
-        if opt_df is not None:
-            df_a = opt_df
-            mindate =  pd.to_datetime(df_a.date.min())
-            maxdate =  pd.to_datetime(df_a.date.max())
-        else:
-            df_a = pd.read_excel(filename)  # import excel document
-        df_m = pd.read_excel(filename_manual)
-        df_b = pd.concat([df_a, df_m])
-        df_b.index = df_b["Unnamed: 0"]
+        df_b = opt_df
 
         df_b['date'] = pd.to_datetime(df_b['date'])  # make date column to datetime objects
 
-        #df_weather = df_weather[df_b['date'].min():df_b['date'].max()]
-        df_w = df_weather
-        df_b = df_b.sort_values(by=['date'])  # sort all entries by date
-        # df_b = df_b[df_b.side == side]
         df = df_b
-        if opt_df is not None:
-            df = df[(df["date"] > mindate) & (df["date"] < maxdate)]
-            # df_w = df_w[(df_w["date"] > mindate) & (df_w["date"] < maxdate)]
+        # df_w = df_w[(df_w["date"] > mindate) & (df_w["date"] < maxdate)]
         fig = plt.figure(figsize=(15, 10))
         axs = {}
 
@@ -1895,10 +1876,10 @@ class App():
         axs["rain"] = plt.subplot(3, 3, (7, 9), sharex=axs["samples"])
         axs["temp"] = axs["rain"].twinx()
 
-        logger.debug(f"Time to make dataset: {time()-start}")
+        logger.debug(f"Time to make dataset: {time() - start}")
 
         plotDF(df, df_w, axs)
-        logger.debug(f"Time to plot: {time()-start}")
+        logger.debug(f"Time to plot: {time() - start}")
 
         date_min = int(axs["samples"].get_xlim()[0])
         date_max = int(axs["samples"].get_xlim()[1])
@@ -1940,28 +1921,40 @@ class App():
                                        on_select_callback=self.on_specific_option_selected,
                                        exportbuttons=False)
 
-
     def on_columns_selected(self, selected):
         logger.info(f"Selected: {selected}")
         if "settings" not in self.specific_options:
             self.specific_options["settings"] = {}
-        self.specific_options["settings"]["columnselection"]=selected
+        self.specific_options["settings"]["columnselection"] = selected
         self.save_specific_options()
 
     def viewDataFrame(self):
         popup = Dataframe_Filter_Popup(self.master,
                                        self.df[self.specific_options["settings"]["columnselection"]],
                                        self.on_DF_selected,
-                                       original_df = self.df,
+                                       original_df=self.df,
                                        exportbuttons=True,
-                                       graphing_callback=self.allplot)
+                                       export_callback=self.on_export_selected,
+                                       graphing_callback=self.cumsum_from_df)
+
+    def cumsum_from_df(self, df):
+        self.allplot(df, self.weather_df)
+
     def on_DF_selected(self, selected_key):
         # Handle the selected key here
         logger.debug(f"Selected file: {selected_key}")
+        selected_key= float(selected_key)
+        selected_key =int(selected_key)
         self.nr = selected_key
         self.getParams()
         self.replot()
         self.update()
+
+    def on_export_selected(self, df):
+        average = self.specific_options["settings"]["exportsettings"]["average"]
+        exporter = ExcelExporter(initial_dir='/', filename=".xlsx")
+        exporter.to_excel(df, average=average)
+
     def on_specific_option_selected(self, selected_key):
         # Handle the selected key here
         logger.debug(f"Selected file: {selected_key}")
@@ -1990,15 +1983,15 @@ class App():
         self.Outs[name].insert(1.0, value)
         self.Outs[name].configure(state="disabled")
 
-    def MakeTextbox(self, name, label, row_disp, frame, collumnbox=1, collumntext=0, state="disabled", width=9, cspan=1):
+    def MakeTextbox(self, name, label, row_disp, frame, collumnbox=1, collumntext=0, state="disabled", width=9,
+                    cspan=1):
         self.Outs[name + "label"] = tk.Label(frame, text=label)
         self.Outs[name + "label"].grid(row=row_disp, column=collumntext, padx=5, pady=5)
         # Regression slope text display
         self.Outs[name] = tk.Text(frame, height=1, width=width)
         # Placement of regression text display
-        self.Outs[name].grid(row=row_disp, column=collumnbox, padx=5, pady=5,columnspan = cspan)
+        self.Outs[name].grid(row=row_disp, column=collumnbox, padx=5, pady=5, columnspan=cspan)
         self.Outs[name].configure(state=state)  # Disable to prevent user input
-
 
 
 # Example usage

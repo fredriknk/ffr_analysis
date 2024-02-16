@@ -1,10 +1,10 @@
-import xlwt
+#import xlwt
+import openpyxl
 import pylab as plt
 import read_regression_exception_list
 import bisect_find
 import divide_left_and_right
 import get_data
-import licor_indexes
 import regression
 import os
 import sys
