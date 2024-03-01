@@ -870,26 +870,6 @@ class ExcelExporter:
             filepath += '.xlsx'
         return filepath
 
-    def show_saving_window(self):
-        """
-        Displays a window indicating that the file is currently being saved.
-        """
-        self.saving_window = tk.Tk()
-        self.saving_window.title("Saving...")
-        tk.Label(self.saving_window, text="Saving the Excel file, please wait...").pack(padx=20, pady=20)
-        # Use `after` method to run the saving process after the window is displayed
-        self.saving_window.after(100, self.to_excel, self.df, self.average)
-        self.saving_window.mainloop()
-
-    def update_saving_window(self, message):
-        """
-        Updates the saving window with a new message and then destroys it after a short delay.
-        """
-        for widget in self.saving_window.winfo_children():
-            widget.destroy()
-        tk.Label(self.saving_window, text=message).pack(padx=20, pady=20)
-        self.saving_window.after(2000, self.saving_window.destroy)
-
     def to_excel(self, df, average=False, byplot=False):
         """
         Export data to an Excel file, with optional averaging.
@@ -913,7 +893,7 @@ class ExcelExporter:
         label.pack(padx=20, pady=20)
 
         try:
-            self.update_saving_window("Writing to file!")
+            logging.debug(f"Exporting data to Excel file: byplot: {self.byplot}, average: {self.average}")
             with pd.ExcelWriter(filepath) as writer:
                 if self.byplot:
                     if self.average:
@@ -1018,6 +998,7 @@ class App():
         debug_menu = tk.Menu(menu_bar, tearoff=0)
         debug_menu.add_command(label="Print Dataframe", command=self.debugprint_dataframe)
         debug_menu.add_command(label="Print specific_options", command=self.debugprint_specific_options)
+        debug_menu.add_command(label="Print settings", command=self.debugprint_specific_settings)
         menu_bar.add_cascade(label="Debug", menu=debug_menu)
 
         self.master.config(menu=menu_bar)
@@ -1415,6 +1396,10 @@ class App():
     def debugprint_specific_options(self):
         print("Specific options:\n")
         print(self.specific_options)
+
+    def debugprint_specific_settings(self):
+        print("Specific settings:\n")
+        print(self.specific_options["settings"])
     def update(self):
         self.setParams()
         self.replot()  # Replot the graph
@@ -1952,8 +1937,10 @@ class App():
 
     def on_export_selected(self, df):
         average = self.specific_options["settings"]["exportsettings"]["average"]
-        exporter = ExcelExporter(initial_dir='/', filename=".xlsx")
-        exporter.to_excel(df, average=average)
+        byplot = self.specific_options["settings"]["exportsettings"]["by_plot"]
+        filename = f"{datetime.now().strftime('%Y%m%d-%H%M%S')}_{self.project_name}_export.xlsx"
+        exporter = ExcelExporter(initial_dir='./output', filename=filename)
+        exporter.to_excel(df, average=average,byplot = byplot)
 
     def on_specific_option_selected(self, selected_key):
         # Handle the selected key here
