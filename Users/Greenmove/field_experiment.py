@@ -128,10 +128,13 @@ try:
     DATA_FILE_NAME = "config.yml"
     paths = read_yaml(DATA_FILE_NAME)["PATHS"]
     resdir.raw_data_path = paths["RAWDATA"]
+    logging.info(f"resdir.raw_data_path: {resdir.raw_data_path}")
     if "MANUAL" in paths:
         manual_path = paths['MANUAL']
+        logging.info(f"manual_path: {manual_path}")
     if "LOGGER_PATH" in paths:
         logger_path = paths['LOGGER_PATH']
+        logging.info(f"logger_path: {logger_path}")
 except FileNotFoundError:
     print(DATA_FILE_NAME + ' not found')
 
