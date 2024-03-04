@@ -34,7 +34,7 @@ from weather_data_from_metno import update_weather_data, make_data_file
 from yaml import safe_load
 from ffr_gui import make_dataset, check_exclude
 
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logging.getLogger('matplotlib.font_manager').disabled = True
 
 def read_yaml(file_path = "config.yml"):
@@ -134,7 +134,6 @@ try:
         logger_path = paths['LOGGER_PATH']
 except FileNotFoundError:
     print(DATA_FILE_NAME + ' not found')
-    resdir.raw_data_path = fixpath('raw_data')
 
 detailed_output_path = fixpath('output/detailed_regression_output_unsorted')
 find_regressions.make_detailed_output_folders(detailed_output_path)
