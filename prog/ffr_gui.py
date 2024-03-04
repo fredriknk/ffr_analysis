@@ -1358,19 +1358,24 @@ class App():
                              }
 
         try:
-            resdir.raw_data_path = read_yaml()["PATHS"]['RAWDATA']
-            self.raw_data = read_yaml()["PATHS"]['RAWDATA']
-            self.manual = read_yaml()["PATHS"]["MANUAL"]
-        except FileNotFoundError:
-            logger.info(resdir.raw_data_path + ' not found')
-            resdir.raw_data_path = fixpath('raw_data')
+            paths = read_yaml()["PATHS"]
+            resdir.raw_data_path = paths["RAWDATA"]
+            logging.info(f"resdir.raw_data_path: {resdir.raw_data_path}")
+            if "MANUAL" in paths:
+                self.manual = paths['MANUAL']
+                logging.info(f"manual_path: {self.manual}")
 
-        df_path = "output/capture_RegressionOutput.xls"
+        except FileNotFoundError:
+            logging.info("YAML not found")
+
         df_path = "output/df_all.pkl"
         self.file_path = df_path
 
         # self.df = pd.read_excel(df_path, index_col=0)
-        self.df = pd.read_pickle(df_path)
+        try:
+            self.df = pd.read_pickle(df_path)
+        except FileNotFoundError:
+            logger.info(f"File {df_path} not found")
         self.df.date = pd.to_datetime(self.df.date, format="%Y%m%d-%H%M%S")
         self.weather_df = pd.read_pickle("./output/df_weather.pkl")
         treatment_name_mapping = {key: value['name'] for key, value in self.treatment_legend.items()}
