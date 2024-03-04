@@ -75,12 +75,6 @@ def convert_dict_values(input_dict):
 
 
 def make_dataset(df_in=None, filename_manual=None):
-    if filename_manual is None:
-        try:
-            filename_manual = read_yaml()["PATHS"]["MANUAL"]
-        except FileNotFoundError:
-            logger.info(resdir.raw_data_path + ' not found')
-
     if df_in is None:
         filename = "output/capture_slopes.xls"
         df_b = pd.read_excel(filename)  # import excel docuument
@@ -88,14 +82,18 @@ def make_dataset(df_in=None, filename_manual=None):
         df_b = df_in
 
     df_b["type"] = "robot"
-    try:
-        df_m = pd.read_excel(filename_manual)
-        df_m["date"] = pd.to_datetime(df_m['date']) + timedelta(hours=12)
-        df_m["type"] = "manual"
-        df_b = pd.concat([df_b, df_m])
-        df_b.index = df_b["Unnamed: 0"]
-    except FileNotFoundError:
-        logger.info(filename_manual + ' not found')
+
+    if filename_manual is None:
+        try:
+            if  "MANUAL" in read_yaml()["PATHS"]:
+                filename_manual = read_yaml()["PATHS"]["MANUAL"]
+                df_m = pd.read_excel(filename_manual)
+                df_m["date"] = pd.to_datetime(df_m['date']) + timedelta(hours=12)
+                df_m["type"] = "manual"
+                df_b = pd.concat([df_b, df_m])
+                df_b.index = df_b["Unnamed: 0"]
+        except FileNotFoundError:
+            logger.info(filename_manual + ' not found')
 
     df_b['date'] = pd.to_datetime(df_b['date'])  # make date column to datetime objects
     df_b = df_b.sort_values(by=['date'])  # sort all entries by date
