@@ -1920,6 +1920,10 @@ class App():
         self.save_specific_options()
 
     def viewDataFrame(self):
+        try:
+            if "settings" not in self.specific_options:
+                if "columnselection" not in self.specific_options["settings"]:
+                    self.specific_options["settings"]["columnselection"] = self.default_persistent_column_selection
         popup = Dataframe_Filter_Popup(self.master,
                                        self.df[self.specific_options["settings"]["columnselection"]],
                                        self.on_DF_selected,
