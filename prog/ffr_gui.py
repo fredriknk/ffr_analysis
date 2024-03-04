@@ -1849,7 +1849,6 @@ class App():
 
         start = time()
         filename = self.file_path  # filename for raw output
-        filename_manual = self.manual  # filename for raw output
 
         df_b = opt_df
 
