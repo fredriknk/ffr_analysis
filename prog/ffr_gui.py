@@ -80,19 +80,22 @@ def make_dataset(df_in=None, filename_manual=None):
             filename_manual = read_yaml()["PATHS"]["MANUAL"]
         except FileNotFoundError:
             logger.info(resdir.raw_data_path + ' not found')
-            filename_manual = "output/capture_slopes_manual.xls"  # filename for raw output
+
     if df_in is None:
         filename = "output/capture_slopes.xls"
         df_b = pd.read_excel(filename)  # import excel docuument
     else:
         df_b = df_in
 
-    df_m = pd.read_excel(filename_manual)
-    df_m["date"] = pd.to_datetime(df_m['date']) + timedelta(hours=12)
-    df_m["type"] = "manual"
     df_b["type"] = "robot"
-    df_b = pd.concat([df_b, df_m])
-    df_b.index = df_b["Unnamed: 0"]
+    try:
+        df_m = pd.read_excel(filename_manual)
+        df_m["date"] = pd.to_datetime(df_m['date']) + timedelta(hours=12)
+        df_m["type"] = "manual"
+        df_b = pd.concat([df_b, df_m])
+        df_b.index = df_b["Unnamed: 0"]
+    except FileNotFoundError:
+        logger.info(filename_manual + ' not found')
 
     df_b['date'] = pd.to_datetime(df_b['date'])  # make date column to datetime objects
     df_b = df_b.sort_values(by=['date'])  # sort all entries by date
@@ -158,50 +161,51 @@ def make_df_weather(date_min, date_max):
     df_weather = make_logger_data()
     df_weather = df_weather[date_min:date_max]
     df_w = df_weather
-
-    param = "ECC_GROUND"
-    hours = 12
-    df_w[param + "_ROLLINGAVG"] = df_w[param].rolling(hours, min_periods=1).mean()
-
-    param = 'TEMPC_GROUND'
-    df_w[param + "_ROLLINGAVG"] = df_w[param].rolling(hours, min_periods=1).mean()
-
-    param = "VWC_GROUND"
-    df_w[param + "_ROLLINGAVG"] = df_w[param].rolling(hours, min_periods=1).mean()
+    if "ECC_GROUND" in df_w.columns:
+        param = "ECC_GROUND"
+        hours = 12
+        df_w[param + "_ROLLINGAVG"] = df_w[param].rolling(hours, min_periods=1).mean()
+    if "TEMPC_GROUND" in df_w.columns:
+        param = 'TEMPC_GROUND'
+        df_w[param + "_ROLLINGAVG"] = df_w[param].rolling(hours, min_periods=1).mean()
+    if "VWC_GROUND" in df_w.columns:
+        param = "VWC_GROUND"
+        df_w[param + "_ROLLINGAVG"] = df_w[param].rolling(hours, min_periods=1).mean()
 
     param = 'sum(precipitation_amount PT1H)'
     hours = 24
     precip_column = "precip_ROLLINGSUM_" + str(hours) + "_H"  # Construct the new column name based on 'hours'
-
     # Calculate the rolling sum and store it in the new column
     df_w[precip_column] = df_w[param].rolling(hours, min_periods=1).sum()
 
     # Replace values smaller than 0.1 in the new column with 0
     df_w[precip_column] = df_w[precip_column].apply(lambda x: 0 if x < 0.1 else x)
-    df_w["TEMPC_GROUND_FFILL"] = df_w.TEMPC_GROUND.fillna(method="ffill")
-    df_rolling = df_w.rolling(2, min_periods=1)
-    df_w["RISING_TEMP_PASS"] = df_rolling.TEMPC_GROUND_FFILL.apply(lambda x: zeropass(x, "rising")).astype("bool")
-    df_w["FALLING_TEMP_PASS"] = df_rolling.TEMPC_GROUND_FFILL.apply(lambda x: zeropass(x, "falling")).astype("bool")
-    df_w["RISING_TEMP_PASS"].iloc[0] = False
-    df_w["FALLING_TEMP_PASS"].iloc[0] = False
-    max_hours = 24 * 10
 
-    a = df_w["RISING_TEMP_PASS"]
-    param = "HOURS_SINCE_THAW"
-    df_w[param] = (a.cumsum() - a.cumsum().where(~a).ffill().fillna(0).astype(int))  # .shift(-1)
-    df_w.loc[(df_w[param] == df_w[param].shift(-1)), param] = None
-    df_w.loc[(df_w[param] > max_hours), param] = None
-    df_w[param].iloc[0] = None
-    df_w[param].iloc[-1] = None
+    if "TEMPC_GROUND" in df_w.columns:
+        df_w["TEMPC_GROUND_FFILL"] = df_w.TEMPC_GROUND.fillna(method="ffill")
+        df_rolling = df_w.rolling(2, min_periods=1)
+        df_w["RISING_TEMP_PASS"] = df_rolling.TEMPC_GROUND_FFILL.apply(lambda x: zeropass(x, "rising")).astype("bool")
+        df_w["FALLING_TEMP_PASS"] = df_rolling.TEMPC_GROUND_FFILL.apply(lambda x: zeropass(x, "falling")).astype("bool")
+        df_w["RISING_TEMP_PASS"].iloc[0] = False
+        df_w["FALLING_TEMP_PASS"].iloc[0] = False
+        max_hours = 24 * 10
 
-    a = df_w["FALLING_TEMP_PASS"]
-    param = "HOURS_SINCE_FREEZE"
-    df_w[param] = (a.cumsum() - a.cumsum().where(~a).ffill().fillna(0).astype(int))  # .shift(-1)
-    df_w.loc[(df_w[param] == df_w[param].shift(-1)), param] = None
-    df_w.loc[(df_w[param] > max_hours), param] = None
-    # df_w[["HOURS_SINCE_THAW", "HOURS_SINCE_FREEZE", "TEMPC_GROUND"]].plot()
-    df_w[param].iloc[0] = None
-    df_w[param].iloc[-1] = None
+        a = df_w["RISING_TEMP_PASS"]
+        param = "HOURS_SINCE_THAW"
+        df_w[param] = (a.cumsum() - a.cumsum().where(~a).ffill().fillna(0).astype(int))  # .shift(-1)
+        df_w.loc[(df_w[param] == df_w[param].shift(-1)), param] = None
+        df_w.loc[(df_w[param] > max_hours), param] = None
+        df_w[param].iloc[0] = None
+        df_w[param].iloc[-1] = None
+
+        a = df_w["FALLING_TEMP_PASS"]
+        param = "HOURS_SINCE_FREEZE"
+        df_w[param] = (a.cumsum() - a.cumsum().where(~a).ffill().fillna(0).astype(int))  # .shift(-1)
+        df_w.loc[(df_w[param] == df_w[param].shift(-1)), param] = None
+        df_w.loc[(df_w[param] > max_hours), param] = None
+        # df_w[["HOURS_SINCE_THAW", "HOURS_SINCE_FREEZE", "TEMPC_GROUND"]].plot()
+        df_w[param].iloc[0] = None
+        df_w[param].iloc[-1] = None
 
     return df_w
 

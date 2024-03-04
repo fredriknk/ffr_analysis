@@ -87,16 +87,18 @@ def find_treatment_number(plot_number,treatment_legends):
             return treatment_number
     return None
 
-try:
-    update_weather_data()
-except:
-    make_data_file()
 
 fixpath = utils.ensure_absolute_path
 
 start_date = '2021-08-19'
 stop_date =  '2099-01-01'  #YYYYMMDD  stop_date has to be one day after the last date you want
 redo_regressions = False
+
+try:
+    update_weather_data()
+except:
+    make_data_file()
+
 
 options = {'interval': 100,
            'start':0,
@@ -266,7 +268,6 @@ treatment_legend = {
     10: {"name": "Ley Moved", "treatment": "4B", "plots": (37, 42, 43, 48)},
     11: {"name": "Ley Control", "treatment": "4A", "plots": (38, 41, 44, 47)},
     12: {"name": "Ley Mov+Min", "treatment": "4C", "plots": (39, 40, 45, 46)}
-
 }
 
 df["nr"] = [Field_numbers[(i, s)] for i, s in zip(df.meas_nr, df.side)]

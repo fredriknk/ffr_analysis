@@ -12,6 +12,7 @@ import matplotlib.pyplot as plt
 from scipy.spatial import ConvexHull
 import matplotlib.patches as patches
 from math import cos, sin, sqrt
+import json
 
 def find_rectangles(points,best_angle):
     """
@@ -103,7 +104,8 @@ def find_minimum_bounding_box(xy_points):
 class FieldPlotter(tk.Tk):
     def __init__(self):
         super().__init__()
-
+        self.data = []  # List to store rectangles and metadata
+        self.rectangles = []  # List to store rectangle patches
         self.title('Field Plotter')
         self.geometry('800x600')
 
@@ -127,13 +129,18 @@ class FieldPlotter(tk.Tk):
         self.specified_value_entry.pack()
 
         # Set a default value for the distance threshold entry
-        default_threshold_value = "1.0"  # Default distance threshold in meters
+        default_threshold_value = "1.5"  # Default distance threshold in meters
         self.specified_value_entry.insert(0, default_threshold_value)
 
         # Add these in your __init__ method to create a new checkbox
         self.include_all_var = tk.BooleanVar()
         self.include_all_checkbox = tk.Checkbutton(self, text="Include All Waypoints", variable=self.include_all_var)
         self.include_all_checkbox.pack()
+
+        # Add these in your __init__ method to create a new checkbox
+        self.show_arrows_var = tk.BooleanVar()
+        self.show_arrows_checkbox = tk.Checkbutton(self, text="Show waypoints", variable=self.show_arrows_var)
+        self.show_arrows_checkbox.pack()
 
         # Setup for plot
         self.fig, self.ax = plt.subplots()
@@ -142,6 +149,15 @@ class FieldPlotter(tk.Tk):
         self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=1)
 
         self.filepath = None
+
+    def save_to_json(self, filename):
+        with open(filename, 'w') as f:
+            json.dump(self.data, f)
+
+    def load_from_json(self, filename):
+        with open(filename) as f:
+            self.data = json.load(f)
+        self.plot_from_data()
 
     def load_and_plot(self):
         self.filepath = filedialog.askopenfilename(filetypes=[("CSV files", "*.csv")])
@@ -349,15 +365,15 @@ class FieldPlotter(tk.Tk):
 
         # Find the minimum bounding box for the given points
         rotated_bounding_box, min_area, best_angle = find_minimum_bounding_box(chamber_points)
-        rectangles = find_rectangles(chamber_points, best_angle)
-        for rect in rectangles:
+        self.rectangles = find_rectangles(chamber_points, best_angle)
+        for rect in self.rectangles:
             polygon = patches.Polygon(rect, closed=True, fill=None, edgecolor='r', linestyle='--')
             self.ax.add_patch(polygon)
 
         self.ax.plot(rotated_bounding_box[:, 0], rotated_bounding_box[:, 1], 'r--',
-                 label=f'Minimum Area Bounding Box{min_area}')
+                 label=f'Minimum Area Bounding Box{min_area}',alpha=0.2)
 
-        print(chamber_points)
+        print(self.rectangles)
 
         self.canvas.draw()
 

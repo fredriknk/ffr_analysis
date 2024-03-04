@@ -269,12 +269,19 @@ class Options_manager(object):
             exopts_filename = self.specific_options_file_name
         if exopts_filename:
             if ".pickle" in exopts_filename:
-                with open(exopts_filename, 'rb') as handle:
-                    self.specific_options_dict = pickle.load(handle)
-                    if self.options != None:
-                        self.specific_options_dict["ALL"] = self.options
-                    else:
-                        self.options = self.specific_options_dict["ALL"]
+                try:
+                    with open(exopts_filename, 'rb') as handle:
+                        self.specific_options_dict = pickle.load(handle)
+                        if self.options != None:
+                            self.specific_options_dict["ALL"] = self.options
+                        else:
+                            self.options = self.specific_options_dict["ALL"]
+                except FileNotFoundError:
+                    #create specific_options pickle file if it doesnt exist
+                    self.specific_options_dict = {}
+                    self.specific_options_dict["ALL"] = self.options
+                    with open(exopts_filename, 'wb') as handle:
+                        pickle.dump(self.specific_options_dict, handle)
             else:
                 self.specific_options_dict = read_regression_exception_list.parse_xls_file(
                     exopts_filename)
@@ -627,6 +634,7 @@ class Regressor(object):
     def update_regressions_file(self, directory_or_files):
         """ this assumes that all files is in the same directory"""
         files = get_filenames(directory_or_files, {})
+        logging.debug(f'files: {files}')
         directory = os.path.split(files[0])[0]
         lines = [x.split('\t') for x in
                  open(self.slopes_file_name, 'r').readlines()]

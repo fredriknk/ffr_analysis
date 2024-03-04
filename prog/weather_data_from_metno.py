@@ -141,18 +141,3 @@ def update_weather_data(stop=None):
 
 if __name__ == "__main__":
     update_weather_data()
-# make_data_file()
-
-#update_weather_data()
-#update_weather_data(stop=(2016, 5, 30, 12, 0,0,0,0,0))
-
-#c = get_stored_data()
-#plt.plot(np.diff([x[0] for x in c])/3600)
-
-# def showit(i,m):
-#     for n in range(i, i+m):
-#         print(time.ctime(c[n][0]))
-#         print(c[n][1])
-
-#showit(1000,3)
-
