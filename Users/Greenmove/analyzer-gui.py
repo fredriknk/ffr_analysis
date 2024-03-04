@@ -52,7 +52,7 @@ if __name__ == "__main__":
     }
 
     persistent_column_selection = ['date', 'CO2_C_mug_m2h', 'N2O_N_mug_m2h', "type",
-                                   'treatment', 'Tc', 'precip', "nr", 'treatment_name']
+                                   'treatment', 'Tc', 'precip', "nr", 'treatment_name',"excluded"]
 
     non_uncheckable_columns = ['date', 'treatment', "nr", 'N2O_N_mug_m2h']
 

@@ -74,7 +74,7 @@ def convert_dict_values(input_dict):
     return output_dict
 
 
-def make_dataset(df_in=None, filename_manual=None):
+def make_dataset(df_in=None, filename_manual=None, specific_options = None):
     if df_in is None:
         filename = "output/capture_slopes.xls"
         df_b = pd.read_excel(filename)  # import excel docuument
@@ -1462,7 +1462,7 @@ class App():
         self.options["interval"] = int(self.XINT.get())
         self.options['co2_guides'] = int(self.CO2_guide.get())
         self.options['exclude'] = int(self.exclude.get())
-        self.df.loc[self.nr]["exclude"] = int(self.exclude.get())
+        self.df.loc[self.nr]["excluded"] = int(self.exclude.get())
         if self.options != self.specific_options["ALL"]:
             self.specific_options[self.fname] = copy.deepcopy(self.options)
             self.save_specific_options()
