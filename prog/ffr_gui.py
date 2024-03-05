@@ -8,6 +8,7 @@ from tkinter import ttk
 import ast
 
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 from PIL import Image, ImageTk
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
@@ -185,27 +186,27 @@ def make_df_weather(date_min, date_max):
         df_rolling = df_w.rolling(2, min_periods=1)
         df_w["RISING_TEMP_PASS"] = df_rolling.TEMPC_GROUND_FFILL.apply(lambda x: zeropass(x, "rising")).astype("bool")
         df_w["FALLING_TEMP_PASS"] = df_rolling.TEMPC_GROUND_FFILL.apply(lambda x: zeropass(x, "falling")).astype("bool")
-        df_w["RISING_TEMP_PASS"].iloc[0] = False
-        df_w["FALLING_TEMP_PASS"].iloc[0] = False
+        df_w["RISING_TEMP_PASS"] = pd.Series(dtype="boolean")
+        df_w["FALLING_TEMP_PASS"] = pd.Series(dtype="boolean")
+        df_w.loc[df_w.index[0], "RISING_TEMP_PASS"] = pd.NA
+        df_w.loc[df_w.index[0],"FALLING_TEMP_PASS"] = pd.NA
         max_hours = 24 * 10
 
         a = df_w["RISING_TEMP_PASS"]
         param = "HOURS_SINCE_THAW"
         df_w[param] = (a.cumsum() - a.cumsum().where(~a).ffill().fillna(0).astype(int))  # .shift(-1)
-        df_w.loc[(df_w[param] == df_w[param].shift(-1)), param] = None
-        df_w.loc[(df_w[param] > max_hours), param] = None
-        df_w[param].iloc[0] = None
-        df_w[param].iloc[-1] = None
+        df_w.loc[(df_w[param] == df_w[param].shift(-1)), param] = pd.NA
+        df_w.loc[(df_w[param] > max_hours), param] = pd.NA
+        df_w.loc[df_w.index[0], param] = pd.NA
+        df_w.loc[df_w.index[-1], param] = pd.NA
 
         a = df_w["FALLING_TEMP_PASS"]
         param = "HOURS_SINCE_FREEZE"
         df_w[param] = (a.cumsum() - a.cumsum().where(~a).ffill().fillna(0).astype(int))  # .shift(-1)
-        df_w.loc[(df_w[param] == df_w[param].shift(-1)), param] = None
-        df_w.loc[(df_w[param] > max_hours), param] = None
-        # df_w[["HOURS_SINCE_THAW", "HOURS_SINCE_FREEZE", "TEMPC_GROUND"]].plot()
-        df_w[param].iloc[0] = None
-        df_w[param].iloc[-1] = None
-
+        df_w.loc[(df_w[param] == df_w[param].shift(-1)), param] = pd.NA
+        df_w.loc[(df_w[param] > max_hours), param] = pd.NA
+        df_w.loc[df_w.index[0], param] = pd.NA
+        df_w.loc[df_w.index[-1],param] = pd.NA
     return df_w
 
 
@@ -1706,10 +1707,8 @@ class App():
                             **kwargs)
 
         def getN2Odata(df, plotno, tot_n2o_sum=[]):
-            # Lazy way of averaging doublepoints on days
-            # df = df[df.nr == plotno].groupby(df[df.nr == plotno].date.dt.date).mean()
-            # df["date"] = df.index
-            plot = df[df['nr'] == plotno]
+            plot = df[df['nr'] == plotno][['date', 'N2O_N_mug_m2h']]
+            plot['N2O_N_mug_m2h'] = pd.to_numeric(plot['N2O_N_mug_m2h'], errors='coerce')
             avg_plot = plot.groupby(pd.Grouper(key='date', freq='D')).mean()  # select the data from plot 2
             avg_plot = avg_plot[avg_plot['N2O_N_mug_m2h'].notna()]
             avg_plot["date"] = avg_plot.index
@@ -1776,7 +1775,8 @@ class App():
                 dataset = []
                 geo_avgs = []
                 for treatment in np.sort(df.treatment.unique()):
-                    plot = df[df['treatment'] == treatment]
+                    plot = df[df['treatment'] == treatment][['date', 'N2O_N_mug_m2h']]
+                    plot['N2O_N_mug_m2h'] = pd.to_numeric(plot['N2O_N_mug_m2h'], errors='coerce')
                     avg_plot = plot.groupby(pd.Grouper(key='date', freq='D')).mean()  # select the data from plot 2
                     avg_plot = avg_plot[avg_plot['N2O_N_mug_m2h'].notna()][
                         'N2O_N_mug_m2h']  # [avg_plot['N2O_N_mug_m2h']>0]
