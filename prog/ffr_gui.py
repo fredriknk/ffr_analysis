@@ -27,6 +27,7 @@ import resdir
 import utils
 import weather_data
 from regression import *
+from analyze_coords import FieldPlotter
 
 logger = logging.getLogger(__name__)
 
@@ -1001,6 +1002,7 @@ class App():
         debug_menu.add_command(label="Print Dataframe", command=self.debugprint_dataframe)
         debug_menu.add_command(label="Print specific_options", command=self.debugprint_specific_options)
         debug_menu.add_command(label="Print settings", command=self.debugprint_specific_settings)
+        debug_menu.add_command(label="fieldplotter", command=self.fieldplotter)
         menu_bar.add_cascade(label="Debug", menu=debug_menu)
 
         self.master.config(menu=menu_bar)
@@ -1235,7 +1237,9 @@ class App():
 
         self.getParams()
         self.update()
-
+    def fieldplotter(self):
+        app = FieldPlotter(self.master)
+        app.mainloop()
     def open_export_settings(self):
         # Open the export settings popup
         ExportSettingsPopup(self.master, self.specific_options, self.on_export_settings_confirmed)

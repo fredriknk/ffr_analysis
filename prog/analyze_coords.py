@@ -101,9 +101,10 @@ def find_minimum_bounding_box(xy_points):
 
     return rotated_bounding_box, min_area, best_angle
 
-class FieldPlotter(tk.Tk):
-    def __init__(self):
-        super().__init__()
+class FieldPlotter(tk.Toplevel):  # Inherit from Toplevel instead of Tk
+    def __init__(self, master=None):  # Optionally accept a master parameter
+        super().__init__(master=master)  # Pass master to the Toplevel constructor
+        self.title('Field Plotter')
         self.data = []  # List to store rectangles and metadata
         self.rectangles = []  # List to store rectangle patches
         self.title('Field Plotter')
@@ -373,10 +374,10 @@ class FieldPlotter(tk.Tk):
         self.ax.plot(rotated_bounding_box[:, 0], rotated_bounding_box[:, 1], 'r--',
                  label=f'Minimum Area Bounding Box{min_area}',alpha=0.2)
 
-        print(self.rectangles)
-
         self.canvas.draw()
 
 if __name__ == "__main__":
-    app = FieldPlotter()
+    root = tk.Tk()  # Create a root window if standalone
+    root.withdraw()  # Optionally hide the root window
+    app = FieldPlotter(root)  # Pass the root window as the master
     app.mainloop()
