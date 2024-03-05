@@ -105,9 +105,7 @@ options = {'interval': 100,
            'stop':180,
            'crit': 'steepest',
            'co2_guides': True,
-           'correct_negatives':False,
-           'cut_beginnings':7,
-           'cut_ends':7
+           'correct_negatives':False
            }
 
 save_options= {'show_images':False,
