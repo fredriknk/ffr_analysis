@@ -92,7 +92,7 @@ fixpath = utils.ensure_absolute_path
 
 start_date = '2021-08-19'
 stop_date =  '2099-01-01'  #YYYYMMDD  stop_date has to be one day after the last date you want
-redo_regressions = False
+redo_regressions = True
 
 try:
     update_weather_data()
