@@ -46,9 +46,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     })?;
     println!(
         "{}",
-        serde_json::to_string_pretty(
-            &json!({"info":info,"importSeconds":import_seconds,"openSeconds":open_seconds,"listSeconds":list_seconds,"detailSeconds":detail_seconds,"previewSeconds":preview_seconds,"summary":summary})
-        )?
+        serde_json::to_string_pretty(&json!({"info":info,
+                "importSeconds":import_seconds,
+                "openSeconds":open_seconds,
+                "listSeconds":list_seconds,
+                "detailSeconds":detail_seconds,
+                "previewSeconds":preview_seconds,
+                "summary":summary}))?
     );
     Ok(())
 }

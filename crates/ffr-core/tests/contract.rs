@@ -55,7 +55,17 @@ fn ui_contract_json_key_sets() {
         .project_create(dir.path().join("test.ffr").to_str().expect("path"), "Test")
         .expect("create");
     check("ProjectInfo", &json!(info));
-    let layout:Layout=serde_json::from_value(json!({"treatments":[{"id":1,"name":"Test","shortName":"T","colour":"#000000","sortOrder":1}],"plots":[{"id":1,"label":"One","treatmentId":1,"block":1,"polygon":null}]})).expect("layout");
+    let layout: Layout = serde_json::from_value(json!({"treatments":[{"id":1,
+        "name":"Test",
+        "shortName":"T",
+        "colour":"#000000",
+        "sortOrder":1}],
+        "plots":[{"id":1,
+        "label":"One",
+        "treatmentId":1,
+        "block":1,
+        "polygon":null}]}))
+    .expect("layout");
     s.set_layout(layout, |_| {}).expect("layout");
     let layout = json!(s.get_layout().expect("layout"));
     check("Layout", &layout);

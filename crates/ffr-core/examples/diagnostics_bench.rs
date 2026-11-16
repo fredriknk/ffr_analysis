@@ -47,9 +47,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let report = s.diagnostics_report()?;
     println!(
         "{}",
-        serde_json::to_string_pretty(
-            &json!({"timingsSeconds":{"open":open,"recompute":recompute,"listFluxes":list,"getFluxDetail":detail_time,"previewFlux":preview,"getFluxThumbs200":thumbnails,"treatmentSummary":summary},"thumbnails":thumbs.len(),"diagnostics":report})
-        )?
+        serde_json::to_string_pretty(&json!({"timingsSeconds":{"open":open,
+                "recompute":recompute,
+                "listFluxes":list,
+                "getFluxDetail":detail_time,
+                "previewFlux":preview,
+                "getFluxThumbs200":thumbnails,
+                "treatmentSummary":summary},
+                "thumbnails":thumbs.len(),
+                "diagnostics":report}))?
     );
     Ok(())
 }

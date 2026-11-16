@@ -63,7 +63,27 @@ fn synthetic_pickle_and_gzip_keep_all_channels() {
     let name = "2022-09-01-13-07-15-x1_0-y2_0-z0_0-h-1_0_both_Plot_1_";
     let metadata = raw::filename(name, "Europe/Oslo").expect("metadata");
     let epoch = metadata.time as f64 / 1000.;
-    let original = json!({"aux":[[epoch,[1,1]],"",[epoch+0.1,[2,0]],[epoch+20.,[2,1]],[epoch+20.1,[1,0]]],"li-cor":{"t0":0,"dt":1,"ty":(0..45).map(|i|json!([i,[400.+i as f64,2.,3.,4.,5.]])).collect::<Vec<_>>()}});
+    let original = json!({"aux":[[epoch,
+        [1,
+        1]],
+        "",
+        [epoch+0.1,
+        [2,
+        0]],
+        [epoch+20.,
+        [2,
+        1]],
+        [epoch+20.1,
+        [1,
+        0]]],
+        "li-cor":{"t0":0,
+        "dt":1,
+        "ty":(0..45).map(|i|json!([i,
+        [400.+i as f64,
+        2.,
+        3.,
+        4.,
+        5.]])).collect::<Vec<_>>()}});
     let path = dir.path().join(name);
     let bytes = serde_pickle::to_vec(&original, serde_pickle::SerOptions::new()).expect("pickle");
     std::fs::write(&path, bytes).expect("write");

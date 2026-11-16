@@ -145,7 +145,11 @@ impl Session {
             }
         }
         findings.valve_lag_s += opts.valve_offset;
-        self.db()?.execute("INSERT INTO diagnostics(flux_id,findings,analysis) VALUES(?1,'[]',?2) ON CONFLICT(flux_id) DO UPDATE SET analysis=excluded.analysis",params![id,serde_json::to_string(&findings)?])?;
+        self.db()?.execute(
+            "INSERT INTO diagnostics(flux_id,findings,analysis) VALUES(?1,'[]',?2) \
+             ON CONFLICT(flux_id) DO UPDATE SET analysis=excluded.analysis",
+            params![id, serde_json::to_string(&findings)?],
+        )?;
         crate::diagnostics::decorate(&mut row, &mut findings.diagnostics, findings.valve_lag_s);
         row.insert("valveImprovement".into(), json!(findings.valve_improvement));
         self.save_findings(id, &findings.diagnostics)?;
@@ -591,7 +595,17 @@ serde_json::to_string(findings)?])?;
             .filter(|r| (30. ..70.).contains(&r["attention"].as_f64().unwrap_or(0.)))
             .count();
         Ok(json!({
-        "noiseFloors":baseline,"severityCounts":severity_counts,"queue":{"bad":bad,"warn":warn,"badFraction":bad as f64/robot.len().max(1) as f64,"badWarnFraction":(bad+warn) as f64/robot.len().max(1) as f64},"top40":top40,"legacyExcludedRanks":legacy_ranks,"top30N2OImpact":impacts,
+        "noiseFloors": baseline,
+        "severityCounts": severity_counts,
+        "queue": {
+            "bad": bad,
+            "warn": warn,
+            "badFraction": bad as f64 / robot.len().max(1) as f64,
+            "badWarnFraction": (bad + warn) as f64 / robot.len().max(1) as f64
+        },
+        "top40": top40,
+        "legacyExcludedRanks": legacy_ranks,
+        "top30N2OImpact": impacts,
         "robotFluxes":robot.len(),
         "excluded":excluded,
         "notExcluded":robot.len()-excluded,

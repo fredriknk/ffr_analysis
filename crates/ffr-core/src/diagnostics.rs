@@ -358,7 +358,15 @@ pub fn analyse(
             .any(|v| (v - c.normal_segment_s).abs() > c.normal_segment_s * c.irregular_fraction)
         || raw.switches.windows(2).any(|p| p[0].1 == p[1].1);
     if irregular {
-        d.push(finding("valves_irregular","warn",None,times.len() as f64,"Valve segments are missing, repeated, or differ from the normal duration by over the configured fraction.".into()));
+        let message = "Valve segments are missing, repeated, or differ from the \
+                       normal duration by over the configured fraction.";
+        d.push(finding(
+            "valves_irregular",
+            "warn",
+            None,
+            times.len() as f64,
+            message.into(),
+        ));
     }
     let mut half_differences = BTreeMap::new();
     for (gas, r) in results {
@@ -524,7 +532,7 @@ pub const RULES: [(&str, &str, &str); 15] = [
     (
         "noisy",
         "Noisy trace",
-        "Residual noise exceeds the project baseline.",
+        "Residual SD exceeds 4 times the gas baseline (warn) or 10 times (bad).",
     ),
     (
         "error",
@@ -534,12 +542,12 @@ pub const RULES: [(&str, &str, &str); 15] = [
     (
         "n2o_negative",
         "N2O decreases",
-        "Significant negative N2O slope suggests a leak.",
+        "Significant negative N2O exceeds the noise floor, with stronger loss or a leak rated bad.",
     ),
     (
         "co2_not_rising",
         "CO2 not rising",
-        "CO2 does not accumulate in the chamber.",
+        "CO2 decreases beyond the noise floor with p below 0.01.",
     ),
     (
         "chamber_leak",
@@ -549,17 +557,17 @@ pub const RULES: [(&str, &str, &str); 15] = [
     (
         "curvature",
         "Curved trace",
-        "A significant quadratic improvement accompanies different half-window slopes.",
+        "Significant curvature changes half-window fluxes by more than 40 percent and twice the noise floor.",
     ),
     (
         "valve_timing",
         "Valve timing mismatch",
-        "A shifted valve schedule substantially lowers both chambers' CO2 SSE.",
+        "A gas-specific valve shift lowers chamber SSE; robust-fit impact determines severity.",
     ),
     (
         "edge_transient",
         "Valve-edge transients",
-        "Segment-edge residuals systematically exceed interior residuals.",
+        "Segment-edge residuals exceed interior residuals; robust-fit impact determines severity.",
     ),
     (
         "valves_irregular",
@@ -569,12 +577,12 @@ pub const RULES: [(&str, &str, &str); 15] = [
     (
         "spike",
         "Residual spike",
-        "A residual exceeds the configured robust MAD threshold.",
+        "A residual exceeds the MAD threshold; robust-fit impact determines severity.",
     ),
     (
         "few_points",
         "Short fit",
-        "Too few points or too short a regression window.",
+        "The fit has too few points or a short window, informational when its window was overridden.",
     ),
     (
         "legacy_qc",
@@ -584,7 +592,7 @@ pub const RULES: [(&str, &str, &str); 15] = [
     (
         "neighbour_outlier",
         "Neighbour outlier",
-        "Asinh flux differs from nearby comparable non-excluded measurements.",
+        "Flux exceeds nearby non-excluded measurements on both noise-scaled asinh and raw MAD scales.",
     ),
     (
         "temp_fallback",
@@ -597,7 +605,6 @@ pub const RULES: [(&str, &str, &str); 15] = [
         "The chamber belongs to no plot.",
     ),
 ];
-
 impl DiagnosticsConfig {
     pub fn validate(&self) -> crate::Result<()> {
         let probabilities = [
@@ -647,7 +654,6 @@ impl DiagnosticsConfig {
         Ok(())
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -684,8 +690,16 @@ mod tests {
                 json!([t, [co2, 1., 1., 1.]])
             })
             .collect();
-        let mut raw =
-            raw::from_value(meta, json!({"aux":events,"li-cor":{"ty":rows}})).expect("raw");
+        let mut raw = raw::from_value(
+            meta,
+            json!({
+            "aux":events,
+            "li-cor":{
+            "ty":rows}
+            }
+            ),
+        )
+        .expect("raw");
         let t: Vec<_> = (0..200).map(|i| i as f64 + 0.25).collect();
         let y = t
             .iter()
@@ -699,7 +713,17 @@ mod tests {
             .expect("fit");
         let c = DiagnosticsConfig::default();
         let mut f = analyse(raw, 1, o, &results, &c, valve_lag(raw, o, &c));
-        let mut row:FluxRow=serde_json::from_value(json!({"id":1,"time":0,"measurementId":1,"source":"robot","excluded":false,"overridden":false,"treatmentId":1,"plotId":1})).expect("row");
+        let mut row: FluxRow = serde_json::from_value(json!({
+        "id":1,
+        "time":0,
+        "measurementId":1,
+        "source":"robot",
+        "excluded":false,
+        "overridden":false,
+        "treatmentId":1,
+        "plotId":1}
+        ))
+        .expect("row");
         for (gas, r) in &results {
             row.insert(format!("{gas}_flux"), json!(r.flux));
             row.insert(format!("{gas}_pval"), json!(r.pval));
@@ -809,7 +833,25 @@ mod tests {
     }
     #[test]
     fn neighbours_and_attention() {
-        let mut rows:Vec<FluxRow>=(0..12).map(|i|serde_json::from_value(json!({"id":i,"measurementId":i,"source":"robot","time":i*1000,"excluded":false,"treatmentId":1,"plotId":1,"N2O_flux":if i==11{10000.}else{10.+i as f64*0.1}})).expect("row")).collect();
+        let mut rows: Vec<FluxRow> = (0..12)
+            .map(|i| {
+                serde_json::from_value(json!({
+                "id":i,
+                "measurementId":i,
+                "source":"robot",
+                "time":i*1000,
+                "excluded":false,
+                "treatmentId":1,
+                "plotId":1,
+                "N2O_flux":if i==11{
+                10000.}
+                else{
+                10.+i as f64*0.1}
+                }
+                ))
+                .expect("row")
+            })
+            .collect();
         let mut f = vec![vec![]; rows.len()];
         let baseline: Baseline = [
             (
@@ -844,8 +886,17 @@ mod tests {
     #[test]
     fn zero_offset_exact() {
         let r = trace(0., false, false, false);
-        let old = regression::compute(&r, 1, &json!({}), &json!({"start":0.,"stop":180.}), 20.)
-            .expect("fit");
+        let old = regression::compute(
+            &r,
+            1,
+            &json!({}),
+            &json!({
+            "start":0.,
+            "stop":180.}
+            ),
+            20.,
+        )
+        .expect("fit");
         let new = regression::compute(
             &r,
             1,

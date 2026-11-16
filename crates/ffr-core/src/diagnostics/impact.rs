@@ -311,7 +311,17 @@ pub fn contextualise(
                     } else {
                         "n2o_negative"
                     };
-                    findings[i].push(finding(code,if gas=="CO2"||flux< -5.*floor{"bad"}else{"warn"},Some(gas),flux,format!("{gas} flux {flux:.1} is below the negative noise floor {negative_floor:.1} with p={p:.2e}.",negative_floor=-floor)));
+                    let severity = if gas == "CO2" || flux < -5. * floor {
+                        "bad"
+                    } else {
+                        "warn"
+                    };
+                    let negative_floor = -floor;
+                    let message = format!(
+                        "{gas} flux {flux:.1} is below the negative noise floor \
+                         {negative_floor:.1} with p={p:.2e}."
+                    );
+                    findings[i].push(finding(code, severity, Some(gas), flux, message));
                 }
             }
         }
@@ -339,7 +349,20 @@ pub fn contextualise(
                 let bad = sibling_co2 > 0.5 * m
                     || (sibling_n2o > 5. * n2o_floor
                         && n2o.is_some_and(|v| v < 0.25 * sibling_n2o));
-                findings[i].push(finding("chamber_leak",if bad{"bad"}else{"warn"},Some("CO2"),co2/m,format!("CO2 is {:.0}% of the day's median ({m:.1}); sibling CO2 is {:.0}% of that median; N2O is {:.0}% of its sibling.",100.*co2/m,100.*sibling_co2/m,100.*n2o.unwrap_or(0.)/sibling_n2o.abs().max(n2o_floor))));
+                let message = format!(
+                    "CO2 is {:.0}% of the day's median ({m:.1}); \
+                     sibling CO2 is {:.0}% of that median; N2O is {:.0}% of its sibling.",
+                    100. * co2 / m,
+                    100. * sibling_co2 / m,
+                    100. * n2o.unwrap_or(0.) / sibling_n2o.abs().max(n2o_floor)
+                );
+                findings[i].push(finding(
+                    "chamber_leak",
+                    if bad { "bad" } else { "warn" },
+                    Some("CO2"),
+                    co2 / m,
+                    message,
+                ));
             }
         }
         let leak = findings[i].iter().any(|d| d.code == "chamber_leak");
@@ -425,7 +448,12 @@ fn neighbours_scaled(
             let z =
                 ((v / scale).asinh() - median(&transformed)).abs() / mad(&transformed).max(0.15);
             if z > c.neighbour_z && raw_z > c.neighbour_raw_z {
-                findings[i].push(finding("neighbour_outlier","warn",Some(gas),z,format!("Flux {v:.1} versus neighbour median {centre:.1}: raw z={raw_z:.1}, scaled-asinh z={z:.1}; {} non-excluded neighbours.",values.len())));
+                let message = format!(
+                    "Flux {v:.1} versus neighbour median {centre:.1}: \
+                     raw z={raw_z:.1}, scaled-asinh z={z:.1}; {} non-excluded neighbours.",
+                    values.len()
+                );
+                findings[i].push(finding("neighbour_outlier", "warn", Some(gas), z, message));
             }
         }
     }
@@ -434,7 +462,24 @@ fn neighbours_scaled(
 mod tests {
     use super::*;
     fn row(id: i64, co2: f64, n2o: f64) -> FluxRow {
-        serde_json::from_value(json!({"id":id,"measurementId":(id+1)/2,"time":0,"source":"robot","excluded":false,"reviewed":false,"overridden":false,"treatmentId":1,"plotId":1,"CO2_flux":co2,"N2O_flux":n2o,"CO2_pval":0.0001,"N2O_pval":0.0001,"CO2_resid":1.,"N2O_resid":0.001})).expect("row")
+        serde_json::from_value(json!({
+        "id":id,
+        "measurementId":(id+1)/2,
+        "time":0,
+        "source":"robot",
+        "excluded":false,
+        "reviewed":false,
+        "overridden":false,
+        "treatmentId":1,
+        "plotId":1,
+        "CO2_flux":co2,
+        "N2O_flux":n2o,
+        "CO2_pval":0.0001,
+        "N2O_pval":0.0001,
+        "CO2_resid":1.,
+        "N2O_resid":0.001}
+        ))
+        .expect("row")
     }
     fn baseline() -> Baseline {
         [

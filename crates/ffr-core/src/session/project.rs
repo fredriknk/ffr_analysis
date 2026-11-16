@@ -63,7 +63,11 @@ original INTEGER);
         self.path = path.into();
         if version < 3 {
             let tx = self.db()?.unchecked_transaction()?;
-            self.db()?.execute_batch("CREATE TABLE IF NOT EXISTS diagnostics(flux_id INTEGER PRIMARY KEY REFERENCES fluxes(id),findings TEXT NOT NULL,analysis TEXT NOT NULL DEFAULT '{}');")?;
+            self.db()?.execute_batch(
+                "CREATE TABLE IF NOT EXISTS diagnostics(\
+                 flux_id INTEGER PRIMARY KEY REFERENCES fluxes(id),\
+                 findings TEXT NOT NULL,analysis TEXT NOT NULL DEFAULT '{}');",
+            )?;
             let columns: Vec<String> = self
                 .db()?
                 .prepare("PRAGMA table_info(diagnostics)")?
