@@ -3,11 +3,11 @@ use super::*;
 impl Session {
     pub fn export_csv(&self, args: ExportArgs) -> Result<()> {
         let rows = self.export_rows(&args)?;
-        let mut writer =
-            csv::Writer::from_path(&args.path).map_err(|e| Error::Invalid(e.to_string()))?;
+        let mut writer = csv::Writer::from_path(&args.path)
+            .map_err(|e| Error::Invalid(format!("{}: {e}", args.path)))?;
         writer
             .write_record(&args.columns)
-            .map_err(|e| Error::Invalid(e.to_string()))?;
+            .map_err(|e| Error::Invalid(format!("{}: {e}", args.path)))?;
         for r in rows {
             writer
                 .write_record(
@@ -15,7 +15,7 @@ impl Session {
                         .iter()
                         .map(|k| cell_text(r.get(k).unwrap_or(&Value::Null))),
                 )
-                .map_err(|e| Error::Invalid(e.to_string()))?;
+                .map_err(|e| Error::Invalid(format!("{}: {e}", args.path)))?;
         }
         writer.flush().map_err(|e| Error::at(&args.path, e))?;
         Ok(())

@@ -315,3 +315,49 @@ fn per_gas_timing_inherits_and_does_not_modify_sibling_gases() {
     assert_eq!((c.cut_beginnings, c.cut_ends, c.valve_offset), (4., 3., 0.));
     assert_eq!(n.start, o.start);
 }
+#[test]
+fn one_sided_files_do_not_create_unmeasured_chamber_errors() {
+    let dir = tempfile::tempdir().expect("temporary");
+    let name = "2022-09-01-13-07-15-x1_0-y2_0-z0_0-h0_0_right_Plot_1_";
+    let file = dir.path().join(name);
+    let meta = ffr_core::raw::filename(name, "Europe/Oslo").expect("metadata");
+    let epoch = meta.time as f64 / 1000.;
+    let data = json!({"aux":[[epoch,[2,1]],[epoch+0.1,[1,0]]],"li-cor":{"ty":(0..100).map(|i|json!([i,[400.+i as f64,1.,1.,1.]])).collect::<Vec<_>>()}});
+    std::fs::write(
+        &file,
+        serde_pickle::to_vec(&data, serde_pickle::SerOptions::new()).expect("pickle"),
+    )
+    .expect("write");
+    let path = dir.path().join("one.ffr");
+    let mut s = Session::default();
+    s.project_create(path.to_str().expect("path"), "One")
+        .expect("create");
+    s.import_raw_files(&[file.to_string_lossy().into_owned()], |_| {})
+        .expect("import");
+    let table = s.list_fluxes().expect("table");
+    assert_eq!(table.rows, 1);
+    assert_eq!(table.data["side"][0], "right");
+    let detail = s.get_flux_detail(1).expect("detail");
+    s.preview_flux(1, detail.options)
+        .expect("baseline exists after incremental import");
+    s.project_close();
+    let db = rusqlite::Connection::open(&path).expect("DB");
+    let row: String = db
+        .query_row("SELECT row FROM fluxes WHERE id=1", [], |r| r.get(0))
+        .expect("row");
+    let mut phantom: serde_json::Value = serde_json::from_str(&row).expect("JSON");
+    phantom["id"] = json!(2);
+    phantom["side"] = json!("left");
+    db.execute(
+        "INSERT INTO fluxes(id,measurement_id,row,results) VALUES(2,1,?1,'{}')",
+        [phantom.to_string()],
+    )
+    .expect("old phantom");
+    db.execute_batch("PRAGMA user_version=2;")
+        .expect("old version");
+    drop(db);
+    let info = s
+        .project_open(path.to_str().expect("path"))
+        .expect("migrate");
+    assert_eq!(info.counts.fluxes, 1);
+}

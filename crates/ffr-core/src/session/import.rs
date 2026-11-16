@@ -62,7 +62,12 @@ impl Session {
                     db.execute("INSERT INTO measurements(filename,metadata,status,error) VALUES(?1,?2,'error',?3)",params![name,metadata,e.to_string()])?;
                     let mid = db.last_insert_rowid();
                     let meta: Value = serde_json::from_str(&metadata)?;
-                    for side in ["left", "right"] {
+                    let sides: Vec<&str> = match meta["sides"].as_str() {
+                        Some("left") => vec!["left"],
+                        Some("right") => vec!["right"],
+                        _ => vec!["left", "right"],
+                    };
+                    for side in sides {
                         let mut row: FluxRow = serde_json::from_value(json!({
                         "id":0,
                         "measurementId":mid,
@@ -111,7 +116,12 @@ serde_json::to_string(&raw.metadata)?,
 bytes])?;
 
                     let mid = db.last_insert_rowid();
-                    for side in ["left", "right"] {
+                    let sides: Vec<&str> = match raw.metadata.sides.as_str() {
+                        "left" => vec!["left"],
+                        "right" => vec!["right"],
+                        _ => vec!["left", "right"],
+                    };
+                    for side in sides {
                         let row = json!({
                         "id":0,
                         "measurementId":mid,

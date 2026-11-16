@@ -163,6 +163,7 @@ impl Session {
         } else {
             None
         };
+        self.prune_unmeasured_sides()?;
         self.lag_cache.borrow_mut().clear();
         let cfg = self.get_config()?;
         let mut jobs = vec![];
@@ -237,6 +238,28 @@ impl Session {
         Ok(())
     }
 
+    fn prune_unmeasured_sides(&self) -> Result<()> {
+        let mut query=self.db()?.prepare("SELECT f.id,m.metadata,f.row FROM fluxes f JOIN measurements m ON f.measurement_id=m.id WHERE m.status='ok'")?;
+        let records = query
+            .query_map([], |r| {
+                Ok((
+                    r.get::<_, i64>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                ))
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        for (id, metadata, row) in records {
+            let meta: raw::Metadata = serde_json::from_str(&metadata)?;
+            let row: FluxRow = serde_json::from_str(&row)?;
+            if ["left", "right"].contains(&meta.sides.as_str()) && row["side"] != meta.sides {
+                self.db()?
+                    .execute("DELETE FROM diagnostics WHERE flux_id=?1", [id])?;
+                self.db()?.execute("DELETE FROM fluxes WHERE id=?1", [id])?;
+            }
+        }
+        Ok(())
+    }
     pub(super) fn save_error_row(&self, id: i64, mut row: FluxRow, message: &str) -> Result<()> {
         let mut findings = vec![crate::diagnostics::Diagnostic {
             impact: None,
