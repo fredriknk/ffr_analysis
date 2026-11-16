@@ -1,4 +1,3 @@
-import { useQuery } from "@tanstack/react-query";
 import {
   getCoreRowModel,
   getFilteredRowModel,
@@ -23,9 +22,11 @@ import {
 } from "../../shared/common";
 import { codes, DiagnosticPicker } from "../../shared/diagnostics";
 import { attention, dateTime, significant } from "../../shared/format";
+import { useDiagnostics } from "../../shared/hooks/useDiagnostics";
 import { FluxTableView } from "../../shared/table/FluxTableView";
 import { useStore } from "../../store";
 export function Data() {
+  const active = useStore((s) => s.screen === "Data");
   const s = useStore(
       useShallow(({ dataSearch, set, nav, reviewThese, openFlux }) => ({
         dataSearch,
@@ -61,10 +62,7 @@ export function Data() {
       JSON.parse(localStorage.getItem("ffr-presets") ?? "{}"),
     );
   const [diagnosticCodes, setDiagnosticCodes] = useState<string[]>([]);
-  const diagnostics = useQuery({
-    queryKey: ["diagnostics"],
-    queryFn: () => api.diagnosticsSummary(),
-  });
+  const diagnostics = useDiagnostics(active);
   const dataRows = useMemo(
     () =>
       data.data?.rows.filter(
@@ -317,7 +315,7 @@ export function Data() {
         <Panel title="Visible columns">
           <input
             aria-label="Search columns"
-            placeholder="Find a column?"
+            placeholder="Find a column…"
             value={columnSearch}
             onChange={(e) => setColumnSearch(e.target.value)}
           />

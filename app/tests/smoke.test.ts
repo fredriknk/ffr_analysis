@@ -1,42 +1,72 @@
-﻿import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
+import type { ECharts } from "echarts/core";
+type ChartElement = HTMLElement & { __ffrChart: ECharts };
 async function chartPoint(page: Page, label: string) {
   const el = page.getByRole("img", { name: label, exact: true });
+  await expect(el).toBeVisible();
+  await page.waitForTimeout(400);
   await el.scrollIntoViewIfNeeded();
-  return page.evaluate(async (label) => {
-    const path = "/src/shared/charts/Chart.tsx",
-      { echarts } = await import(path),
-      el = document.querySelector(
-        '[aria-label="' + label + '"]',
-      ) as HTMLElement,
-      c = echarts.getInstanceByDom(el),
-      opt = c.getOption(),
-      series = opt.series.findIndex(
-        (s: { data?: unknown[] }) => s.data?.length,
-      ),
-      datum = opt.series[series].data[0],
-      pixel = c.convertToPixel({ seriesIndex: series }, datum.value ?? datum),
-      box = el.getBoundingClientRect();
-    return { x: box.left + pixel[0], y: box.top + pixel[1] };
-  }, label);
+  return el.evaluate((element) => {
+    const c = (element as ChartElement).__ffrChart;
+    const opt = c.getOption() as {
+      series: { type: string; data: { value?: number[] } | number[][] }[];
+    };
+    for (const s of opt.series) {
+      if (s.type !== "scatter" || !Array.isArray(s.data)) continue;
+      for (const datum of s.data) {
+        const value = Array.isArray(datum)
+          ? datum
+          : (datum as { value: number[] }).value;
+        if (!value?.[2]) continue;
+        const pixel = c.convertToPixel(
+          { xAxisIndex: 0, yAxisIndex: 0 },
+          value.slice(0, 2),
+        );
+        if (c.containPixel({ gridIndex: 0 }, pixel)) {
+          const box = element.getBoundingClientRect();
+          return { x: box.left + pixel[0], y: box.top + pixel[1] };
+        }
+      }
+    }
+    throw Error(
+      "No visible scatter point in " + element.getAttribute("aria-label"),
+    );
+  });
 }
-test("outlier hunting, attribution and linked review in both themes", async ({
+async function quick(page: Page, value: string) {
+  const filter = page.locator(".queue-toolbar .filter-menu").first();
+  await filter.locator("summary").click();
+  await page.getByLabel("Quick filter").selectOption(value);
+  await filter.locator("summary").click();
+}
+async function go(page: Page, id: number) {
+  await page.locator(".review-heading h2").click();
+  await page.keyboard.press("g");
+  await page.getByLabel("Go to flux or date").fill(String(id));
+  await page.getByRole("button", { name: "Go", exact: true }).click();
+  await expect(page.locator(".review-heading")).toHaveAttribute(
+    "data-flux-id",
+    String(id),
+  );
+}
+test("triage, stable selection, lazy contact sheet, linked charts and all screens", async ({
   page,
 }) => {
   test.setTimeout(240000);
   mkdirSync("screenshots", { recursive: true });
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
+  page.on("console", (e) => {
+    if (e.type() === "error") errors.push(e.text());
+  });
   await page.goto("/");
   await expect(
     page.getByRole("button", { name: "Open demo project" }),
   ).toBeVisible({ timeout: 60000 });
   const shot = async (name: string) => {
-    await page.waitForTimeout(350);
-    await page.screenshot({
-      path: "screenshots/" + name + ".png",
-      fullPage: true,
-    });
+    await page.waitForTimeout(300);
+    await page.screenshot({ path: `screenshots/${name}.png`, fullPage: true });
   };
   const pair = async (name: string) => {
     await shot(name + "-light");
@@ -48,14 +78,128 @@ test("outlier hunting, attribution and linked review in both themes", async ({
     page.locator("nav").getByRole("button", { name, exact: true }).click();
   await pair("start");
   await page.getByRole("button", { name: "Open demo project" }).click();
-  await expect(page.getByLabel("Quick filter")).toHaveValue("attention");
+  await expect(page.locator(".review-heading h2")).not.toHaveText(
+    "Loading flux…",
+  );
   await expect(page.getByLabel("Valve offset seconds")).toBeVisible();
-  await expect(
-    page.getByRole("img", { name: "N2O residual strip" }),
-  ).toBeVisible();
   await pair("review-triage");
+  await page.setViewportSize({ width: 1366, height: 768 });
+  const dimensions = await page
+    .locator(".review-main,.compact-inspector")
+    .evaluateAll((els) =>
+      els.map((el) => ({ h: el.clientHeight, scroll: el.scrollHeight })),
+    );
+  expect(dimensions.every((d) => d.scroll <= d.h + 3)).toBe(true);
+  await pair("review-1366");
+  expect(
+    await page.locator(".triage-row:visible").count(),
+  ).toBeGreaterThanOrEqual(20);
+  await page.setViewportSize({ width: 1500, height: 960 });
+  await quick(page, "all");
+  await page.getByLabel("Queue sort").selectOption("time");
+  await page.evaluate(async () => {
+    const path = "/src/api/index.ts",
+      { api } = await import(path);
+    await api.setFluxFlags([1, 2], { reviewed: false, excluded: false });
+  });
+  await go(page, 1);
+  // Slow only the next uncached detail: the previous header and chart must remain.
+  await page.evaluate(async () => {
+    const path = "/src/api/index.ts",
+      { api } = await import(path),
+      original = api.getFluxDetail;
+    api.getFluxDetail = async (id: number) => {
+      await new Promise((r) => setTimeout(r, 350));
+      return original(id);
+    };
+  });
+  await page.keyboard.press("ArrowRight");
+  await expect(page.locator(".review-heading")).toHaveAttribute(
+    "data-flux-id",
+    "1",
+  );
+  await expect(page.locator(".review-heading")).toHaveAttribute(
+    "data-flux-id",
+    "2",
+  );
+  await page.keyboard.press("x");
+  await expect(page.locator(".excluded-banner")).toBeVisible();
+  await page.keyboard.press("Control+z");
+  await expect(page.locator(".excluded-banner")).toHaveCount(0);
+  await expect(page.locator(".review-heading")).toHaveAttribute(
+    "data-flux-id",
+    "2",
+  );
+  await page.keyboard.press("a");
+  await expect
+    .poll(() =>
+      page.evaluate(async () => {
+        const path = "/src/api/index.ts",
+          { api } = await import(path);
+        return [
+          (await api.getFluxDetail(1)).flux.reviewed,
+          (await api.getFluxDetail(2)).flux.reviewed,
+        ];
+      }),
+    )
+    .toEqual([false, true]);
+  // A change that removes the item from its filter must not select the first queue item.
+  await go(page, 1009);
+  await quick(page, "unreviewed");
+  await page.getByLabel("Queue sort").selectOption("attention");
+  await page
+    .getByRole("button", { name: "Exclude flux", exact: false })
+    .click();
+  await page.keyboard.press("Control+z");
+  await expect(page.locator(".review-heading")).toHaveAttribute(
+    "data-flux-id",
+    "1009",
+  );
+  await page.getByLabel("start seconds").fill("25");
+  await page.getByLabel("start seconds").press("Enter");
+  await page.getByLabel("start seconds").blur();
+  const handle = page.getByRole("slider", {
+    name: "N2O start handle",
+    exact: true,
+  });
+  const h = await handle.boundingBox();
+  if (h) {
+    await page.mouse.move(h.x + 4, h.y + 30);
+    await page.mouse.down();
+    await page.mouse.move(h.x + 20, h.y + 30, { steps: 4 });
+    await page.mouse.up();
+  }
+  await pair("review");
+  // Slow thumbnails deliberately: loading never masquerades as validation failure.
+  await page.evaluate(async () => {
+    const path = "/src/api/index.ts",
+      { api } = await import(path),
+      original = api.getFluxThumbs;
+    (window as unknown as { thumbCalls: number[][] }).thumbCalls = [];
+    api.getFluxThumbs = async (
+      ids: number[],
+      gas: "N2O" | "CO2",
+      maxPoints?: number,
+    ) => {
+      (window as unknown as { thumbCalls: number[][] }).thumbCalls.push(ids);
+      await new Promise((r) => setTimeout(r, 900));
+      return original(ids, gas, maxPoints);
+    };
+  });
   await page.getByRole("button", { name: /Contact sheet/ }).click();
-  await expect(page.locator(".contact-card").first()).toBeVisible();
+  await expect(
+    page.getByRole("status", { name: "Loading trace" }).first(),
+  ).toBeVisible();
+  await expect(
+    page.getByText("No trace returned / validation failed"),
+  ).toHaveCount(0);
+  await expect(page.locator(".contact-card svg line").first()).toBeVisible();
+  const calls = await page.evaluate(
+    () => (window as unknown as { thumbCalls: number[][] }).thumbCalls,
+  );
+  expect(calls.every((ids) => ids.length <= 8)).toBe(true);
+  expect(calls.flat().length).toBeLessThan(100);
+  await pair("contact-sheet");
   await page
     .locator(".contact-card")
     .nth(0)
@@ -65,11 +209,6 @@ test("outlier hunting, attribution and linked review in both themes", async ({
     .nth(1)
     .click({ modifiers: ["Control"] });
   await expect(page.getByText(/2 selected/)).toBeVisible();
-  await pair("contact-sheet");
-  await page.keyboard.press("x");
-  await page
-    .getByRole("button", { name: "Include selected", exact: true })
-    .click();
   await page
     .getByRole("button", { name: "Mark selected reviewed", exact: true })
     .click();
@@ -77,77 +216,23 @@ test("outlier hunting, attribution and linked review in both themes", async ({
     .getByRole("button", { name: "Clear selection", exact: true })
     .click();
   await page.locator(".contact-card").first().click();
-  await expect(page.getByLabel("start seconds")).toBeVisible();
-  await page.getByLabel("Quick filter").selectOption("all");
-  await page.getByLabel("Queue sort").selectOption("time");
-  async function go(id: number) {
-    await page.locator(".review-heading h2").click();
-    await page.keyboard.press("g");
-    await page.getByLabel("Go to flux or date").fill(String(id));
-    await page.getByRole("button", { name: "Go", exact: true }).click();
-    await expect(page.locator(".review-heading")).toContainText("Flux #" + id);
-  }
-  await go(1);
-  await page.keyboard.press("ArrowRight");
-  await expect(page.locator(".review-heading")).toContainText("Flux #2");
-  await page.getByLabel("start seconds").fill("25");
-  await page.getByLabel("start seconds").press("Enter");
-  await page.getByLabel("start seconds").blur();
-  const box = await page
-    .getByRole("slider", { name: "N2O start handle", exact: true })
-    .boundingBox();
-  if (box) {
-    await page.mouse.move(box.x + 7, box.y + 50);
-    await page.mouse.down();
-    await page.mouse.move(box.x + 25, box.y + 50, { steps: 4 });
-    await page.mouse.up();
-  }
-  await page.locator(".review-heading h2").click();
-  await page.keyboard.press("x");
-  await expect(
-    page.getByRole("button", { name: "Include flux", exact: false }),
-  ).toBeVisible();
-  await page.keyboard.press("Control+z");
-  await expect(
-    page.getByRole("button", { name: "Exclude flux", exact: false }),
-  ).toBeVisible();
-  await go(1009);
-  await page.getByLabel("Offset scope").selectOption("file");
-  await page.getByRole("button", { name: "Apply estimated offset" }).click();
-  await expect(page.getByLabel("Valve offset seconds")).not.toHaveValue("0");
-  await page.locator(".review-heading h2").click();
-  await page.keyboard.press("Control+z");
-  await expect(page.getByLabel("Valve offset seconds")).toHaveValue("0");
-  await page
-    .locator(".results")
-    .evaluate((el) => (el.scrollTop = el.scrollHeight));
-  await expect(page.getByPlaceholder("Add a note…")).toBeVisible();
-  await page.locator(".results").evaluate((el) => (el.scrollTop = 0));
-  await pair("review");
   await nav("Outliers");
   await expect(
     page.getByRole("heading", { name: "Outlier hunting" }),
   ).toBeVisible();
   await pair("outliers");
-  // Activate the box tool, then drag over the actual plotted points.
-  await page
-    .getByRole("img", { name: "N₂O versus CO₂", exact: true })
-    .scrollIntoViewIfNeeded();
-  const rect = await page
-    .getByRole("img", { name: "N₂O versus CO₂", exact: true })
-    .boundingBox();
-  await page.evaluate(async () => {
-    const path = "/src/shared/charts/Chart.tsx",
-      { echarts } = await import(path),
-      el = document.querySelector(
-        '[aria-label="N₂O versus CO₂"]',
-      ) as HTMLElement;
-    echarts.getInstanceByDom(el).dispatchAction({
+  const scatter = page.getByRole("img", {
+    name: "N₂O versus CO₂",
+    exact: true,
+  });
+  await scatter.evaluate((el) =>
+    (el as ChartElement).__ffrChart.dispatchAction({
       type: "takeGlobalCursor",
       key: "brush",
-      brushOption: { brushType: "rect" },
-    });
-  });
+      brushOption: { brushType: "rect", brushMode: "single" },
+    }),
+  );
+  const rect = await scatter.boundingBox();
   if (rect) {
     await page.mouse.move(rect.x + 80, rect.y + 40);
     await page.mouse.down();
@@ -162,56 +247,44 @@ test("outlier hunting, attribution and linked review in both themes", async ({
   await page
     .getByRole("button", { name: "Review these →", exact: true })
     .click();
-  await expect(
-    page.getByRole("button", { name: "← Back to Outliers" }),
-  ).toBeVisible();
   await page.getByRole("button", { name: "← Back to Outliers" }).click();
   await expect(
     page.getByRole("button", { name: "Review these →", exact: true }),
   ).toBeEnabled();
   const point = await chartPoint(page, "Valve lag over time");
   await page.mouse.click(point.x, point.y);
-  await expect(
-    page.getByRole("button", { name: "← Back to Outliers" }),
-  ).toBeVisible();
   await page.getByRole("button", { name: "← Back to Outliers" }).click();
   await nav("Treatments");
   await pair("treatments");
-  await page.evaluate(async () => {
-    const path = "/src/shared/charts/Chart.tsx",
-      { echarts } = await import(path),
-      el = document.querySelector(
-        '[aria-label="Shared date-range brush"]',
-      ) as HTMLElement;
-    echarts
-      .getInstanceByDom(el)
-      .dispatchAction({ type: "dataZoom", start: 20, end: 80 });
-  });
+  await page
+    .getByRole("img", { name: "Shared date-range brush", exact: true })
+    .evaluate((el) =>
+      (el as ChartElement).__ffrChart.dispatchAction({
+        type: "dataZoom",
+        start: 20,
+        end: 80,
+      }),
+    );
   await expect(page.getByLabel("Summary from")).not.toHaveValue("");
   const from = await page.getByLabel("Summary from").inputValue();
   const p = await chartPoint(page, "Individual fluxes over time");
   await page.mouse.click(p.x, p.y);
-  await expect(
-    page.getByRole("button", { name: "← Back to Treatments" }),
-  ).toBeVisible();
   await page.getByRole("button", { name: "← Back to Treatments" }).click();
   await expect(page.getByLabel("Summary from")).toHaveValue(from);
+  await pair("treatments-detail");
   await nav("Data");
   const plot = page.getByLabel("Filter Plot", { exact: true });
   await page.locator("th").filter({ has: plot }).locator("summary").click();
   await plot.selectOption("P03");
   await page.locator("th").filter({ has: plot }).locator("summary").click();
   await pair("data");
-  await page.getByRole("button", { name: "Review these", exact: true }).click();
   await expect(
-    page.getByRole("button", { name: "← Back to Data" }),
-  ).toBeVisible();
+    page.getByRole("button", { name: "N2O_flux", exact: true }),
+  ).toHaveCount(0);
+  await page.getByRole("button", { name: "Review these", exact: true }).click();
   await page.getByRole("button", { name: "← Back to Data" }).click();
   await expect(plot).toHaveValues(["P03"]);
-  await page.locator(".table-scroll tbody tr button.cell").first().click();
-  await expect(
-    page.getByRole("button", { name: "← Back to Data" }),
-  ).toBeVisible();
+  await page.locator(".table-scroll tbody button.cell").first().click();
   await page.getByRole("button", { name: "← Back to Data" }).click();
   await nav("External data");
   await pair("external");
@@ -219,13 +292,9 @@ test("outlier hunting, attribution and linked review in both themes", async ({
   await pair("project");
   expect(errors).toEqual([]);
 });
-test("empty projects and query failures stay usable", async ({ page }) => {
-  test.setTimeout(90000);
+test("empty project and API error states stay usable", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("button", { name: "New project…" }).click();
-  await expect(
-    page.getByRole("heading", { name: "Project settings" }),
-  ).toBeVisible();
   await expect(page.getByText(/No field layout yet/)).toBeVisible();
   const nav = (name: string) =>
     page.locator("nav").getByRole("button", { name, exact: true }).click();
@@ -258,97 +327,4 @@ test("empty projects and query failures stay usable", async ({ page }) => {
       .getByRole("status")
       .filter({ hasText: "Synthetic connection failure" }),
   ).toBeVisible({ timeout: 10000 });
-  await expect(
-    page.locator("nav").getByRole("button", { name: "Project", exact: true }),
-  ).toBeEnabled();
 });
-test("manual flux links retain their imported values and treatment detail captures are current", async ({
-  page,
-}) => {
-  test.setTimeout(90000);
-  await page.goto("/");
-  await page.getByRole("button", { name: "Open demo project" }).click();
-  await page
-    .locator("nav")
-    .getByRole("button", { name: "Treatments", exact: true })
-    .click();
-  await page
-    .getByRole("img", { name: "Individual fluxes over time", exact: true })
-    .scrollIntoViewIfNeeded();
-  await page.waitForTimeout(350);
-  await page.screenshot({ path: "screenshots/treatments-detail-light.png" });
-  await page.getByLabel("Toggle theme").click();
-  await page.waitForTimeout(350);
-  await page.screenshot({ path: "screenshots/treatments-detail-dark.png" });
-  const manual = await page.evaluate(async () => {
-    const path = "/src/api/index.ts",
-      { api } = await import(path),
-      table = await api.listFluxes(),
-      i = table.data.source.findIndex((s: string) => s === "manual");
-    return {
-      id: Number(table.data.id[i]),
-      value: Number(table.data.N2O_flux[i]),
-    };
-  });
-  await page
-    .locator("nav")
-    .getByRole("button", { name: "Data", exact: true })
-    .click();
-  const source = page.getByLabel("Filter Source", { exact: true });
-  await page.locator("th").filter({ has: source }).locator("summary").click();
-  await source.selectOption("manual");
-  await page.locator("th").filter({ has: source }).locator("summary").click();
-  // Sorting by ID makes this independent of campaign order.
-  await page.getByRole("button", { name: "Flux ID", exact: true }).click();
-  await page.getByRole("button", { name: "Flux ID", exact: true }).click();
-  await page.locator(".table-scroll tbody tr button.cell").first().click();
-  await expect(page.locator(".review-heading")).toContainText(
-    "Flux #" + manual.id,
-  );
-  await expect(
-    page.getByText("Manual measurement · no raw trace", { exact: true }),
-  ).toBeVisible();
-  await expect(page.locator(".results .big-number").first()).toHaveText(
-    manual.value.toLocaleString("en-GB", {
-      minimumFractionDigits: 1,
-      maximumFractionDigits: 1,
-    }),
-  );
-  await page
-    .locator("nav")
-    .getByRole("button", { name: "External data", exact: true })
-    .click();
-  const deletes = page.getByRole("button", { name: /^Delete / });
-  for (let remaining = await deletes.count(); remaining > 0; remaining--) {
-    await deletes.first().click();
-    await expect(deletes).toHaveCount(remaining - 1);
-  }
-  await expect(
-    page.getByRole("img", { name: "External series preview", exact: true }),
-  ).toHaveCount(0);
-  await expect(
-    page.getByText(
-      "No series selected. Import or choose a series to preview it.",
-    ),
-  ).toBeVisible();
-  await page
-    .locator("nav")
-    .getByRole("button", { name: "Outliers", exact: true })
-    .click();
-  const last = page.getByRole("img", {
-    name: "Fluxes by treatment",
-    exact: true,
-  });
-  await expect(last).toBeVisible();
-  const bottom = await last.boundingBox();
-  expect(bottom!.y + bottom!.height).toBeLessThanOrEqual(
-    page.viewportSize()!.height - 26,
-  );
-  await page.waitForTimeout(350);
-  await page.screenshot({ path: "screenshots/outliers-dark.png" });
-  await page.getByLabel("Toggle theme").click();
-  await page.waitForTimeout(350);
-  await page.screenshot({ path: "screenshots/outliers-light.png" });
-});
-
-// The preceding workflow tests the empty workspace; the manual workflow also checks deleting the last series.

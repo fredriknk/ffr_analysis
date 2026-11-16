@@ -5,6 +5,7 @@ import { api, mockMode } from "../../api";
 import { Field, Panel, Status, pick, useAction } from "../../shared/common";
 import { useStore } from "../../store";
 export function Start() {
+  const visible = useStore((s) => s.screen === "Start");
   const action = useAction(),
     s = useStore(useShallow(({ nav }) => ({ nav })));
   const [wizard, setWizard] = useState(false),
@@ -17,6 +18,7 @@ export function Start() {
     [scan, setScan] = useState<Awaited<ReturnType<typeof api.legacyScan>>>();
   const recent = useQuery({
     queryKey: ["recent"],
+    enabled: visible,
     queryFn: () => api.recentProjects(),
   });
   const openProject = (path: string) =>

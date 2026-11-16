@@ -1,14 +1,16 @@
-﻿import { useQuery } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { useCallback, useMemo, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { api } from "../../api";
 import type { FluxRow, Gas } from "../../api/types";
 import { Status, unit, useAction, useRows } from "../../shared/common";
 import { codes } from "../../shared/diagnostics";
+import { useDiagnostics } from "../../shared/hooks/useDiagnostics";
 import { useStore } from "../../store";
 import { ScatterPlot, type ScatterSpec } from "./ScatterPlot";
 import { quantile, type AxisScale } from "./axes";
 export function Outliers() {
+  const visible = useStore((s) => s.screen === "Outliers");
   const s = useStore(
       useShallow(({ openFlux, reviewThese }) => ({ openFlux, reviewThese })),
     ),
@@ -22,11 +24,12 @@ export function Outliers() {
     [scale, setScale] = useState<AxisScale>("asinh"),
     [full, setFull] = useState(false),
     [colour, setColour] = useState<"severity" | "treatment">("severity");
-  const counts = useQuery({
-      queryKey: ["diagnostics"],
-      queryFn: () => api.diagnosticsSummary(),
-    }),
-    layout = useQuery({ queryKey: ["layout"], queryFn: () => api.getLayout() });
+  const counts = useDiagnostics(visible),
+    layout = useQuery({
+      queryKey: ["layout"],
+      enabled: visible,
+      queryFn: () => api.getLayout(),
+    });
   const rows = useMemo(() => {
     const raw = data.data?.rows ?? [],
       formatter = new Intl.DateTimeFormat("en-CA", {

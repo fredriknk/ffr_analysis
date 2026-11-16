@@ -41,6 +41,7 @@ export const ScatterPlot = memo(function ScatterPlot({
   onSelect,
   onOpen,
 }: Props) {
+  const theme = useStore((s) => s.theme);
   const instance = useRef<ECharts>(),
     select = useRef(onSelect),
     open = useRef(onOpen),
@@ -178,7 +179,7 @@ export const ScatterPlot = memo(function ScatterPlot({
             name: g.severity,
             type: "scatter",
             z: g.severity === "bad" ? 5 : g.severity === "warn" ? 3 : 1,
-            large: g.severity === "info",
+            large: false,
             largeThreshold: 2000,
             progressive: 2000,
             progressiveThreshold: 3000,
@@ -299,11 +300,7 @@ export const ScatterPlot = memo(function ScatterPlot({
         ),
       );
     }
-  }, [selected, dataset]);
-  const theme = useStore((s) => s.theme);
-  useEffect(() => {
-    void theme;
-  }, [theme]);
+  }, [selected, dataset, theme]);
   return (
     <section className="panel scatter-panel">
       <div className="panel-title">

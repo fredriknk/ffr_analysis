@@ -1,4 +1,4 @@
-import { useQueries, useQuery } from "@tanstack/react-query";
+import { useQueries } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../../api";
@@ -16,6 +16,7 @@ import {
   ReasonChips,
   severity,
 } from "../../shared/diagnostics";
+import { useDiagnostics } from "../../shared/hooks/useDiagnostics";
 import { useStore } from "../../store";
 export function useQueue(rows: FluxRow[]) {
   const s = useStore();
@@ -68,10 +69,7 @@ export function useQueue(rows: FluxRow[]) {
 }
 export function QueueFilters({ rows }: { rows: FluxRow[] }) {
   const s = useStore(),
-    counts = useQuery({
-      queryKey: ["diagnostics"],
-      queryFn: () => api.diagnosticsSummary(),
-    });
+    counts = useDiagnostics(s.screen === "Review");
   const unique = (
     key: "treatmentId" | "plotId",
     name: "treatmentName" | "plotLabel",
@@ -210,10 +208,7 @@ export function QueueList({ rows }: { rows: FluxRow[] }) {
       estimateSize: () => 30,
       overscan: 4,
     }),
-    counts = useQuery({
-      queryKey: ["diagnostics"],
-      queryFn: () => api.diagnosticsSummary(),
-    });
+    counts = useDiagnostics(s.screen === "Review");
   useEffect(() => {
     const i = rows.findIndex((r) => r.id === s.selected);
     if (i >= 0 && s.screen === "Review") v.scrollToIndex(i, { align: "auto" });
@@ -272,10 +267,7 @@ export function ContactSheet({
     anchor = useRef(0),
     [width, setWidth] = useState(900),
     [gas, setGas] = useState<Gas>("N2O");
-  const counts = useQuery({
-    queryKey: ["diagnostics"],
-    queryFn: () => api.diagnosticsSummary(),
-  });
+  const counts = useDiagnostics(s.screen === "Review");
   useEffect(() => {
     if (!ref.current) return;
     const ro = new ResizeObserver((es) => setWidth(es[0].contentRect.width));
@@ -289,6 +281,11 @@ export function ContactSheet({
       estimateSize: () => 192,
       overscan: 1,
     });
+  useEffect(() => {
+    const i = rows.findIndex((r) => r.id === s.selected);
+    if (i >= 0 && s.screen === "Review")
+      v.scrollToIndex(Math.floor(i / columns), { align: "auto" });
+  }, [s.selected, s.screen, columns, rows, v]);
   const indices = v
     .getVirtualItems()
     .flatMap((item) =>
@@ -302,6 +299,7 @@ export function ContactSheet({
   const queries = useQueries({
     queries: batches.map((ids) => ({
       queryKey: ["thumbBatch", gas, ids],
+      enabled: s.screen === "Review" && s.contactSheet,
       queryFn: () => api.getFluxThumbs(ids, gas, 60),
       staleTime: 60000,
     })),
@@ -447,7 +445,9 @@ export function ContactSheet({
                           <text x="12" y="55" fill="currentColor" fontSize="11">
                             {query?.isError
                               ? "Could not load trace"
-                              : "No trace returned / validation failed"}
+                              : r.source === "manual"
+                                ? "Manual measurement / no raw trace"
+                                : "No trace returned / validation failed"}
                           </text>
                         )}
                       </svg>

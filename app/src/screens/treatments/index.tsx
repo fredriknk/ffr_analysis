@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import type { EChartsCoreOption } from "echarts/core";
 import { useState } from "react";
 import { useShallow } from "zustand/react/shallow";
@@ -9,8 +9,14 @@ import { Empty, Field, Panel, Status, fmt, useRows } from "../../shared/common";
 import { TimeBrush } from "../../shared/filters/TimeBrush";
 import { dateTime, unit } from "../../shared/format";
 import { useStore } from "../../store";
-import { quantile } from "../outliers/axes";
+import {
+  inverse,
+  quantile,
+  transformed,
+  type AxisScale,
+} from "../outliers/axes";
 export function Treatments() {
+  const visible = useStore((s) => s.screen === "Treatments");
   const allFluxes = useRows();
   const s = useStore(
       useShallow(
@@ -37,11 +43,12 @@ export function Treatments() {
         }),
       ),
     ),
-    [log, setLog] = useState(false),
+    [boxScale, setBoxScale] = useState<AxisScale>("asinh"),
     [hidden, setHidden] = useState<number[]>([]),
     [showExcluded, setShowExcluded] = useState(false);
   const seriesMeta = useQuery({
     queryKey: ["series"],
+    enabled: visible,
     queryFn: () => api.listSeries(),
   });
   const temperature = seriesMeta.data?.find(
@@ -60,11 +67,14 @@ export function Treatments() {
   };
   const result = useQuery({
       queryKey: ["summary", q],
+      placeholderData: keepPreviousData,
+      enabled: visible,
       queryFn: () => api.treatmentSummary(q),
     }),
     weather = useQuery({
       queryKey: ["weather", weatherIds, s.from, s.to],
-      enabled: !!weatherIds.length,
+      placeholderData: keepPreviousData,
+      enabled: visible && !!weatherIds.length,
       queryFn: () =>
         api.getSeries(weatherIds, q.from, q.to, 20000).then((series) =>
           series.map((s) => {
@@ -123,7 +133,10 @@ export function Treatments() {
               ?.fluxId,
           })),
         )
-        .filter((v) => Number.isFinite(v.value) && (!log || v.value > 0)),
+        .filter(
+          (v) =>
+            Number.isFinite(v.value) && (boxScale !== "log" || v.value > 0),
+        ),
       values = daily.map((v) => v.value);
     return {
       box: [0.05, 0.25, 0.5, 0.75, 0.95].map((p) => quantile(values, p)),
@@ -330,15 +343,18 @@ export function Treatments() {
               />
             </Panel>
             <Panel
-              title="Daily means ? whiskers 5th?95th percentile"
+              title="Daily means · whiskers 5th–95th percentile"
               extra={
                 <label>
-                  <input
-                    type="checkbox"
-                    checked={log}
-                    onChange={(e) => setLog(e.target.checked)}
-                  />{" "}
-                  Log scale
+                  <select
+                    aria-label="Distribution scale"
+                    value={boxScale}
+                    onChange={(e) => setBoxScale(e.target.value as AxisScale)}
+                  >
+                    <option value="asinh">Symmetric log</option>
+                    <option value="linear">Linear</option>
+                    <option value="log">Log (positive)</option>
+                  </select>
                 </label>
               }
             >
@@ -353,18 +369,44 @@ export function Treatments() {
                 option={
                   {
                     grid: { left: 65, right: 20, top: 25, bottom: 80 },
-                    tooltip: { trigger: "item" },
+                    tooltip: {
+                      trigger: "item",
+                      formatter: (p: {
+                        seriesType: string;
+                        value: number[];
+                        name: string;
+                      }) =>
+                        p.seriesType === "boxplot"
+                          ? p.name +
+                            "<br/>5%, Q1, median, Q3, 95%: " +
+                            p.value
+                              .slice(-5)
+                              .map((v) => fmt(inverse(v, boxScale), 1))
+                              .join(" / ")
+                          : "Flux #" +
+                            p.value[2] +
+                            ": " +
+                            fmt(inverse(p.value[1], boxScale), 1),
+                    },
                     xAxis: {
                       type: "category",
                       data: ts.map((t) => t.name),
                       axisLabel: { rotate: 40, fontSize: 10 },
                     },
-                    yAxis: { type: log ? "log" : "value", scale: true },
+                    yAxis: {
+                      type: "value",
+                      scale: true,
+                      axisLabel: {
+                        formatter: (v: number) => fmt(inverse(v, boxScale), 1),
+                      },
+                    },
                     series: [
                       {
                         type: "boxplot",
                         data: ts.map((t, i) => ({
-                          value: distributions[i].box,
+                          value: distributions[i].box.map((v) =>
+                            transformed(v, boxScale),
+                          ),
                           itemStyle: {
                             color: t.colour + "55",
                             borderColor: t.colour,
@@ -381,7 +423,7 @@ export function Treatments() {
                                 v.value < dist.box[0] || v.value > dist.box[4],
                             )
                             .map((v) => ({
-                              value: [i, v.value, v.fluxId],
+                              value: [i, transformed(v.value,boxScale), v.fluxId],
                               itemStyle: { color: ts[i].colour, opacity: 0.6 },
                             })),
                         ),

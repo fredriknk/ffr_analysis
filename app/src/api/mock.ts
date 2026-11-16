@@ -384,7 +384,7 @@ export function createMock(seed = 42): T.FfrApi {
         severity: Number(r.CO2_flux) < 0 ? "bad" : "warn",
         gas: "CO2",
         message:
-          "CO? respiration is far below the daily field median; inspect the chamber seal.",
+          "CO₂ respiration is far below the daily field median; inspect the chamber seal.",
         value: Number(r.CO2_flux),
       });
     if (r.source === "robot" && (r.measurementId ?? 0) % 29 === 2)
@@ -942,7 +942,7 @@ export function createMock(seed = 42): T.FfrApi {
             (v) =>
               ({
                 _slope: " slope",
-                _rsq: " R?",
+                _rsq: " R²",
                 _pval: " p value",
                 _flux: " flux",
                 _n: " points",

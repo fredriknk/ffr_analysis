@@ -1912,7 +1912,17 @@ td {
     height: auto;
   }
 }
-.dense-queue .triage-row, .dense-queue time {font-size: 10px;}
-.result-stat, .result-robust {font-size: 10px;}
-.compact-result small {font-size: 9px;}
-.finding-sentence {font-size: 11px;}
+.dense-queue .triage-row,
+.dense-queue time {
+  font-size: 10px;
+}
+.result-stat,
+.result-robust {
+  font-size: 10px;
+}
+.compact-result small {
+  font-size: 9px;
+}
+.finding-sentence {
+  font-size: 11px;
+}

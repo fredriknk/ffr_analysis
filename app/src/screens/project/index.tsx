@@ -12,8 +12,16 @@ export function Project() {
     useShallow(({ nav, screen }) => ({ nav, screen })),
   );
   const action = useAction(),
-    q = useQuery({ queryKey: ["config"], queryFn: () => api.getConfig() }),
-    l = useQuery({ queryKey: ["layout"], queryFn: () => api.getLayout() }),
+    q = useQuery({
+      queryKey: ["config"],
+      enabled: navigation.screen === "Project",
+      queryFn: () => api.getConfig(),
+    }),
+    l = useQuery({
+      queryKey: ["layout"],
+      enabled: navigation.screen === "Project",
+      queryFn: () => api.getLayout(),
+    }),
     h = useQuery({
       queryKey: ["history"],
       queryFn: () => api.history(15),
@@ -335,9 +343,9 @@ export function Project() {
               <span>
                 {c.fluxIds.length
                   ? c.fluxIds.length +
-                    " fluxes ? " +
+                    " fluxes · " +
                     c.fluxIds.slice(0, 3).join(", ") +
-                    (c.fluxIds.length > 3 ? "?" : "")
+                    (c.fluxIds.length > 3 ? "—" : "")
                   : "Project"}
               </span>
             </div>

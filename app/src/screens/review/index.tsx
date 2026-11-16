@@ -15,6 +15,7 @@ import {
   useRows,
 } from "../../shared/common";
 import { diagnosticLabels } from "../../shared/diagnostics";
+import { useDiagnostics } from "../../shared/hooks/useDiagnostics";
 import { useStore } from "../../store";
 import { ContactSheet, QueueFilters, QueueList, useQueue } from "./Queue";
 import { TraceChart } from "./TraceChart";
@@ -35,20 +36,22 @@ export function Review() {
       () => localStorage.getItem("ffr-shortcuts") !== "hidden",
     );
   const [scope, setScope] = useState<"flux" | "file" | "day">("flux"),
-    [offsetGas, setOffsetGas] = useState<"all" | "N2Oall" | "CO2" | "N2O">("all"),
+    [offsetGas, setOffsetGas] = useState<"all" | "N2Oall" | "CO2" | "N2O">(
+      "all",
+    ),
     [editGas, setEditGas] = useState<Gas>("N2O");
   const layout = useQuery({
       queryKey: ["layout"],
+      enabled: s.screen === "Review",
       queryFn: () => api.getLayout(),
     }),
-    definitions = useQuery({
-      queryKey: ["diagnostics"],
-      queryFn: () => api.diagnosticsSummary(),
-    });
+    definitions = useDiagnostics(s.screen === "Review");
   const detail = useQuery({
     queryKey: ["detail", s.selected],
     queryFn: () => api.getFluxDetail(s.selected),
-    enabled: !!data.data?.rows.some((r) => r.id === s.selected),
+    enabled:
+      s.screen === "Review" &&
+      !!data.data?.rows.some((r) => r.id === s.selected),
     placeholderData: keepPreviousData,
   });
   const [preview, setPreview] = useState<FluxDetail | null>(null),
@@ -87,7 +90,7 @@ export function Review() {
           }
         : undefined);
   const displayedRow = data.data?.rows.find((r) => r.id === active),
-    flux = d ? { ...d.flux, ...displayedRow } : undefined;
+    flux = d ? { ...displayedRow, ...d.flux } : undefined;
   const index = filtered.findIndex((r) => r.id === active),
     targets = s.contactSheet && multi.length ? multi : [active];
   const queueRows =
@@ -217,8 +220,13 @@ export function Review() {
         )
         .map((r) => r.id);
     const partial: Partial<AnalysisOptions> =
-      (gas === "all" || gas === "N2Oall")
-        ? { valveOffset: delta, perGas: Object.fromEntries(gasNames.map(g => [g, {valveOffset: delta}])) }
+      gas === "all" || gas === "N2Oall"
+        ? {
+            valveOffset: delta,
+            perGas: Object.fromEntries(
+              gasNames.map((g) => [g, { valveOffset: delta }]),
+            ),
+          }
         : { perGas: { [gas]: { valveOffset: delta } } };
     void action(
       () => api.patchFluxOptions(ids, partial),
@@ -360,8 +368,7 @@ export function Review() {
             {flux ? (
               <>
                 <h2>
-                  {flux.plotLabel} · {flux.treatmentName} · {flux.side} chamber
-                  · {dateTime(flux.time)}
+                  {/^(plot\b|P\d)/i.test(flux.plotLabel) ? flux.plotLabel : "Plot " + flux.plotLabel} · {flux.treatmentName} · {flux.source === "manual" ? "manual measurement" : flux.side + " chamber"} · {dateTime(flux.time)}
                 </h2>
                 <small className="filename" title={flux.filename}>
                   {flux.filename}
