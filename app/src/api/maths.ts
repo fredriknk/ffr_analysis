@@ -1,12 +1,12 @@
 import type {
   AnalysisOptions,
-  Gas,
-  Regression,
   FluxRow,
-  TreatmentSummary,
-  SummaryQuery,
+  Gas,
   Plot,
+  Regression,
+  SummaryQuery,
   Treatment,
+  TreatmentSummary,
 } from "./types";
 export const gases: Gas[] = ["N2O", "CO2", "CO", "H2O", "licor_H2O"];
 export const defaults: AnalysisOptions = {
@@ -18,6 +18,7 @@ export const defaults: AnalysisOptions = {
   co2Guides: true,
   cutBeginnings: 4,
   cutEnds: 3,
+  valveOffset: 0,
 };
 export function random(seed: number) {
   let s = seed >>> 0;
@@ -70,7 +71,7 @@ function betaFraction(a: number, b: number, x: number) {
   }
   return h;
 }
-function beta(x: number, a: number, b: number): number {
+export function beta(x: number, a: number, b: number): number {
   if (x <= 0) return 0;
   if (x >= 1) return 1;
   const bt = Math.exp(
@@ -162,9 +163,11 @@ export function summarize(
   const valid = rows.filter(
     (r) =>
       !r.excluded &&
+      typeof r[q.gas + "_flux"] === "number" &&
+      Number.isFinite(r[q.gas + "_flux"]) &&
       q.sources.includes(r.source) &&
-      (!q.from || r.time >= q.from) &&
-      (!q.to || r.time <= q.to) &&
+      (q.from === undefined || r.time >= q.from) &&
+      (q.to === undefined || r.time <= q.to) &&
       (!selected || selected.has(r.id)),
   );
   const ps = plots.map((p) => {
