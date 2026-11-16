@@ -8,6 +8,7 @@ export type Screen =
   | "Project";
 interface State {
   screen: Screen;
+  timeZone: string;
   selected: number;
   back: Screen | null;
   theme: "light" | "dark";
@@ -29,6 +30,7 @@ interface State {
 }
 export const useStore = create<State>((set, get) => ({
   screen: "Start",
+  timeZone: "Europe/Oslo",
   selected: 1,
   back: null,
   theme:

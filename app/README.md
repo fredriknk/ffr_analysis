@@ -69,3 +69,20 @@ The mock exportXlsx downloads CSV with the selected grouping; daily mode current
 Manual-import mapping currently uses the legacy plot/N2O/CO2 mapping and 12-hour offset.
 The field map shows synthetic plot positions, not a geospatial polygon editor.
 Native persistence, real imports, Frost networking and XLSX belong to the Rust integration.
+## Verification (Windows, 2026-11-16)
+
+- Strict TypeScript / Vite production build: passed.
+- ESLint: passed.
+- Vitest: 4 passed; regression/p-value/standard errors, ideal-gas conversion,
+  daily averaging/integration/population SD/source filtering, previews and undo/redo.
+- Playwright: passed; all six screens, keyboard navigation, input and pointer window
+  adjustment, exclusion/undo, an actual ECharts flux-point click, Back, a filtered Data
+  row and preserved filter state. Fourteen synthetic screenshots cover both themes,
+  including the lower Treatments panels; all were visually inspected.
+- Rust 1.85 cargo check: passed.
+- Debug Tauri build: passed; produced target/debug/ffr-analyzer.exe and
+  target/debug/bundle/nsis/FFR Analyzer_0.1.0_x64-setup.exe (2.70 MiB).
+- Native executable: opened and its actual WebView2 Start screen was verified over CDP.
+  The installer was built but was not installed.
+- Production Vite bundle has a size advisory (~936 kB before gzip), primarily ECharts.
+  Charts use explicit tree-shaken imports.

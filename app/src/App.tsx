@@ -35,7 +35,7 @@ const fmt = (n: unknown, d = 2) =>
     : String(n ?? "—");
 const date = (n: number) =>
   new Intl.DateTimeFormat("en-GB", {
-    timeZone: "Europe/Oslo",
+    timeZone: useStore.getState().timeZone,
     day: "2-digit",
     month: "short",
     year: "numeric",
@@ -1406,7 +1406,7 @@ function Treatments() {
                       key={p.plotId}
                       onClick={() => s.openFlux(p.points[0].fluxId)}
                     >
-                      Open {p.label} · #{p.points[0].fluxId} ?
+                      Open {p.label} · #{p.points[0].fluxId} ↗
                     </button>
                   ),
               )}
@@ -1480,35 +1480,53 @@ function Data() {
     );
   const columns = useMemo<ColumnDef<FluxRow>[]>(
     () =>
-      data.data?.columns.map((c) => ({
-        id: c.key,
-        accessorKey: c.key,
-        header: c.label,
-        filterFn: (row, id, value: string) => {
-          const cell = row.getValue<Cell>(id);
-          if (c.type === "number" || c.type === "time") {
-            const [a, b] = value.split("..");
-            const parse = (v: string) =>
-              c.type === "time" ? Date.parse(v) : Number(v);
-            return (
-              (!a || Number(cell) >= parse(a)) &&
-              (!b || Number(cell) <= parse(b))
-            );
-          }
-          return String(cell ?? "")
-            .toLowerCase()
-            .includes(value.toLowerCase());
-        },
-        cell: (info) =>
-          c.type === "time"
-            ? date(Number(info.getValue()))
-            : typeof info.getValue() === "number"
-              ? fmt(
-                  info.getValue(),
-                  c.key === "id" ? 0 : c.key.endsWith("slope") ? 6 : 2,
-                )
-              : String(info.getValue() ?? "—"),
-      })) ?? [],
+      data.data?.columns
+        .slice()
+        .sort((a, b) => {
+          const order = [
+            "id",
+            "time",
+            "plotLabel",
+            "treatmentName",
+            "N2O_flux",
+            "CO2_flux",
+            "N2O_qc",
+            "source",
+            "side",
+          ];
+          const rank = (key: string) =>
+            order.includes(key) ? order.indexOf(key) : 99;
+          return rank(a.key) - rank(b.key);
+        })
+        .map((c) => ({
+          id: c.key,
+          accessorKey: c.key,
+          header: c.label,
+          filterFn: (row, id, value: string) => {
+            const cell = row.getValue<Cell>(id);
+            if (c.type === "number" || c.type === "time") {
+              const [a, b] = value.split("..");
+              const parse = (v: string) =>
+                c.type === "time" ? Date.parse(v) : Number(v);
+              return (
+                (!a || Number(cell) >= parse(a)) &&
+                (!b || Number(cell) <= parse(b))
+              );
+            }
+            return String(cell ?? "")
+              .toLowerCase()
+              .includes(value.toLowerCase());
+          },
+          cell: (info) =>
+            c.type === "time"
+              ? date(Number(info.getValue()))
+              : typeof info.getValue() === "number"
+                ? fmt(
+                    info.getValue(),
+                    c.key === "id" ? 0 : c.key.endsWith("slope") ? 6 : 2,
+                  )
+                : String(info.getValue() ?? "—"),
+        })) ?? [],
     [data.data],
   );
   const defaultVisible = useMemo(() => {
@@ -1705,7 +1723,24 @@ function Data() {
                   />
                 </th>
                 {hg.headers.map((h) => (
-                  <th key={h.id}>
+                  <th
+                    key={h.id}
+                    style={{
+                      minWidth:
+                        h.id === "id"
+                          ? 55
+                          : [
+                                "source",
+                                "side",
+                                "reviewed",
+                                "excluded",
+                                "overridden",
+                                "plotLabel",
+                              ].includes(h.id)
+                            ? 85
+                            : 125,
+                    }}
+                  >
                     <button onClick={h.column.getToggleSortingHandler()}>
                       {flexRender(h.column.columnDef.header, h.getContext())}
                       {h.column.getIsSorted() === "asc"
@@ -2436,6 +2471,10 @@ export default function App() {
     queryFn: () => api.projectInfo(),
   });
   useEffect(() => {
+    if (info.data?.timeZone)
+      useStore.getState().set({ timeZone: info.data.timeZone });
+  }, [info.data?.timeZone]);
+  useEffect(() => {
     toastFn = setToast;
   }, []);
   useEffect(() => {
@@ -2564,7 +2603,7 @@ export default function App() {
         </div>
         <footer className="statusbar">
           <span>
-            ? {mockMode ? "Demo session" : "Ready"} ·{" "}
+            ● {mockMode ? "Demo session" : "Ready"} ·{" "}
             {info.data?.timeZone ?? "Europe/Oslo"}
           </span>
           <span>

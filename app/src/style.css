@@ -969,3 +969,11 @@ td {
     grid-template-columns: 1fr;
   }
 }
+
+.table-scroll th input:not([type="checkbox"]) {
+  width: 100%;
+  min-width: 0;
+}
+.table-scroll th button {
+  font-size: 10px;
+}

@@ -58,19 +58,27 @@ test("complete synthetic workspace in both themes", async ({ page }) => {
   await page.getByLabel("Toggle theme").click();
   await shot("treatments-dark");
   await page.getByLabel("Toggle theme").click();
-  await page.getByRole("img",{name:"Individual fluxes over time",exact:true}).scrollIntoViewIfNeeded();
+  await page
+    .getByRole("img", { name: "Individual fluxes over time", exact: true })
+    .scrollIntoViewIfNeeded();
   await shot("treatments-detail-light");
-  await page.getByLabel("Toggle theme").click();await shot("treatments-detail-dark");await page.getByLabel("Toggle theme").click();
-  const point=await page.evaluate(async()=>{
-    const modulePath="/src/ui/Chart.tsx";
-    const {echarts}=await import(modulePath);
-    const element=document.querySelector('[aria-label="Individual fluxes over time"]') as HTMLElement;
-    const c=echarts.getInstanceByDom(element);
-    const option=c.getOption(),first=option.series[0].data[0];
-    const [x,y]=c.convertToPixel({seriesIndex:0},first);
-    const box=element.getBoundingClientRect();return {x:box.left+x,y:box.top+y};
+  await page.getByLabel("Toggle theme").click();
+  await shot("treatments-detail-dark");
+  await page.getByLabel("Toggle theme").click();
+  const point = await page.evaluate(async () => {
+    const modulePath = "/src/ui/Chart.tsx";
+    const { echarts } = await import(modulePath);
+    const element = document.querySelector(
+      '[aria-label="Individual fluxes over time"]',
+    ) as HTMLElement;
+    const c = echarts.getInstanceByDom(element);
+    const option = c.getOption(),
+      first = option.series[0].data[0];
+    const [x, y] = c.convertToPixel({ seriesIndex: 0 }, first);
+    const box = element.getBoundingClientRect();
+    return { x: box.left + x, y: box.top + y };
   });
-  await page.mouse.click(point.x,point.y);
+  await page.mouse.click(point.x, point.y);
   await expect(
     page.getByRole("button", { name: "← Back to Treatments" }),
   ).toBeVisible();
