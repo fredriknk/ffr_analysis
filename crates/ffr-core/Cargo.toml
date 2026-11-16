@@ -1,0 +1,30 @@
+[package]
+name = "ffr-core"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["float_roundtrip"] }
+serde-pickle = "1"
+serde_yaml = "0.9"
+chrono = { version = "0.4", features = ["serde"] }
+chrono-tz = "0.10"
+regex = "1"
+flate2 = "1"
+statrs = "0.18"
+rusqlite = { version = "0.32", features = ["bundled"] }
+zstd = "0.13"
+rayon = "1"
+thiserror = "2"
+calamine = { version = "0.26", features = ["dates"] }
+rust_xlsxwriter = "0.79"
+csv = "1"
+reqwest = { version = "0.12", features = ["blocking", "json"] }
+
+[dev-dependencies]
+tempfile = "3"
+[dependencies.zip]
+# calamine 0.26 uses the pre-2.5 ZipFile API; keep both workspaces reproducible.
+version = "=2.4.2"
+default-features = false
