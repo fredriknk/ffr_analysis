@@ -93,7 +93,9 @@ export function createMock(seed = 42): T.FfrApi {
       gas === "N2O" ? 0.02 : gas === "CO2" ? 80 : gas === "CO" ? 0.01 : 300;
     const k = (row.measurementId ?? row.id) % 29;
     const campaign = Math.floor((row.time - start) / 86400000 / 7),
-      trueLag = campaign >= 14 && campaign <= 18 ? 3 + (campaign % 3) : 0;
+      trueLag =
+        (campaign >= 14 && campaign <= 18 ? 3 + (campaign % 3) : 0) +
+        (gas === "N2O" ? 2 : 0);
     const rate =
       (growth * (0.08 + (row.treatmentId / 12) * 0.7 + rng() * 0.22)) / 185;
     const t = Array.from({ length: 186 }, (_, i) => i);
@@ -241,6 +243,7 @@ export function createMock(seed = 42): T.FfrApi {
           qc: "manual",
         })),
         traces: [],
+        robust: [] as T.RobustRegression[],
         lag: 0,
         diagnostics: [] as T.Diagnostic[],
       };
@@ -257,9 +260,63 @@ export function createMock(seed = 42): T.FfrApi {
     lagCache.set(r.measurementId ?? r.id, rawLag);
     const improvement =
       Math.abs(rawLag.lag - o.valveOffset) < 1.5 ? 0 : rawLag.improvement;
+    const robust: T.RobustRegression[] = failed
+      ? []
+      : (["N2O", "CO2"] as T.Gas[]).map((g) => {
+          const effective = { ...o, ...o.perGas?.[g] },
+            lag = rawLag.lag + (g === "N2O" ? 2 : 0),
+            robustOptions = {
+              ...effective,
+              perGas: {},
+              valveOffset: Math.abs(lag) >= 1 ? lag : effective.valveOffset,
+              cutBeginnings: effective.cutBeginnings + 3,
+              cutEnds: effective.cutEnds + 3,
+            },
+            tr = trace(r, g, robustOptions),
+            indices = tr.t.flatMap((_, i) => (tr.used[i] ? [i] : []));
+          const fit = regression(
+              indices.map((i) => tr.t[i]),
+              indices.map((i) => tr.y[i]),
+              g,
+              r.airTemp,
+            ),
+            res = indices.map(
+              (i) => tr.y[i] - fit.intercept - fit.slope * tr.t[i],
+            ),
+            centre = median(res),
+            mad = Math.max(
+              1e-12,
+              median(res.map((v) => Math.abs(v - centre))) * 1.4826,
+            ),
+            kept = indices.filter(
+              (_, j) => Math.abs(res[j] - centre) <= 4 * mad,
+            ),
+            f = regression(
+              kept.map((i) => tr.t[i]),
+              kept.map((i) => tr.y[i]),
+              g,
+              r.airTemp,
+            );
+          return {
+            gas: g,
+            slope: f.slope,
+            intercept: f.intercept,
+            start: f.start,
+            stop: f.stop,
+            n: f.n,
+            flux: fluxConversion(
+              f.slope,
+              r.airTemp,
+              g,
+              config.chamberHeight,
+              config.pressure,
+            ),
+          };
+        });
     return {
       regs,
       traces,
+      robust,
       lag: rawLag.lag,
       diagnostics: findings(
         r,
@@ -296,6 +353,49 @@ export function createMock(seed = 42): T.FfrApi {
     });
     r.N2O_qc = a.regs.find((r) => r.gas === "N2O")?.qc ?? "error";
     r.valveLagS = a.lag;
+    r.N2O_lagS = r.source === "robot" ? a.lag + 2 : 0;
+    for (const g of ["N2O", "CO2"]) {
+      const robust = a.robust.find((v) => v.gas === g),
+        value = Number(r[g + "_flux"]);
+      r[g + "_robustFlux"] = robust?.flux ?? null;
+      r[g + "_impact"] = robust
+        ? Math.abs(value - robust.flux) /
+          Math.max(
+            Math.abs(value),
+            Math.abs(robust.flux),
+            g === "N2O" ? 1 : 1000,
+          )
+        : null;
+    }
+    a.diagnostics = a.diagnostics.filter((d) => d.code !== "co2_low_r2");
+    for (const finding of a.diagnostics)
+      if (["valve_timing", "edge_transient", "spike"].includes(finding.code)) {
+        const impact = Number(r[(finding.gas ?? "N2O") + "_impact"] ?? 0);
+        finding.severity =
+          impact >= 0.3 ? "bad" : impact >= 0.1 ? "warn" : "info";
+      }
+    if (
+      r.source === "robot" &&
+      r.N2O_qc !== "error" &&
+      Number(r.CO2_flux) < 5000
+    )
+      a.diagnostics.push({
+        code: "chamber_leak",
+        severity: Number(r.CO2_flux) < 0 ? "bad" : "warn",
+        gas: "CO2",
+        message:
+          "CO? respiration is far below the daily field median; inspect the chamber seal.",
+        value: Number(r.CO2_flux),
+      });
+    if (r.source === "robot" && (r.measurementId ?? 0) % 29 === 2)
+      a.diagnostics.push({
+        code: "noisy",
+        severity: Number(r.N2O_impact) > 0.3 ? "bad" : "warn",
+        gas: "N2O",
+        message:
+          "Residual noise is high compared with this project's typical analyzer noise.",
+        value: Number(r.N2O_resid),
+      });
     r.overridden = opts.has(r.id);
     diagnosticMap.set(r.id, a.diagnostics);
     r.diag = [...new Set(a.diagnostics.map((d) => d.code))].join(",");
@@ -607,9 +707,12 @@ export function createMock(seed = 42): T.FfrApi {
       a = analyse(r, o),
       regs = a.regs;
     return {
+      robust: a.robust,
       diagnostics: a.diagnostics.concat(
         (diagnosticMap.get(id) ?? []).filter(
-          (d) => d.code === "neighbour_outlier",
+          (d) =>
+            ["neighbour_outlier", "chamber_leak", "noisy"].includes(d.code) &&
+            !a.diagnostics.some((f) => f.code === d.code),
         ),
       ),
       valveLagS: a.lag,
@@ -934,7 +1037,20 @@ export function createMock(seed = 42): T.FfrApi {
             ...effective,
             ...structuredClone(partial),
             perGas: partial.perGas
-              ? { ...effective.perGas, ...partial.perGas }
+              ? Object.fromEntries(
+                  [
+                    ...new Set([
+                      ...Object.keys(effective.perGas ?? {}),
+                      ...Object.keys(partial.perGas),
+                    ]),
+                  ].map((g) => [
+                    g,
+                    {
+                      ...effective.perGas?.[g as T.Gas],
+                      ...partial.perGas?.[g as T.Gas],
+                    },
+                  ]),
+                )
               : effective.perGas,
           });
           refresh(row(id));
@@ -967,18 +1083,20 @@ export function createMock(seed = 42): T.FfrApi {
         };
       }),
     diagnosticsSummary: async () =>
-      Object.entries(diagnosticLabels).map(([code, label]) => {
-        const found = rows.filter((r) => r.diag.split(",").includes(code)),
-          d = [...diagnosticMap.values()].flat().find((d) => d.code === code);
-        return {
-          code,
-          label,
-          description: d?.message ?? label,
-          severity: d?.severity ?? "info",
-          count: found.length,
-          unreviewed: found.filter((r) => !r.reviewed).length,
-        };
-      }),
+      Object.entries(diagnosticLabels)
+        .filter(([code]) => code !== "co2_low_r2")
+        .map(([code, label]) => {
+          const found = rows.filter((r) => r.diag.split(",").includes(code)),
+            d = [...diagnosticMap.values()].flat().find((d) => d.code === code);
+          return {
+            code,
+            label,
+            description: d?.message ?? label,
+            severity: d?.severity ?? "info",
+            count: found.length,
+            unreviewed: found.filter((r) => !r.reviewed).length,
+          };
+        }),
     recomputeAll: async () => {
       await progress("Recompute");
       rows.filter((r) => r.source === "robot").forEach(refresh);
@@ -1014,7 +1132,12 @@ export function createMock(seed = 42): T.FfrApi {
       undoStack
         .slice(-limit)
         .reverse()
-        .map((c) => c.change),
+        .map((c) => ({
+          id: c.change.id,
+          time: c.change.time,
+          kind: c.change.kind,
+          fluxIds: c.change.fluxIds,
+        })),
     treatmentSummary: async (q) =>
       summarize(rows, layout.plots, layout.treatments, q),
     listSeries: async () => structuredClone(series),

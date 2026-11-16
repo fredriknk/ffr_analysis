@@ -78,14 +78,6 @@ export function findings(
       co2.slope,
       "CO2",
     );
-  if (co2 && co2.rsq < limits.co2R2)
-    add(
-      "co2_low_r2",
-      co2.rsq < limits.co2BadR2 ? "bad" : "warn",
-      "The CO₂ trace does not follow a straight line.",
-      co2.rsq,
-      "CO2",
-    );
   if (
     Math.abs(lag - o.valveOffset) >= limits.valveMinLag &&
     improvement >= limits.valveImprovement

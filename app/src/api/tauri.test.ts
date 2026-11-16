@@ -22,6 +22,10 @@ describe("diagnostic command adapter", () => {
     await tauriApi.diagnosticsSummary();
     expect(invoke).toHaveBeenLastCalledWith("diagnostics_summary");
   });
+  it("drops large history snapshots before exposing them to the UI", async () => {
+    vi.mocked(invoke).mockResolvedValueOnce([{id:3,time:0,kind:"flags",fluxIds:[2],before:"x".repeat(100000),after:{large:true}}]);
+    expect(await tauriApi.history(20)).toEqual([{id:3,time:0,kind:"flags",fluxIds:[2]}]);
+  });
   it("forwards progress payloads and returns an unsubscribe", async () => {
     const cb = vi.fn(),
       off = await tauriApi.onProgress(cb);

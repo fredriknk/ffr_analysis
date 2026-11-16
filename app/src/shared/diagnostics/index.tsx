@@ -6,16 +6,33 @@ export {
   score,
   severity,
 } from "../../api/diagnosticMeta";
-export function ReasonChips({ diag }: { diag: unknown }) {
+export function ReasonChips({
+  diag,
+  definitions,
+  limit = 2,
+}: {
+  diag: unknown;
+  definitions?: DiagnosticCount[];
+  limit?: number;
+}) {
+  const list = codes(diag);
   return (
     <span className="reason-chips">
-      {codes(diag)
-        .slice(0, 3)
-        .map((c) => (
-          <span key={c} title={diagnosticLabels[c] ?? c}>
-            {diagnosticLabels[c] ?? c}
-          </span>
-        ))}
+      {list.slice(0, limit).map((c) => (
+        <span
+          key={c}
+          title={
+            definitions?.find((d) => d.code === c)?.description ??
+            diagnosticLabels[c] ??
+            c
+          }
+        >
+          {definitions?.find((d) => d.code === c)?.label ??
+            diagnosticLabels[c] ??
+            c.replaceAll("_", " ")}
+        </span>
+      ))}
+      {list.length > limit && <span>+{list.length - limit}</span>}
     </span>
   );
 }

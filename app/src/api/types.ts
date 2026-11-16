@@ -104,7 +104,8 @@ export interface FluxRow {
   valveLagS: number;
   x: number;
   y: number;
-  [key: string]: Cell;
+  [key: string]: Cell | undefined;
+  N2O_lagS?: number | null;
 }
 export interface Regression {
   gas: Gas;
@@ -157,7 +158,18 @@ export interface FluxThumb {
   slope: number;
   intercept: number;
 }
+export interface RobustRegression {
+  gas: Gas;
+  slope: number;
+  intercept: number;
+  start: number;
+  stop: number;
+  n: number;
+  flux: number;
+  options?: Partial<AnalysisOptions>;
+}
 export interface FluxDetail {
+  robust?: RobustRegression[];
   diagnostics: Diagnostic[];
   valveLagS: number;
   flux: FluxRow;
@@ -180,8 +192,8 @@ export interface Change {
   time: number;
   kind: string;
   fluxIds: number[];
-  before: string;
-  after: string;
+  before?: unknown;
+  after?: unknown;
 }
 export interface UndoResult {
   changed: boolean;
@@ -220,6 +232,7 @@ export interface TreatmentSummary {
   }[];
 }
 export interface SeriesMeta {
+  displayName?: string;
   id: number;
   name: string;
   unit: string;
@@ -266,6 +279,10 @@ export interface ImportReport {
   errors: { path: string; message: string }[];
 }
 export interface LegacyScan {
+  rawDir?: string;
+  manualPath?: string;
+  loggerPath?: string;
+  metnoPicklePath?: string;
   configPaths: string[];
   rawFiles: number;
   manualExists: boolean;

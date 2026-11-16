@@ -2,6 +2,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../api";
 import type { FluxRow } from "../../api/types";
 import { error, toastFn } from "../feedback";
+import { columnMeta } from "../format";
 export function useAction() {
   const client = useQueryClient();
   return async (fn: () => Promise<unknown>, message?: string) => {
@@ -20,7 +21,7 @@ export function useRows() {
     queryFn: async () => {
       const t = await api.listFluxes();
       return {
-        columns: t.columns,
+        columns: t.columns.map(columnMeta),
         rows: Array.from(
           { length: t.rows },
           (_, i) =>
