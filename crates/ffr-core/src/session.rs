@@ -55,7 +55,7 @@ impl Session {
         )?;
         db.execute(
             "INSERT INTO meta VALUES ('layout',?1)",
-            [serde_json::to_string(&Layout::default())?],
+            [serde_json::to_string(&StoredLayout::default())?],
         )?;
         self.series_cache.borrow_mut().clear();
         self.values_cache.borrow_mut().clear();
@@ -116,7 +116,7 @@ impl Session {
                 overridden: count("overridden"),
                 reviewed: count("reviewed"),
                 manual: rows.iter().filter(|r| r["source"] == "manual").count(),
-                series: self.list_series()?.len(),
+                series: self.series_value()?.len(),
             },
             time_range: times
                 .iter()
@@ -126,8 +126,11 @@ impl Session {
         }))
     }
 
-    pub fn recent_projects(&self) -> Vec<Value> {
-        self.recent.clone()
+    pub fn recent_projects(&self) -> Vec<RecentProject> {
+        self.recent
+            .iter()
+            .filter_map(|v| serde_json::from_value(v.clone()).ok())
+            .collect()
     }
 
     pub fn project_save_copy(&self, path: &str) -> Result<()> {
@@ -143,10 +146,14 @@ impl Session {
     }
 
     pub fn get_config(&self) -> Result<ProjectConfig> {
-        self.meta("config")
+        let mut cfg: ProjectConfig = self.meta("config")?;
+        cfg.name = self
+            .db()?
+            .query_row("SELECT value FROM meta WHERE key='name'", [], |r| r.get(0))?;
+        Ok(cfg)
     }
 
-    pub fn get_layout(&self) -> Result<Layout> {
+    fn layout_value(&self) -> Result<StoredLayout> {
         self.meta("layout")
     }
 
@@ -196,6 +203,8 @@ impl Session {
             }
         }
         self.edit_meta("config", &cfg)?;
+        self.db()?
+            .execute("UPDATE meta SET value=?1 WHERE key='name'", [&cfg.name])?;
         self.recompute_all(progress)?;
         tx.commit()?;
         Ok(())
@@ -203,7 +212,18 @@ impl Session {
 
     pub fn set_layout(&self, layout: Layout, progress: impl Fn(Progress)) -> Result<()> {
         let tx = self.db()?.unchecked_transaction()?;
-        self.edit_meta("layout", &layout)?;
+        let old = self.layout_value()?;
+        let mut stored = serde_json::to_value(&layout)?;
+        if let Some(plots) = stored["plots"].as_array_mut() {
+            for p in plots {
+                if let Some(existing) = old.plots.iter().find(|v| v["id"] == p["id"]) {
+                    if let Some(w) = existing.get("waypoints") {
+                        p["waypoints"] = w.clone();
+                    }
+                }
+            }
+        }
+        self.edit_meta("layout", &stored)?;
         self.recompute_all(progress)?;
         tx.commit()?;
         Ok(())
@@ -228,7 +248,7 @@ impl Session {
     }
 
     fn join_rows(&self, rows: &mut [FluxRow]) -> Result<()> {
-        let layout = self.get_layout()?;
+        let layout = self.layout_value()?;
         for row in rows.iter_mut() {
             if let Some(plot) = layout.plots.iter().find(|p| p["id"] == row["plotId"]) {
                 row.insert("plotLabel".into(), plot["label"].clone());
@@ -242,7 +262,7 @@ impl Session {
                 }
             }
         }
-        for meta in self.list_series()? {
+        for meta in self.series_value()? {
             let id = meta["id"].as_i64().unwrap_or(0);
             let name = meta["name"].as_str().unwrap_or("");
             self.cached_values(id)?;
@@ -295,7 +315,7 @@ impl Session {
                 keys.insert(format!("{gas}_{suffix}"), "number".into());
             }
         }
-        for series in self.list_series()? {
+        for series in self.series_value()? {
             if let Some(name) = series["name"].as_str() {
                 keys.insert(name.into(), "number".into());
             }
@@ -542,7 +562,7 @@ impl Session {
 
     fn cached_values(&self, id: i64) -> Result<()> {
         if !self.values_cache.borrow().contains_key(&id) {
-            let data = self.get_series(&[id], None, None, None)?;
+            let data = self.series_data_value(&[id], None, None, None)?;
             let points = data[0]["points"]
                 .as_array()
                 .cloned()
@@ -555,7 +575,7 @@ impl Session {
         Ok(())
     }
     fn weather(&self, time: i64, key: &str) -> Result<Option<f64>> {
-        for s in self.list_series()? {
+        for s in self.series_value()? {
             if s["name"] == key {
                 let id = s["id"].as_i64().unwrap_or(0);
                 self.cached_values(id)?;
@@ -620,7 +640,7 @@ impl Session {
                 r.qc = regression::qc_with(r, side, &cfg.qc);
             }
         }
-        let layout = self.get_layout()?;
+        let layout = self.layout_value()?;
         assign(&mut row, &raw.metadata, side, cfg, &layout);
         row.insert("overridden".into(), json!(overridden));
         for (gas, r) in &results {
@@ -636,7 +656,7 @@ impl Session {
                 row.insert("N2O_qc".into(), json!(r.qc));
             }
         }
-        for s in self.list_series()? {
+        for s in self.series_value()? {
             if let (Some(name), Some(sid)) = (s["name"].as_str(), s["id"].as_i64()) {
                 self.cached_values(sid)?;
                 let cache = self.values_cache.borrow();
@@ -778,7 +798,10 @@ impl Session {
             }
             match raw {
                 Err(e) => {
-                    report.errors.push(format!("{name}: {e}"));
+                    report.errors.push(ImportError {
+                        path: name.clone(),
+                        message: e.to_string(),
+                    });
                     let metadata = raw::filename(&name, &cfg.time_zone)
                         .ok()
                         .map(|m| serde_json::to_string(&m))
@@ -803,7 +826,10 @@ impl Session {
                         self.write_row(id, &row)?;
                         if compute {
                             if let Err(e) = self.recompute_one(id) {
-                                report.errors.push(format!("{name} {side}: {e}"));
+                                report.errors.push(ImportError {
+                                    path: name.clone(),
+                                    message: format!("{side}: {e}"),
+                                });
                             }
                         }
                     }
@@ -821,7 +847,7 @@ impl Session {
         Ok(report)
     }
 
-    pub fn list_series(&self) -> Result<Vec<Value>> {
+    fn series_value(&self) -> Result<Vec<Value>> {
         let mut q = self
             .db()?
             .prepare("SELECT id,metadata FROM series ORDER BY id")?;
@@ -837,7 +863,7 @@ impl Session {
             .collect()
     }
 
-    pub fn get_series(
+    fn series_data_value(
         &self,
         ids: &[i64],
         from: Option<i64>,
@@ -907,25 +933,27 @@ impl Session {
         self.recompute_all(|_| {})
     }
 
-    pub fn history(&self, limit: usize) -> Result<Vec<Value>> {
+    fn history_value(&self, limit: usize) -> Result<Vec<Value>> {
         let mut q=self.db()?.prepare("SELECT id,time,kind,before,after,target,action,original FROM changes ORDER BY id DESC LIMIT ?1")?;
         let rows=q.query_map([limit],|r|Ok(json!({"id":r.get::<_,i64>(0)?,"time":r.get::<_,i64>(1)?,"kind":r.get::<_,String>(2)?,"before":r.get::<_,String>(3)?,"after":r.get::<_,String>(4)?,"target":r.get::<_,Option<i64>>(5)?,"action":r.get::<_,String>(6)?,"original":r.get::<_,Option<i64>>(7)?})))?.collect::<std::result::Result<Vec<_>,_>>()?;
         Ok(rows)
     }
 
-    pub fn undo(&self) -> Result<Value> {
-        self.travel(false)
+    pub fn undo(&self) -> Result<UndoResult> {
+        let changed = self.travel(false)?["changed"] == true;
+        self.undo_state(changed)
     }
 
-    pub fn redo(&self) -> Result<Value> {
-        self.travel(true)
+    pub fn redo(&self) -> Result<UndoResult> {
+        let changed = self.travel(true)?["changed"] == true;
+        self.undo_state(changed)
     }
 
     fn travel(&self, redo: bool) -> Result<Value> {
-        let history = self.history(usize::MAX / 2)?;
+        let history_value = self.history_value(usize::MAX / 2)?;
         let mut undone = std::collections::BTreeSet::new();
         let mut redos = vec![];
-        for h in history.iter().rev() {
+        for h in history_value.iter().rev() {
             let id = h["id"].as_i64().unwrap_or(0);
             let original = h["original"].as_i64().unwrap_or(0);
             match h["action"].as_str() {
@@ -947,9 +975,9 @@ impl Session {
         let chosen = if redo {
             redos
                 .last()
-                .and_then(|id| history.iter().find(|h| h["id"] == *id))
+                .and_then(|id| history_value.iter().find(|h| h["id"] == *id))
         } else {
-            history
+            history_value
                 .iter()
                 .find(|h| h["action"] == "edit" && !undone.contains(&h["id"].as_i64().unwrap_or(0)))
         };
@@ -1055,7 +1083,7 @@ pub(crate) fn assign(
     m: &raw::Metadata,
     side: u8,
     cfg: &ProjectConfig,
-    layout: &Layout,
+    layout: &StoredLayout,
 ) {
     let (Some(mut x), Some(mut y)) = (m.x, m.y) else {
         return;
@@ -1069,8 +1097,8 @@ pub(crate) fn assign(
         x += cfg.chamber_distance * a.cos() + cfg.chamber_forward_distance * h.cos();
         y += cfg.chamber_distance * a.sin() + cfg.chamber_forward_distance * h.sin();
     }
-    row.insert("chamberX".into(), json!(x));
-    row.insert("chamberY".into(), json!(y));
+    row.insert("x".into(), json!(x));
+    row.insert("y".into(), json!(y));
     for key in ["plotId", "plotLabel", "treatmentId", "treatmentName"] {
         row.insert(key.into(), Value::Null);
     }
@@ -1132,7 +1160,7 @@ fn contains(poly: &[Value], x: f64, y: f64) -> bool {
 }
 
 impl Session {
-    pub fn legacy_scan(&self, dir: &str) -> Result<Value> {
+    fn scan_value(&self, dir: &str) -> Result<Value> {
         let root = Path::new(dir);
         let cfg = root.join("config.yml");
         let config: Value = if cfg.exists() {
@@ -1162,7 +1190,7 @@ impl Session {
         args: LegacyImportArgs,
         progress: impl Fn(Progress),
     ) -> Result<ProjectInfo> {
-        let scan = self.legacy_scan(&args.legacy_dir)?;
+        let scan = self.scan_value(&args.legacy_dir)?;
         let name = Path::new(&args.legacy_dir)
             .file_name()
             .unwrap_or_default()
@@ -1334,11 +1362,11 @@ impl Session {
         Ok(())
     }
 
-    pub fn preview_table(&self, path: &str, opts: Value) -> Result<Value> {
+    fn table_value(&self, path: &str, opts: Value) -> Result<Value> {
         let (sheets, rows) = read_table(path, opts["sheet"].as_str())?;
         let header = opts["headerRow"].as_u64().unwrap_or(0) as usize;
         Ok(
-            json!({"sheets":sheets,"headerCandidates":(0..rows.len().min(5)).collect::<Vec<_>>(),"headers":rows.get(header),"rows":rows.iter().skip(header+1).take(20).collect::<Vec<_>>(),"totalRows":rows.len().saturating_sub(header+1)}),
+            json!({"sheets":sheets,"headerCandidates":(0..rows.len().min(5)).collect::<Vec<_>>(),"columns":rows.get(header),"rows":rows.iter().skip(header+1).take(20).collect::<Vec<_>>(),"totalRows":rows.len().saturating_sub(header+1)}),
         )
     }
 
@@ -1416,12 +1444,12 @@ impl Session {
             .ok_or_else(|| Error::Invalid("missing headers".into()))?;
         let col =
             |key: &str, default: &str| column(headers, args.get(key).unwrap_or(&json!(default)));
-        let tc = col("timeColumn", "date")
+        let tc = col("dateColumn", "date")
             .ok_or_else(|| Error::Invalid("date column missing".into()))?;
         let pc =
             col("plotColumn", "nr").ok_or_else(|| Error::Invalid("plot column missing".into()))?;
         let cfg = self.get_config()?;
-        let layout = self.get_layout()?;
+        let layout = self.layout_value()?;
         let mut report = ImportReport::default();
         for values in rows.iter().skip(h + 1) {
             let Some(time) = values.get(tc).and_then(|v| parse_time(v, &cfg.time_zone)) else {
@@ -1430,10 +1458,11 @@ impl Session {
             };
             let plot = values.get(pc).and_then(number).map(|n| n as i64);
             let p = layout.plots.iter().find(|p| p["id"].as_i64() == plot);
-            let row = json!({"id":0,"measurementId":null,"source":"manual","time":time+43200000,"filename":null,"side":null,"plotId":plot,"plotLabel":p.map(|p|p["label"].clone()),"treatmentId":p.map(|p|p["treatmentId"].clone()),"treatmentName":null,"excluded":false,"reviewed":false,"overridden":false,"note":"","airTemp":null,"precip":null});
+            let row = json!({"id":0,"measurementId":null,"source":"manual","time":time+args["offsetHours"].as_i64().unwrap_or(12)*3600000,"filename":null,"side":null,"plotId":plot,"plotLabel":p.map(|p|p["label"].clone()),"treatmentId":p.map(|p|p["treatmentId"].clone()),"treatmentName":null,"excluded":false,"reviewed":false,"overridden":false,"note":"","airTemp":null,"precip":null});
             let mut row: FluxRow = serde_json::from_value(row)?;
             for (gas, col) in [("N2O", "N2O_N_mug_m2h"), ("CO2", "CO2_C_mug_m2h")] {
-                if let Some(i) = column(headers, &json!(col)) {
+                if let Some(i) = column(headers, args["gasColumns"].get(gas).unwrap_or(&json!(col)))
+                {
                     row.insert(format!("{gas}_flux"), json!(values.get(i).and_then(number)));
                 }
             }
@@ -1500,7 +1529,7 @@ impl Session {
         self.recompute_all(|_| {})
     }
 
-    pub fn treatment_summary(&self, q: SummaryQuery) -> Result<Value> {
+    fn summary_value(&self, q: SummaryQuery) -> Result<Value> {
         let rows: Vec<_> = self
             .rows()?
             .into_iter()
@@ -1573,7 +1602,7 @@ impl Session {
             plots.push(json!({"plotId":id,"label":rows[0]["plotLabel"],"treatmentId":rows[0]["treatmentId"],"total":cumulative,"points":points,"daily":daily}));
         }
         let mut treatments = vec![];
-        for t in self.get_layout()?.treatments {
+        for t in self.layout_value()?.treatments {
             let ps: Vec<_> = plots
                 .iter()
                 .filter(|p| p["treatmentId"] == t["id"])
@@ -1901,12 +1930,12 @@ fn convert_options(v: &Value, base: &AnalysisOptions) -> Result<AnalysisOptions>
     Ok(serde_json::from_value(out)?)
 }
 
-pub(crate) fn preset_layout(name: &str) -> Result<Layout> {
+pub(crate) fn preset_layout(name: &str) -> Result<StoredLayout> {
     let presets: Value = serde_json::from_str(include_str!("presets.json"))?;
     layout_from_preset(&presets[name], name)
 }
-fn layout_from_preset(p: &Value, name: &str) -> Result<Layout> {
-    let mut layout = Layout::default();
+fn layout_from_preset(p: &Value, name: &str) -> Result<StoredLayout> {
+    let mut layout = StoredLayout::default();
     if let Some(ts) = p["treatment_legend"].as_object() {
         for (id, t) in ts {
             let id: i64 = id.parse().map_err(|_| Error::Invalid("preset".into()))?;
@@ -1944,7 +1973,7 @@ fn layout_from_preset(p: &Value, name: &str) -> Result<Layout> {
     Ok(layout)
 }
 
-fn unknown_layout(dir: &str) -> Result<Layout> {
+fn unknown_layout(dir: &str) -> Result<StoredLayout> {
     for filename in ["analyzer-gui.py", "field_experiment.py"] {
         let path = Path::new(dir).join(filename);
         if !path.exists() {
@@ -1964,5 +1993,118 @@ fn unknown_layout(dir: &str) -> Result<Layout> {
             }
         }
     }
-    Ok(Layout::default())
+    Ok(StoredLayout::default())
+}
+impl Session {
+    pub fn get_layout(&self) -> Result<Layout> {
+        Ok(serde_json::from_value(serde_json::to_value(
+            self.layout_value()?,
+        )?)?)
+    }
+    pub fn list_series(&self) -> Result<Vec<SeriesMeta>> {
+        self.series_value()?
+            .into_iter()
+            .map(|mut v| {
+                if v["timeRange"].is_null() {
+                    v["timeRange"] = json!([0, 0]);
+                }
+                Ok(serde_json::from_value(v)?)
+            })
+            .collect()
+    }
+    pub fn get_series(
+        &self,
+        ids: &[i64],
+        from: Option<i64>,
+        to: Option<i64>,
+        max_points: Option<usize>,
+    ) -> Result<Vec<SeriesData>> {
+        Ok(serde_json::from_value(json!(
+            self.series_data_value(ids, from, to, max_points)?
+        ))?)
+    }
+    pub fn treatment_summary(&self, q: SummaryQuery) -> Result<TreatmentSummary> {
+        Ok(serde_json::from_value(self.summary_value(q)?)?)
+    }
+    pub fn preview_table(&self, path: &str, opts: Value) -> Result<TablePreview> {
+        Ok(serde_json::from_value(self.table_value(path, opts)?)?)
+    }
+    pub fn legacy_scan(&self, dir: &str) -> Result<LegacyScan> {
+        let v = self.scan_value(dir)?;
+        let paths = &v["config"]["PATHS"];
+        let exists = |k: &str| paths[k].as_str().is_some_and(|p| Path::new(p).exists());
+        Ok(LegacyScan {
+            config_paths: paths
+                .as_object()
+                .map(|m| {
+                    m.values()
+                        .filter_map(|v| v.as_str().map(str::to_owned))
+                        .collect()
+                })
+                .unwrap_or_default(),
+            raw_files: v["rawCount"].as_u64().unwrap_or(0) as usize,
+            manual_exists: exists("MANUAL"),
+            logger_exists: exists("LOGGER_PATH"),
+            weather_exists: Path::new(dir).join("../../metno_data.pickle").exists(),
+            warnings: if v["rawCount"] == 0 {
+                vec!["No raw files found; choose a raw folder.".into()]
+            } else {
+                vec![]
+            },
+        })
+    }
+    pub fn history(&self, limit: usize) -> Result<Vec<Change>> {
+        self.history_value(limit)?
+            .into_iter()
+            .map(|h| {
+                let before = h["before"].as_str().unwrap_or("null").to_owned();
+                let after = h["after"].as_str().unwrap_or("null").to_owned();
+                let v: Value = serde_json::from_str(&after)?;
+                let flux_ids = if let Some(a) = v.as_array() {
+                    a.iter().filter_map(|v| v["id"].as_i64()).collect()
+                } else {
+                    h["target"].as_i64().into_iter().collect()
+                };
+                Ok(Change {
+                    id: h["id"].as_i64().unwrap_or(0),
+                    time: h["time"].as_i64().unwrap_or(0),
+                    kind: h["kind"].as_str().unwrap_or("").into(),
+                    flux_ids,
+                    before,
+                    after,
+                })
+            })
+            .collect()
+    }
+    fn undo_state(&self, changed: bool) -> Result<UndoResult> {
+        let h = self.history_value(usize::MAX / 2)?;
+        let mut undo = vec![];
+        let mut redo = vec![];
+        for h in h.iter().rev() {
+            match h["action"].as_str() {
+                Some("edit") => {
+                    undo.push(h["id"].as_i64().unwrap_or(0));
+                    redo.clear();
+                }
+                Some("undo") => {
+                    if let Some(id) = h["original"].as_i64() {
+                        undo.retain(|v| *v != id);
+                        redo.push(id);
+                    }
+                }
+                Some("redo") => {
+                    if let Some(id) = h["original"].as_i64() {
+                        redo.retain(|v| *v != id);
+                        undo.push(id);
+                    }
+                }
+                _ => {}
+            }
+        }
+        Ok(UndoResult {
+            changed,
+            can_undo: !undo.is_empty(),
+            can_redo: !redo.is_empty(),
+        })
+    }
 }

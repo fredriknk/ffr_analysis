@@ -358,6 +358,7 @@ dependencies = [
  "statrs",
  "tempfile",
  "thiserror",
+ "zip",
  "zstd",
 ]
 

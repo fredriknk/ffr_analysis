@@ -39,9 +39,8 @@ fn project_roundtrip_edits_backup_and_external_data() {
     )
     .expect("series");
     assert_eq!(
-        s.get_series(&[1], None, None, Some(1)).expect("series")[0]["points"]
-            .as_array()
-            .expect("points")
+        s.get_series(&[1], None, None, Some(1)).expect("series")[0]
+            .points
             .len(),
         1
     );
@@ -129,8 +128,14 @@ fn treatment_integration_and_three_xlsx_modes() {
         .expect("create");
     s.set_layout(
         Layout {
-            treatments: vec![json!({"id":1,"name":"T","colour":"#000000"})],
-            plots: vec![json!({"id":1,"label":"P","treatmentId":1})],
+            treatments: vec![
+                serde_json::from_value(json!({"id":1,"name":"T","colour":"#000000"}))
+                    .expect("treatment"),
+            ],
+            plots: vec![serde_json::from_value(
+                json!({"id":1,"label":"P","treatmentId":1,"polygon":null}),
+            )
+            .expect("plot")],
         },
         |_| {},
     )
@@ -145,7 +150,7 @@ fn treatment_integration_and_three_xlsx_modes() {
             flux_ids: None,
         })
         .expect("summary");
-    assert!((summary["treatments"][0]["mean"].as_f64().expect("mean") - 0.0072).abs() < 1e-14);
+    assert!((summary.treatments[0].mean - 0.0072).abs() < 1e-14);
     for mode in ["flat", "sheetPerPlot", "dailyPerPlot"] {
         let path = dir.path().join(format!("{mode}.xlsx"));
         s.export_xlsx(ExportArgs {
