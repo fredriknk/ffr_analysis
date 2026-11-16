@@ -1,0 +1,14 @@
+﻿[package]
+name = "ffr-analyzer"
+version = "0.1.0"
+description = "Field Flux Robot analysis workspace"
+edition = "2021"
+
+[workspace]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
