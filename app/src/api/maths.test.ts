@@ -1,7 +1,7 @@
-import { describe,expect,it } from "vitest";
-import { fluxConversion,regression,summarize } from "./maths";
+import { describe, expect, it } from "vitest";
+import { fluxConversion, regression, summarize } from "./maths";
 import { createMock } from "./mock";
-import type { FluxRow,Plot,Treatment } from "./types";
+import type { FluxRow, Plot, Treatment } from "./types";
 describe("scientific calculations", () => {
   it("fits a line with proper errors and Pearson p", () => {
     const r = regression([0, 1, 2, 3, 4], [1, 3, 5, 7, 9]);
@@ -68,33 +68,58 @@ describe("scientific calculations", () => {
     expect((await api.getFluxDetail(4)).isOverridden).toBe(false);
     await api.redo();
     expect((await api.getFluxDetail(4)).options.start).toBe(40);
-    const lagged=await api.getFluxDetail(1009);
+    const lagged = await api.getFluxDetail(1009);
     expect(lagged.valveLagS).toBeGreaterThanOrEqual(3);
     expect(lagged.valveLagS).toBeLessThanOrEqual(6);
-    expect(lagged.diagnostics.some(d=>d.code==="valve_timing")).toBe(true);
-    const original=(await api.getFluxDetail(1010)).options;
-    await api.setFluxOptions([1009],{...lagged.options,start:30,stop:150,perGas:{N2O:{start:40}}});
-    await api.patchFluxOptions([1009,1010],{valveOffset:lagged.valveLagS});
-    const aligned=await api.getFluxDetail(1009);
+    expect(lagged.diagnostics.some((d) => d.code === "valve_timing")).toBe(
+      true,
+    );
+    const original = (await api.getFluxDetail(1010)).options;
+    await api.setFluxOptions([1009], {
+      ...lagged.options,
+      start: 30,
+      stop: 150,
+      perGas: { N2O: { start: 40 } },
+    });
+    await api.patchFluxOptions([1009, 1010], { valveOffset: lagged.valveLagS });
+    const aligned = await api.getFluxDetail(1009);
     expect(aligned.options.start).toBe(30);
     expect(aligned.options.perGas?.N2O?.start).toBe(40);
     expect((await api.getFluxDetail(1010)).options.start).toBe(original.start);
     expect(aligned.traces[0].side).not.toEqual(lagged.traces[0].side);
-    expect(aligned.traces.every(t=>t.fit.every((v,i)=>(v!==null)===t.used[i]))).toBe(true);
-    expect(aligned.diagnostics.some(d=>d.code==="valve_timing")).toBe(false);
+    expect(
+      aligned.traces.every((t) =>
+        t.fit.every((v, i) => (v !== null) === t.used[i]),
+      ),
+    ).toBe(true);
+    expect(aligned.diagnostics.some((d) => d.code === "valve_timing")).toBe(
+      false,
+    );
     await api.undo();
     expect((await api.getFluxDetail(1009)).options.valveOffset).toBe(0);
     expect((await api.getFluxDetail(1010)).options.valveOffset).toBe(0);
     await api.redo();
-    expect((await api.getFluxDetail(1010)).options.valveOffset).toBe(lagged.valveLagS);
-    const thumbs=await api.getFluxThumbs([1009,1010,211],"N2O",30);
+    expect((await api.getFluxDetail(1010)).options.valveOffset).toBe(
+      lagged.valveLagS,
+    );
+    const thumbs = await api.getFluxThumbs([1009, 1010, 211], "N2O", 30);
     expect(thumbs[0].t.length).toBeLessThanOrEqual(30);
     expect(thumbs[0].t.length).toBe(thumbs[0].used.length);
-    const failed=await api.getFluxDetail(211);
+    const failed = await api.getFluxDetail(211);
     expect(failed.regressions).toHaveLength(0);
-    expect(failed.diagnostics.some(d=>d.code==="error")).toBe(true);
-    const counts=await api.diagnosticsSummary();
-    for(const code of ["valve_timing","curvature","spike","neighbour_outlier","error","n2o_negative","co2_not_rising"])expect(counts.find(d=>d.code===code)?.count,code).toBeGreaterThan(0);
-
+    expect(failed.diagnostics.some((d) => d.code === "error")).toBe(true);
+    const counts = await api.diagnosticsSummary();
+    for (const code of [
+      "valve_timing",
+      "curvature",
+      "spike",
+      "neighbour_outlier",
+      "error",
+      "n2o_negative",
+      "co2_not_rising",
+    ])
+      expect(counts.find((d) => d.code === code)?.count, code).toBeGreaterThan(
+        0,
+      );
   }, 20000);
 });

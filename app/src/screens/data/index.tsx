@@ -1,5 +1,5 @@
+import { useQuery } from "@tanstack/react-query";
 import {
-  flexRender,
   getCoreRowModel,
   getFilteredRowModel,
   getSortedRowModel,
@@ -8,27 +8,35 @@ import {
   type ColumnFiltersState,
   type SortingState,
 } from "@tanstack/react-table";
-import { useVirtualizer } from "@tanstack/react-virtual";
 import { save } from "@tauri-apps/plugin-dialog";
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { api, isTauri, mockMode } from "../../api";
 import type { Cell, ExportArgs, FluxRow } from "../../api/types";
 import {
-  Empty,
+  date,
   Field,
+  fmt,
   Panel,
   Status,
-  date,
-  fmt,
   useAction,
   useRows,
 } from "../../shared/common";
+import { codes, DiagnosticPicker } from "../../shared/diagnostics";
+import { FluxTableView } from "../../shared/table/FluxTableView";
 import { useStore } from "../../store";
 export function Data() {
-  const s = useStore(),
+  const s = useStore(
+      useShallow(({ dataSearch, set, nav, reviewThese, openFlux }) => ({
+        dataSearch,
+        set,
+        nav,
+        reviewThese,
+        openFlux,
+      })),
+    ),
     data = useRows(),
     action = useAction(),
-    parent = useRef<HTMLDivElement>(null),
     [sorting, setSorting] = useState<SortingState>([]),
     [filters, setFilters] = useState<ColumnFiltersState>([]),
     [visible, setVisible] = useState<Record<string, boolean>>({
@@ -51,6 +59,20 @@ export function Data() {
     [presets, setPresets] = useState<Record<string, ColumnFiltersState>>(() =>
       JSON.parse(localStorage.getItem("ffr-presets") ?? "{}"),
     );
+  const [diagnosticCodes, setDiagnosticCodes] = useState<string[]>([]);
+  const diagnostics = useQuery({
+    queryKey: ["diagnostics"],
+    queryFn: () => api.diagnosticsSummary(),
+  });
+  const dataRows = useMemo(
+    () =>
+      data.data?.rows.filter(
+        (r) =>
+          !diagnosticCodes.length ||
+          diagnosticCodes.some((c) => codes(r.diag).includes(c)),
+      ) ?? [],
+    [data.data, diagnosticCodes],
+  );
   const columns = useMemo<ColumnDef<FluxRow>[]>(
     () =>
       data.data?.columns
@@ -74,31 +96,44 @@ export function Data() {
         .map((c) => ({
           id: c.key,
           accessorKey: c.key,
-          header: c.label,
-          filterFn: (row, id, value: string) => {
+          header: () => (
+            <span>
+              {c.label}
+              {c.unit && <small className="column-unit">{c.unit}</small>}
+            </span>
+          ),
+          filterFn: (row, id, value: unknown) => {
             const cell = row.getValue<Cell>(id);
             if (c.type === "number" || c.type === "time") {
-              const [a, b] = value.split("..");
+              const [a, b] = String(value ?? "").split("..");
               const parse = (v: string) =>
                 c.type === "time" ? Date.parse(v) : Number(v);
               return (
                 (!a || Number(cell) >= parse(a)) &&
-                (!b || Number(cell) <= parse(b))
+                (!b ||
+                  Number(cell) <=
+                    parse(b) + (c.type === "time" ? 86400000 - 1 : 0))
               );
             }
+            if (Array.isArray(value))
+              return !value.length || value.includes(String(cell));
             return String(cell ?? "")
               .toLowerCase()
-              .includes(value.toLowerCase());
+              .includes(String(value ?? "").toLowerCase());
           },
           cell: (info) =>
-            c.type === "time"
-              ? date(Number(info.getValue()))
-              : typeof info.getValue() === "number"
-                ? fmt(
-                    info.getValue(),
-                    c.key === "id" ? 0 : c.key.endsWith("slope") ? 6 : 2,
-                  )
-                : String(info.getValue() ?? "—"),
+            c.type === "boolean"
+              ? info.getValue()
+                ? "✓"
+                : "—"
+              : c.type === "time"
+                ? date(Number(info.getValue()))
+                : typeof info.getValue() === "number"
+                  ? fmt(
+                      info.getValue(),
+                      c.key === "id" ? 0 : c.key.endsWith("slope") ? 6 : 2,
+                    )
+                  : String(info.getValue() ?? "—"),
         })) ?? [],
     [data.data],
   );
@@ -127,7 +162,7 @@ export function Data() {
     return v;
   }, [data.data, visible]);
   const table = useReactTable({
-    data: data.data?.rows ?? [],
+    data: dataRows,
     columns,
     state: {
       sorting,
@@ -147,12 +182,6 @@ export function Data() {
     getRowId: (r) => String(r.id),
   });
   const rs = table.getRowModel().rows,
-    virt = useVirtualizer({
-      count: rs.length,
-      getScrollElement: () => parent.current,
-      estimateSize: () => 39,
-      overscan: 12,
-    }),
     ids = Object.keys(selection)
       .filter((k) => selection[k])
       .map(Number),
@@ -195,6 +224,13 @@ export function Data() {
         />
         <button onClick={() => setChooser(!chooser)}>Columns</button>
         <button
+          className="primary"
+          disabled={!exportIds.length}
+          onClick={() => s.reviewThese(exportIds)}
+        >
+          Review these
+        </button>
+        <button
           onClick={() => {
             s.set({ subset: exportIds });
             s.nav("Treatments");
@@ -208,6 +244,7 @@ export function Data() {
         <button
           onClick={() => {
             setFilters([]);
+            setDiagnosticCodes([]);
             s.set({ dataSearch: "" });
             setSelection({});
           }}
@@ -241,9 +278,7 @@ export function Data() {
             <option key={p}>{p}</option>
           ))}
         </select>
-        <small>
-          Numeric / date ranges: minimum..maximum · Click headers to sort
-        </small>
+        <small>Typed column filters · Click headers to sort</small>
       </div>
       {chooser && (
         <Panel title="Visible columns">
@@ -260,13 +295,19 @@ export function Data() {
                           ?.group === group,
                     )
                     .map((col) => (
-                      <label key={col.id}>
+                      <label
+                        key={
+                          data.data?.columns.find((c) => c.key === col.id)
+                            ?.label ?? "Column"
+                        }
+                      >
                         <input
                           type="checkbox"
                           checked={col.getIsVisible()}
                           onChange={col.getToggleVisibilityHandler()}
                         />
-                        {col.id}
+                        {data.data?.columns.find((c) => c.key === col.id)
+                          ?.label ?? "Column"}
                       </label>
                     ))}
                 </div>
@@ -275,119 +316,23 @@ export function Data() {
           </div>
         </Panel>
       )}
+      <details className="panel diagnostic-filter">
+        <summary>
+          Filter by diagnostic code ({diagnosticCodes.length} selected)
+        </summary>
+        <Status loading={diagnostics.isLoading} error={diagnostics.error} />
+        <DiagnosticPicker
+          counts={(diagnostics.data ?? []).filter((c) => c.count)}
+          value={diagnosticCodes}
+          onChange={setDiagnosticCodes}
+        />
+      </details>
       <Status loading={data.isLoading} error={data.error} />
-      <div className="table-scroll panel" ref={parent}>
-        <table>
-          <thead>
-            {table.getHeaderGroups().map((hg) => (
-              <tr key={hg.id}>
-                <th>
-                  <input
-                    aria-label="Select all matching rows"
-                    type="checkbox"
-                    checked={rs.length > 0 && rs.every((r) => selection[r.id])}
-                    onChange={(e) =>
-                      setSelection(
-                        e.target.checked
-                          ? Object.fromEntries(rs.map((r) => [r.id, true]))
-                          : {},
-                      )
-                    }
-                  />
-                </th>
-                {hg.headers.map((h) => (
-                  <th
-                    key={h.id}
-                    style={{
-                      minWidth:
-                        h.id === "id"
-                          ? 55
-                          : [
-                                "source",
-                                "side",
-                                "reviewed",
-                                "excluded",
-                                "overridden",
-                                "plotLabel",
-                              ].includes(h.id)
-                            ? 85
-                            : 125,
-                    }}
-                  >
-                    <button onClick={h.column.getToggleSortingHandler()}>
-                      {flexRender(h.column.columnDef.header, h.getContext())}
-                      {h.column.getIsSorted() === "asc"
-                        ? " ?"
-                        : h.column.getIsSorted() === "desc"
-                          ? " ?"
-                          : ""}
-                    </button>
-                    <input
-                      aria-label={"Filter " + h.id}
-                      placeholder={
-                        data.data?.columns.find((c) => c.key === h.id)?.type ===
-                        "number"
-                          ? "min..max"
-                          : "Filter…"
-                      }
-                      value={String(h.column.getFilterValue() ?? "")}
-                      onChange={(e) => h.column.setFilterValue(e.target.value)}
-                    />
-                  </th>
-                ))}
-              </tr>
-            ))}
-          </thead>
-          <tbody>
-            <tr style={{ height: virt.getVirtualItems()[0]?.start ?? 0 }}>
-              <td colSpan={columns.length + 1} />
-            </tr>
-            {virt.getVirtualItems().map((v) => {
-              const r = rs[v.index];
-              return (
-                <tr
-                  key={r.id}
-                  className={r.original.excluded ? "excluded" : ""}
-                  style={{ height: 39 }}
-                >
-                  <td>
-                    <input
-                      aria-label={"Select flux " + r.id}
-                      type="checkbox"
-                      checked={!!selection[r.id]}
-                      onChange={r.getToggleSelectedHandler()}
-                    />
-                  </td>
-                  {r.getVisibleCells().map((c) => (
-                    <td key={c.id}>
-                      <button
-                        className="cell"
-                        onClick={() => s.openFlux(r.original.id)}
-                      >
-                        {flexRender(c.column.columnDef.cell, c.getContext())}
-                      </button>
-                    </td>
-                  ))}
-                </tr>
-              );
-            })}
-            <tr
-              style={{
-                height: Math.max(
-                  0,
-                  virt.getTotalSize() -
-                    (virt.getVirtualItems().at(-1)?.end ?? 0),
-                ),
-              }}
-            >
-              <td colSpan={columns.length + 1} />
-            </tr>
-          </tbody>
-        </table>
-        {!rs.length && (
-          <Empty>No rows match. Clear filters to see all measurements.</Empty>
-        )}
-      </div>
+      <FluxTableView
+        table={table}
+        data={data.data ?? { columns: [], rows: [] }}
+        onOpen={s.openFlux}
+      />
       {exporting && (
         <div className="modal-shade">
           <section

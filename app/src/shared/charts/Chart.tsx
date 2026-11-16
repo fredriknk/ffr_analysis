@@ -6,12 +6,14 @@ import {
   ScatterChart,
 } from "echarts/charts";
 import {
+  BrushComponent,
   DataZoomComponent,
   GraphicComponent,
   GridComponent,
   LegendComponent,
   MarkAreaComponent,
   MarkLineComponent,
+  ToolboxComponent,
   TooltipComponent,
 } from "echarts/components";
 import type { ECElementEvent, EChartsCoreOption } from "echarts/core";
@@ -28,6 +30,8 @@ echarts.use([
   GridComponent,
   TooltipComponent,
   LegendComponent,
+  BrushComponent,
+  ToolboxComponent,
   DataZoomComponent,
   MarkLineComponent,
   MarkAreaComponent,

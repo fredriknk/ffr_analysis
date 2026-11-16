@@ -1,17 +1,27 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { api, mockMode } from "./api";
 import type { Progress } from "./api/types";
 import { Data } from "./screens/data";
 import { External } from "./screens/external";
+import { Outliers } from "./screens/outliers";
 import { Project } from "./screens/project";
 import { Review } from "./screens/review";
 import { Start } from "./screens/start";
 import { Treatments } from "./screens/treatments";
-import { Empty, setToastHandler, useAction } from "./shared/common";
+import { Empty, error, setToastHandler, useAction } from "./shared/common";
 import { useStore, type Screen } from "./store";
 export default function App() {
-  const s = useStore(),
+  const s = useStore(
+      useShallow(({ screen, theme, nav, set, timeZone }) => ({
+        screen,
+        theme,
+        nav,
+        set,
+        timeZone,
+      })),
+    ),
     action = useAction(),
     [toast, setToast] = useState(""),
     [progress, setProgress] = useState<Progress | null>(null);
@@ -46,21 +56,28 @@ export default function App() {
       .then((fn) => {
         if (disposed) fn();
         else off = fn;
-      });
+      })
+      .catch(error);
     return () => {
       disposed = true;
       off?.();
     };
   }, []);
+  useEffect(() => {
+    const show = (e: Event) => error((e as CustomEvent<unknown>).detail);
+    window.addEventListener("ffr-api-error", show);
+    return () => window.removeEventListener("ffr-api-error", show);
+  }, []);
   const screens: Screen[] = [
       "Start",
       "Review",
       "Treatments",
+      "Outliers",
       "Data",
       "External data",
       "Project",
     ],
-    icons = ["⌂", "∿", "▥", "▦", "☁", "⚙"];
+    icons = ["⌂", "∿", "▥", "◇", "▦", "☁", "⚙"];
   return (
     <div className="app-shell">
       <nav className="rail">
@@ -123,6 +140,16 @@ export default function App() {
             </button>
           </div>
         </header>
+        {progress && (
+          <div className="operation-progress" role="status">
+            <strong>{progress.task}</strong>
+            <progress value={progress.done} max={progress.total} />
+            <span>
+              {progress.message ?? "Processing?"} ? {progress.done}/
+              {progress.total}
+            </span>
+          </div>
+        )}
         <div className="screen-body">
           {screens.map((screen) => (
             <div
@@ -137,6 +164,8 @@ export default function App() {
                   <Review />
                 ) : screen === "Treatments" ? (
                   <Treatments />
+                ) : screen === "Outliers" ? (
+                  <Outliers />
                 ) : screen === "Data" ? (
                   <Data />
                 ) : screen === "External data" ? (

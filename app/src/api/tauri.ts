@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import type { FfrApi,Progress } from "./types";
+import type { FfrApi, Progress } from "./types";
 export const tauriApi: FfrApi = {
   projectCreate: (path, name) => invoke("project_create", { path, name }),
   projectOpen: (path) => invoke("project_open", { path }),

@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import type { EChartsCoreOption } from "echarts/core";
 import { useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { api } from "../../api";
 import type { Gas } from "../../api/types";
 import { Chart } from "../../shared/charts/Chart";
@@ -13,11 +14,37 @@ import {
   fmt,
   useRows,
 } from "../../shared/common";
+import { TimeBrush } from "../../shared/filters/TimeBrush";
 import { useStore } from "../../store";
 export function Treatments() {
   const allFluxes = useRows();
-  const s = useStore(),
-    [log, setLog] = useState(false);
+  const s = useStore(
+      useShallow(
+        ({ gas, from, to, sources, subset, focus, set, openFlux }) => ({
+          gas,
+          from,
+          to,
+          sources,
+          subset,
+          focus,
+          set,
+          openFlux,
+        }),
+      ),
+    ),
+    [log, setLog] = useState(false),
+    [showExcluded, setShowExcluded] = useState(false);
+  const seriesMeta = useQuery({
+    queryKey: ["series"],
+    queryFn: () => api.listSeries(),
+  });
+  const temperature = seriesMeta.data?.find(
+      (s) => /air.*temp|temperature/i.test(s.name) && !/soil/i.test(s.name),
+    ),
+    rain = seriesMeta.data?.find((s) => /precip|rain/i.test(s.name)),
+    weatherIds = [temperature?.id, rain?.id].filter(
+      (id): id is number => id !== undefined,
+    );
   const q = {
     gas: s.gas,
     from: s.from ? Date.parse(s.from) : undefined,
@@ -30,9 +57,10 @@ export function Treatments() {
       queryFn: () => api.treatmentSummary(q),
     }),
     weather = useQuery({
-      queryKey: ["weather", s.from, s.to],
+      queryKey: ["weather", weatherIds, s.from, s.to],
+      enabled: !!weatherIds.length,
       queryFn: () =>
-        api.getSeries([1, 2], q.from, q.to, 20000).then((series) =>
+        api.getSeries(weatherIds, q.from, q.to, 20000).then((series) =>
           series.map((s) => {
             const days = new Map<number, number[]>();
             s.points.forEach((p) => {
@@ -44,7 +72,7 @@ export function Treatments() {
               points: [...days].map(([time, v]) => ({
                 time,
                 value:
-                  s.id === 2
+                  s.id === rain?.id
                     ? v.reduce((a, b) => a + b, 0)
                     : v.reduce((a, b) => a + b, 0) / v.length,
               })),
@@ -52,6 +80,7 @@ export function Treatments() {
           }),
         ),
     });
+  const fluxLookup = new Map(allFluxes.data?.rows.map((r) => [r.id, r]));
   const d = result.data,
     ts = d?.treatments.filter((t) => !s.focus || t.id === s.focus) ?? [],
     ps = d?.plots.filter((p) => !s.focus || p.treatmentId === s.focus) ?? [];
@@ -59,9 +88,8 @@ export function Treatments() {
   const seriesTime = {
     grid: { left: 65, right: 30, top: 25, bottom: 65 },
     tooltip: { trigger: "axis" },
-    xAxis: { type: "time" },
+    xAxis: { type: "time", min: q.from, max: q.to },
     yAxis: { type: "value", scale: true },
-    dataZoom: [{ type: "inside" }, { type: "slider", height: 18, bottom: 10 }],
   };
   return (
     <div className="page">
@@ -70,7 +98,14 @@ export function Treatments() {
           <h2>Treatment comparison</h2>
           <p>From individual fluxes to cumulative field response.</p>
         </div>
-        <span className="badge">Excluded fluxes omitted from summaries</span>
+        <label>
+          <input
+            type="checkbox"
+            checked={showExcluded}
+            onChange={(e) => setShowExcluded(e.target.checked)}
+          />
+          Show excluded points faintly
+        </label>
       </div>
       <div className="toolbar panel">
         <Field label="Gas">
@@ -127,55 +162,17 @@ export function Treatments() {
         </span>
       </div>
       <Status loading={result.isLoading} error={result.error} />
+      <Status loading={allFluxes.isLoading} error={allFluxes.error} />
+      {!allFluxes.isLoading &&
+        !allFluxes.data?.rows.some((r) => r.source === "manual") &&
+        s.sources.includes("manual") && (
+          <p className="muted">
+            No manual fluxes in this project. Robot data remain available.
+          </p>
+        )}
       {d && (
         <>
-          <div className="toolbar brush">
-            <span>Date-range brush</span>
-            <input
-              aria-label="Brush start date"
-              type="range"
-              min="0"
-              max="728"
-              value={
-                s.from
-                  ? Math.round(
-                      (Date.parse(s.from) - Date.UTC(2023, 0, 4)) / 86400000,
-                    )
-                  : 0
-              }
-              onChange={(e) =>
-                s.set({
-                  from: new Date(
-                    Date.UTC(2023, 0, 4) + Number(e.target.value) * 86400000,
-                  )
-                    .toISOString()
-                    .slice(0, 10),
-                })
-              }
-            />
-            <input
-              aria-label="Brush end date"
-              type="range"
-              min="0"
-              max="728"
-              value={
-                s.to
-                  ? Math.round(
-                      (Date.parse(s.to) - Date.UTC(2023, 0, 4)) / 86400000,
-                    )
-                  : 728
-              }
-              onChange={(e) =>
-                s.set({
-                  to: new Date(
-                    Date.UTC(2023, 0, 4) + Number(e.target.value) * 86400000,
-                  )
-                    .toISOString()
-                    .slice(0, 10),
-                })
-              }
-            />
-          </div>
+          <TimeBrush rows={allFluxes.data?.rows ?? []} />{" "}
           <div className="treatment-legend">
             {d.treatments.map((t) => (
               <button
@@ -370,7 +367,17 @@ export function Treatments() {
                         color: colour(p.treatmentId),
                         opacity: 0.65,
                       },
-                      data: p.points.map((v) => [v.time, v.value, v.fluxId]),
+                      data: p.points.map((v) => ({
+                        value: [v.time, v.value, v.fluxId],
+                        symbol:
+                          (fluxLookup.get(v.fluxId)?.attention ?? 0) >= 30
+                            ? "diamond"
+                            : "circle",
+                        symbolSize:
+                          (fluxLookup.get(v.fluxId)?.attention ?? 0) >= 30
+                            ? 7
+                            : 4,
+                      })),
                     })),
                     {
                       name: "Excluded",
@@ -381,6 +388,7 @@ export function Treatments() {
                         allFluxes.data?.rows
                           .filter(
                             (r) =>
+                              showExcluded &&
                               r.excluded &&
                               (!s.focus || r.treatmentId === s.focus) &&
                               s.sources.includes(r.source) &&
@@ -393,19 +401,22 @@ export function Treatments() {
                 } as EChartsCoreOption
               }
             />
-            <div className="point-links">
-              {ps.slice(0, 6).map(
-                (p) =>
-                  p.points[0] && (
-                    <button
-                      key={p.plotId}
-                      onClick={() => s.openFlux(p.points[0].fluxId)}
-                    >
-                      Open {p.label} · #{p.points[0].fluxId} ↗
-                    </button>
-                  ),
-              )}
-            </div>
+            <details className="accessible-points">
+              <summary>Open a flux by keyboard</summary>
+              <input
+                type="number"
+                min="1"
+                aria-label="Treatment flux ID"
+                placeholder="Flux ID, then Enter"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    const id = Number(e.currentTarget.value);
+                    if (ps.some((p) => p.points.some((v) => v.fluxId === id)))
+                      s.openFlux(id);
+                  }
+                }}
+              />
+            </details>
           </Panel>
           <Panel
             title="Weather context"
@@ -415,6 +426,16 @@ export function Treatments() {
               </small>
             }
           >
+            <Status
+              loading={seriesMeta.isLoading || weather.isLoading}
+              error={seriesMeta.error ?? weather.error}
+            />
+            {!seriesMeta.isLoading && !weatherIds.length && (
+              <Empty>
+                No weather series. Import weather in External data to add
+                context.
+              </Empty>
+            )}
             <Chart
               label="Weather precipitation and temperature"
               height={190}
@@ -427,8 +448,8 @@ export function Treatments() {
                   ],
                   series: weather.data?.map((w, i) => ({
                     name: i ? "Precipitation" : "Temperature",
-                    type: i ? "bar" : "line",
-                    yAxisIndex: i,
+                    type: w.id === rain?.id ? "bar" : "line",
+                    yAxisIndex: w.id === rain?.id ? 1 : 0,
                     showSymbol: false,
                     itemStyle: { color: i ? "#708ebd" : "#bd7d3e" },
                     areaStyle: i ? undefined : { opacity: 0.1 },

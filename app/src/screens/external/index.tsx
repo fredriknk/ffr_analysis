@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import type { EChartsCoreOption } from "echarts/core";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api, mockMode } from "../../api";
 import { Chart } from "../../shared/charts/Chart";
 import {
@@ -31,9 +31,14 @@ export function External() {
     [client, setClient] = useState(""),
     [from, setFrom] = useState("2023-01-01"),
     [to, setTo] = useState("2024-12-31");
+  useEffect(() => {
+    if (series.data?.length && !series.data.some((s) => s.id === selected))
+      setSelected(series.data[0].id);
+  }, [series.data, selected]);
   const points = useQuery({
     queryKey: ["series-points", selected],
     queryFn: () => api.getSeries([selected]),
+    enabled: !!series.data?.some((s) => s.id === selected),
   });
   return (
     <div className="page">

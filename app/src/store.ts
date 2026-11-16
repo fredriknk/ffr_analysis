@@ -3,13 +3,21 @@ export type Screen =
   | "Start"
   | "Review"
   | "Treatments"
+  | "Outliers"
   | "Data"
   | "External data"
   | "Project";
 interface State {
   screen: Screen;
   timeZone: string;
+  reviewFrom: string;
+  reviewTo: string;
   selected: number;
+  reviewIds: number[] | undefined;
+  diagnosticCodes: string[];
+  queueSort: "attention" | "time" | "plot";
+  contactSheet: boolean;
+  reviewThese: (ids: number[]) => void;
   back: Screen | null;
   theme: "light" | "dark";
   search: string;
@@ -31,13 +39,19 @@ interface State {
 export const useStore = create<State>((set, get) => ({
   screen: "Start",
   timeZone: "Europe/Oslo",
+  reviewFrom: "",
+  reviewTo: "",
   selected: 1,
+  reviewIds: undefined,
+  diagnosticCodes: [],
+  queueSort: "attention",
+  contactSheet: false,
   back: null,
   theme:
     (localStorage.getItem("ffr-theme") as "light" | "dark") ||
     (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"),
   search: "",
-  quick: "all",
+  quick: "attention",
   treatment: "",
   plot: "",
   from: "",
@@ -49,7 +63,37 @@ export const useStore = create<State>((set, get) => ({
   subset: undefined,
   nav: (screen) => set({ screen, back: null }),
   openFlux: (selected) =>
-    set({ selected, back: get().screen, screen: "Review" }),
+    set({
+      selected,
+      back: get().screen,
+      screen: "Review",
+      quick: "all",
+      reviewIds: undefined,
+      diagnosticCodes: [],
+      search: "",
+      treatment: "",
+      plot: "",
+      reviewFrom: "",
+      reviewTo: "",
+      contactSheet: false,
+    }),
+  reviewThese: (ids) => {
+    if (ids.length)
+      set({
+        reviewIds: ids,
+        selected: ids[0],
+        screen: "Review",
+        back: get().screen,
+        quick: "all",
+        search: "",
+        treatment: "",
+        plot: "",
+        diagnosticCodes: [],
+        reviewFrom: "",
+        reviewTo: "",
+        contactSheet: false,
+      });
+  },
   goBack: () => set({ screen: get().back ?? "Review", back: null }),
   set: (v) => set(v),
 }));

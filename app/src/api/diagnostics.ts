@@ -1,11 +1,11 @@
-import { beta,regression } from "./maths";
+import { beta, regression } from "./maths";
 import type {
-AnalysisOptions,
-Diagnostic,
-FluxRow,
-ProjectConfig,
-Regression,
-Trace,
+  AnalysisOptions,
+  Diagnostic,
+  FluxRow,
+  ProjectConfig,
+  Regression,
+  Trace,
 } from "./types";
 export const thresholds = {
   negativeP: 0.01,
@@ -54,6 +54,12 @@ export function findings(
     value?: number,
     gas?: string,
   ) => out.push({ code, severity, message, value, gas });
+  if (!row.plotId)
+    add(
+      "no_plot",
+      "info",
+      "This chamber has no plot assignment; choose a plot before summarising.",
+    );
   const n = regs.find((r) => r.gas === "N2O"),
     co2 = regs.find((r) => r.gas === "CO2");
   if (n && n.slope < 0 && n.pval < limits.negativeP)
@@ -105,7 +111,7 @@ export function findings(
         r.n,
         r.gas,
       );
-    const centre=median(res);
+    const centre = median(res);
     const mad = Math.max(
         1e-12,
         median(res.map((v) => Math.abs(v - centre))) * 1.4826,

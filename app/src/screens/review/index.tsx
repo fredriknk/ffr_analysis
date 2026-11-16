@@ -1,6 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useVirtualizer } from "@tanstack/react-virtual";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "../../api";
 import type { AnalysisOptions, FluxDetail, Gas } from "../../api/types";
 import {
@@ -15,18 +14,25 @@ import {
   useAction,
   useRows,
 } from "../../shared/common";
+import { diagnosticLabels } from "../../shared/diagnostics";
 import { useStore } from "../../store";
+import { ContactSheet, QueueFilters, QueueList, useQueue } from "./Queue";
 import { TraceChart } from "./TraceChart";
 export function Review() {
   const s = useStore(),
     action = useAction(),
     data = useRows(),
-    parent = useRef<HTMLDivElement>(null),
+    [multi, setMulti] = useState<number[]>([]),
+    [hint, setHint] = useState(
+      () => localStorage.getItem("ffr-shortcuts") !== "hidden",
+    ),
+    [scope, setScope] = useState<"flux" | "file" | "day">("flux"),
     [goto, setGoto] = useState(""),
     [showGoto, setShowGoto] = useState(false);
   const detail = useQuery({
     queryKey: ["detail", s.selected],
     queryFn: () => api.getFluxDetail(s.selected),
+    enabled: !!data.data?.rows.some((r) => r.id === s.selected),
   });
   const [preview, setPreview] = useState<FluxDetail | null>(null),
     [draft, setDraft] = useState<AnalysisOptions | null>(null),
@@ -36,35 +42,20 @@ export function Review() {
     setDraft(null);
     serial.current++;
   }, [detail.data]);
-  const d = preview ?? detail.data,
+  const d = data.data?.rows.some((r) => r.id === s.selected)
+      ? (preview ?? detail.data)
+      : undefined,
     o = draft ?? d?.options;
-  const filtered = useMemo(
-    () =>
-      data.data?.rows.filter(
-        (r) =>
-          (!s.search ||
-            [r.id, r.filename, r.plotLabel, r.treatmentName]
-              .join(" ")
-              .toLowerCase()
-              .includes(s.search.toLowerCase())) &&
-          (s.quick === "all" ||
-            (s.quick === "unreviewed" && !r.reviewed) ||
-            (s.quick === "flagged" && r.N2O_qc !== "OK") ||
-            (s.quick === "overridden" && r.overridden) ||
-            (s.quick === "excluded" && r.excluded)) &&
-          (!s.treatment || r.treatmentId === Number(s.treatment)) &&
-          (!s.plot || r.plotId === Number(s.plot)) &&
-          (!s.from || r.time >= Date.parse(s.from)) &&
-          (!s.to || r.time < Date.parse(s.to) + 86400000),
-      ) ?? [],
-    [data.data, s.search, s.quick, s.treatment, s.plot, s.from, s.to],
-  );
-  const virtual = useVirtualizer({
-    count: filtered.length,
-    getScrollElement: () => parent.current,
-    estimateSize: () => 64,
-    overscan: 8,
-  });
+  const filtered = useQueue(data.data?.rows ?? []);
+  useEffect(() => {
+    if (
+      s.screen === "Review" &&
+      filtered.length &&
+      !filtered.some((r) => r.id === s.selected)
+    )
+      s.set({ selected: filtered[0].id });
+  }, [filtered, s.screen, s.selected]);
+  const targets = s.contactSheet && multi.length ? multi : [s.selected];
   const index = filtered.findIndex((r) => r.id === s.selected);
   function step(n: number) {
     const next =
@@ -72,13 +63,12 @@ export function Review() {
     if (next) s.set({ selected: next.id });
   }
   useEffect(() => {
-    const i = filtered.findIndex((r) => r.id === s.selected);
-    if (i >= 0) virtual.scrollToIndex(i, { align: "auto" });
-  }, [s.selected, filtered, virtual]);
-  useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (s.screen !== "Review") return;
-      if ((e.target as HTMLElement).matches("input,textarea,select")) return;
+      if (
+        (e.target as HTMLElement).matches("input,textarea,select,[role=slider]")
+      )
+        return;
       const key = e.key.toLowerCase();
       if (e.ctrlKey && ["z", "y"].includes(key)) {
         e.preventDefault();
@@ -91,13 +81,17 @@ export function Review() {
         step(-1);
       } else if (key === "x" && d)
         void action(() =>
-          api.setFluxFlags([s.selected], { excluded: !d.flux.excluded }),
+          api.setFluxFlags(targets, {
+            excluded: !targets.every(
+              (id) => data.data?.rows.find((r) => r.id === id)?.excluded,
+            ),
+          }),
         );
       else if (key === "r")
         void action(() => api.setFluxOptions([s.selected], null));
       else if (key === "a")
         void action(async () => {
-          await api.setFluxFlags([s.selected], { reviewed: true });
+          await api.setFluxFlags(targets, { reviewed: true });
           step(1);
         });
       else if (key === "g") setShowGoto(true);
@@ -117,6 +111,64 @@ export function Review() {
   };
   const commit = (next: AnalysisOptions) =>
     void action(() => api.setFluxOptions([s.selected], next));
+  if (s.contactSheet)
+    return (
+      <div className="contact-page">
+        <div className="page-heading">
+          <div>
+            <h2>Contact sheet</h2>
+            <p>
+              Scan the current review queue. Select several traces to act on
+              them together.
+            </p>
+          </div>
+          <button onClick={() => s.set({ contactSheet: false })}>
+            List & detail view
+          </button>
+        </div>
+        <div className="contact-layout">
+          <aside className="panel">
+            <QueueFilters rows={data.data?.rows ?? []} />
+          </aside>
+          <section className="contact-main">
+            <div className="toolbar">
+              <button
+                disabled={!multi.length}
+                onClick={() =>
+                  void action(() => api.setFluxFlags(multi, { excluded: true }))
+                }
+              >
+                Exclude selected
+              </button>
+              <button
+                disabled={!multi.length}
+                onClick={() =>
+                  void action(() =>
+                    api.setFluxFlags(multi, { excluded: false }),
+                  )
+                }
+              >
+                Include selected
+              </button>
+              <button
+                disabled={!multi.length}
+                onClick={() =>
+                  void action(() => api.setFluxFlags(multi, { reviewed: true }))
+                }
+              >
+                Mark selected reviewed
+              </button>
+              <button onClick={() => setMulti([])}>Clear selection</button>
+            </div>
+            <ContactSheet
+              rows={filtered}
+              selected={multi}
+              onSelect={setMulti}
+            />
+          </section>
+        </div>
+      </div>
+    );
   return (
     <div className="review">
       <aside className="queue panel">
@@ -124,116 +176,15 @@ export function Review() {
           <h3>Review queue</h3>
           <span className="badge">{filtered.length.toLocaleString()}</span>
         </div>
-        <div className="queue-filters">
-          <input
-            aria-label="Search fluxes"
-            placeholder="Search plot, treatment, file…"
-            value={s.search}
-            onChange={(e) => s.set({ search: e.target.value })}
-          />
-          <select
-            aria-label="Quick filter"
-            value={s.quick}
-            onChange={(e) => s.set({ quick: e.target.value })}
-          >
-            <option value="all">All measurements</option>
-            <option value="unreviewed">Unreviewed</option>
-            <option value="flagged">QC flagged</option>
-            <option value="overridden">Overridden</option>
-            <option value="excluded">Excluded</option>
-          </select>
-          <div className="two">
-            <select
-              aria-label="Treatment filter"
-              value={s.treatment}
-              onChange={(e) => s.set({ treatment: e.target.value })}
-            >
-              <option value="">All treatments</option>
-              {Array.from({ length: 12 }, (_, i) => (
-                <option key={i} value={i + 1}>
-                  {
-                    data.data?.rows.find((r) => r.treatmentId === i + 1)
-                      ?.treatmentName
-                  }
-                </option>
-              ))}
-            </select>
-            <select
-              aria-label="Plot filter"
-              value={s.plot}
-              onChange={(e) => s.set({ plot: e.target.value })}
-            >
-              <option value="">All plots</option>
-              {Array.from({ length: 36 }, (_, i) => (
-                <option key={i} value={i + 1}>
-                  P{String(i + 1).padStart(2, "0")}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="two">
-            <input
-              aria-label="Review from"
-              type="date"
-              value={s.from}
-              onChange={(e) => s.set({ from: e.target.value })}
-            />
-            <input
-              aria-label="Review to"
-              type="date"
-              value={s.to}
-              onChange={(e) => s.set({ to: e.target.value })}
-            />
-          </div>
-        </div>
+        <button
+          className="sheet-toggle"
+          onClick={() => s.set({ contactSheet: true })}
+        >
+          Contact sheet ▦
+        </button>
+        <QueueFilters rows={data.data?.rows ?? []} />
         <Status loading={data.isLoading} error={data.error} />
-        <div className="virtual-list" ref={parent}>
-          <div style={{ height: virtual.getTotalSize(), position: "relative" }}>
-            {virtual.getVirtualItems().map((v) => {
-              const r = filtered[v.index];
-              return (
-                <button
-                  key={r.id}
-                  className={
-                    "flux-item " +
-                    (r.id === s.selected ? "selected " : "") +
-                    (r.excluded ? "excluded" : "")
-                  }
-                  style={{
-                    position: "absolute",
-                    top: 0,
-                    transform: "translateY(" + v.start + "px)",
-                    height: v.size,
-                    width: "100%",
-                  }}
-                  onClick={() => s.set({ selected: r.id })}
-                >
-                  <span>
-                    <strong>
-                      #{r.id} · {r.plotLabel}
-                    </strong>
-                    <small>
-                      {date(r.time)} · {r.side}
-                    </small>
-                  </span>
-                  <span className="flux-item-right">
-                    <strong>{fmt(r.N2O_flux, 1)}</strong>
-                    <small>
-                      {r.excluded
-                        ? "Excluded"
-                        : r.reviewed
-                          ? "Reviewed"
-                          : r.N2O_qc === "OK"
-                            ? "Unreviewed"
-                            : "⚑ Check fit"}
-                    </small>
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-          {!filtered.length && <Empty>No matching fluxes</Empty>}
-        </div>
+        <QueueList rows={filtered} />
         <div className="queue-footer">
           {(
             data.data?.rows.filter((r) => r.reviewed).length ?? 0
@@ -270,7 +221,15 @@ export function Review() {
             </button>
           </div>
         </div>
-        <Status loading={detail.isLoading} error={detail.error} />
+        <Status
+          loading={detail.isLoading && !!data.data?.rows.length}
+          error={detail.error}
+        />
+        {!data.isLoading && !data.data?.rows.length && (
+          <Empty>
+            No measurements yet. Import robot or manual data to begin.
+          </Empty>
+        )}
         {d && o && (
           <>
             <div className="legend">
@@ -319,7 +278,7 @@ export function Review() {
                 className="primary"
                 onClick={() =>
                   void action(async () => {
-                    await api.setFluxFlags([s.selected], { reviewed: true });
+                    await api.setFluxFlags(targets, { reviewed: true });
                     step(1);
                   })
                 }
@@ -327,12 +286,21 @@ export function Review() {
                 Reviewed & next <kbd>A</kbd>
               </button>
             </div>
-            <div className="shortcut-strip">
+            <div className="shortcut-strip" hidden={!hint}>
               ← → Navigate <span>X Exclude</span>
               <span>R Reset</span>
               <span>A Reviewed & next</span>
               <span>G Go to</span>
               <span>Ctrl Z / Y Undo / redo</span>
+              <button
+                aria-label="Dismiss shortcut hints"
+                onClick={() => {
+                  setHint(false);
+                  localStorage.setItem("ffr-shortcuts", "hidden");
+                }}
+              >
+                ?
+              </button>
             </div>
           </>
         )}
@@ -351,7 +319,17 @@ export function Review() {
                   ? data.data?.rows.find((r) => r.time >= Date.parse(goto))
                   : data.data?.rows.find((r) => r.id === Number(goto));
                 if (r) {
-                  s.set({ selected: r.id });
+                  s.set({
+                    selected: r.id,
+                    quick: "all",
+                    reviewIds: undefined,
+                    search: "",
+                    diagnosticCodes: [],
+                    plot: "",
+                    treatment: "",
+                    from: "",
+                    to: "",
+                  });
                   setShowGoto(false);
                 } else toastFn("No matching measurement");
               }}
@@ -365,6 +343,96 @@ export function Review() {
       <aside className="results">
         {d && o && (
           <>
+            <Panel title="Findings">
+              <div className="findings">
+                {d.diagnostics.length ? (
+                  d.diagnostics.map((finding, i) => (
+                    <div
+                      key={finding.code + "-" + i}
+                      className={"finding " + finding.severity}
+                    >
+                      <strong>
+                        {finding.gas ? finding.gas + " · " : ""}
+                        {diagnosticLabels[finding.code] ??
+                          finding.code.replaceAll("_", " ")}
+                      </strong>
+                      <p>{finding.message}</p>
+                      {finding.value !== undefined && (
+                        <small>
+                          Value:{" "}
+                          {Math.abs(finding.value) < 0.001
+                            ? finding.value.toExponential(3)
+                            : fmt(finding.value, 3)}
+                          {finding.code === "valve_timing" ? " s" : ""}
+                        </small>
+                      )}
+                    </div>
+                  ))
+                ) : (
+                  <p>No diagnostic findings for this flux.</p>
+                )}
+              </div>
+            </Panel>
+            <Panel title="Valve alignment">
+              <p>
+                Estimated lag: <strong>{fmt(d.valveLagS, 1)} s</strong>
+              </p>
+              <Field label="Valve offset · s">
+                <input
+                  aria-label="Valve offset seconds"
+                  type="number"
+                  min="-10"
+                  max="10"
+                  step=".5"
+                  value={o.valveOffset}
+                  onChange={(e) =>
+                    changePreview({ ...o, valveOffset: Number(e.target.value) })
+                  }
+                  onBlur={() => commit(o)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") commit(o);
+                  }}
+                />
+              </Field>
+              <Field label="Apply offset scope">
+                <select
+                  aria-label="Offset scope"
+                  value={scope}
+                  onChange={(e) => setScope(e.target.value as typeof scope)}
+                >
+                  <option value="flux">This flux</option>
+                  <option value="file">This file · both chambers</option>
+                  <option value="day">This measurement day</option>
+                </select>
+              </Field>
+              <button
+                className="full"
+                onClick={() =>
+                  void action(() => {
+                    const day = (t: number) =>
+                      new Intl.DateTimeFormat("en-CA", {
+                        timeZone: s.timeZone,
+                      }).format(t);
+                    const ids = (data.data?.rows ?? [])
+                      .filter((r) =>
+                        scope === "flux"
+                          ? r.id === s.selected
+                          : scope === "file"
+                            ? r.measurementId !== null &&
+                              r.measurementId === d.flux.measurementId
+                            : r.source === "robot" &&
+                              day(r.time) === day(d.flux.time),
+                      )
+                      .map((r) => r.id);
+                    return api.patchFluxOptions(ids, {
+                      valveOffset: d.valveLagS,
+                    });
+                  }, "Valve offset applied in one undo step")
+                }
+              >
+                Apply estimated offset
+              </button>
+            </Panel>
             <Panel
               title="Regression results"
               extra={

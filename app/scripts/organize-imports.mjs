@@ -1,4 +1,4 @@
-import process from 'node:process';
+import process from "node:process";
 import ts from "typescript";
 import fs from "node:fs";
 const config = ts.readConfigFile("tsconfig.json", ts.sys.readFile);

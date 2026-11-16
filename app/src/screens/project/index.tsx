@@ -1,13 +1,14 @@
 import { useQuery } from "@tanstack/react-query";
 import type { EChartsCoreOption } from "echarts/core";
 import { useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { api } from "../../api";
 import type { ProjectConfig } from "../../api/types";
 import { Chart } from "../../shared/charts/Chart";
 import { Field, Panel, Status, pick, useAction } from "../../shared/common";
 import { useStore } from "../../store";
 export function Project() {
-  const navigation = useStore();
+  const navigation = useStore(useShallow(({ nav }) => ({ nav })));
   const action = useAction(),
     q = useQuery({ queryKey: ["config"], queryFn: () => api.getConfig() }),
     l = useQuery({ queryKey: ["layout"], queryFn: () => api.getLayout() }),
@@ -64,6 +65,14 @@ export function Project() {
         </div>
       </div>
       <Status loading={q.isLoading} error={q.error} />
+      <Status loading={l.isLoading} error={l.error} />
+      <Status loading={h.isLoading} error={h.error} />
+      {!l.isLoading && !layout?.plots.length && (
+        <p className="muted">
+          No field layout yet. Import a project layout to assign plots and
+          treatments.
+        </p>
+      )}
       {cfg && (
         <div className="two">
           <Panel title="Project & analysis defaults">
@@ -128,6 +137,30 @@ export function Project() {
               Gases: {cfg.gases.join(", ")} · N2O as µg N m⁻² h⁻¹ · CO2 as µg C
               m⁻² h⁻¹
             </p>
+            <details className="diagnostic-thresholds">
+              <summary>Diagnostic thresholds</summary>
+              <div className="form-grid">
+                {Object.entries(cfg.diagnostics ?? {}).map(([key, value]) => (
+                  <Field key={key} label={key.replace(/([A-Z])/g, " $1")}>
+                    <input
+                      type="number"
+                      step="any"
+                      aria-label={"Diagnostic threshold " + key}
+                      value={value}
+                      onChange={(e) =>
+                        setDraft({
+                          ...cfg,
+                          diagnostics: {
+                            ...cfg.diagnostics,
+                            [key]: Number(e.target.value),
+                          },
+                        })
+                      }
+                    />
+                  </Field>
+                ))}
+              </div>
+            </details>
             <button
               className="primary"
               onClick={() =>

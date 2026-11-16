@@ -1,12 +1,12 @@
-import { diagnosticLabels,score } from "./diagnosticMeta";
-import { estimateLag,findings,median,thresholds } from "./diagnostics";
+import { diagnosticLabels, score } from "./diagnosticMeta";
+import { estimateLag, findings, median, thresholds } from "./diagnostics";
 import {
-defaults,
-fluxConversion,
-gases,
-random,
-regression,
-summarize,
+  defaults,
+  fluxConversion,
+  gases,
+  random,
+  regression,
+  summarize,
 } from "./maths";
 import type * as T from "./types";
 const colours = [
@@ -272,21 +272,88 @@ export function createMock(seed = 42): T.FfrApi {
     r.diag = [...new Set(a.diagnostics.map((d) => d.code))].join(",");
     r.attention = score(a.diagnostics);
   }
-  function neighbours(){
-   const treatments=new Map<number,T.FluxRow[]>(),plots=new Map<number,T.FluxRow[]>();
-   for(const r of rows){if(r.excluded)continue;for(const [map,key] of [[treatments,r.treatmentId],[plots,r.plotId]] as const){let group=map.get(key);if(!group){group=[];map.set(key,group);}group.push(r);}}
-   for(const map of [treatments,plots])for(const group of map.values())group.sort((a,b)=>a.time-b.time);
-   const range=(group:T.FluxRow[],time:number,gap:number)=>{const lower=(t:number)=>{let lo=0,hi=group.length;while(lo<hi){const m=(lo+hi)>>>1;if(group[m].time<t)lo=m+1;else hi=m;}return lo;};return group.slice(lower(time-gap),lower(time+gap+1));};
-   for(const r of rows){const ds=(diagnosticMap.get(r.id)??[]).filter(d=>d.code!=='neighbour_outlier');
-    if(r.source==='robot'&&r.N2O_qc!=='error'){let peers=range(treatments.get(r.treatmentId)??[],r.time,3*86400000);if(peers.length<6)peers=range(plots.get(r.plotId)??[],r.time,10*86400000);
-     if(peers.length>=6)for(const gas of ['N2O','CO2']){const vs=peers.filter(p=>typeof p[gas+'_flux']==='number').map(p=>Math.asinh(Number(p[gas+'_flux']))),m=median(vs),mad=median(vs.map(v=>Math.abs(v-m)))*1.4826,z=Math.abs(Math.asinh(Number(r[gas+'_flux']))-m)/Math.max(.01,mad);if(z>(config.diagnostics.neighbourZ??5))ds.push({code:'neighbour_outlier',severity:'warn',gas,value:z,message:'This flux is far from comparable measurements in the same treatment and nearby dates.'});}
+  function neighbours() {
+    const treatments = new Map<number, T.FluxRow[]>(),
+      plots = new Map<number, T.FluxRow[]>();
+    for (const r of rows) {
+      if (r.excluded) continue;
+      for (const [map, key] of [
+        [treatments, r.treatmentId],
+        [plots, r.plotId],
+      ] as const) {
+        let group = map.get(key);
+        if (!group) {
+          group = [];
+          map.set(key, group);
+        }
+        group.push(r);
+      }
     }
-    ds.sort((a,b)=>({bad:0,warn:1,info:2}[a.severity]-{bad:0,warn:1,info:2}[b.severity]));diagnosticMap.set(r.id,ds);r.diag=[...new Set(ds.map(d=>d.code))].join(',');r.attention=score(ds);
-   }
+    for (const map of [treatments, plots])
+      for (const group of map.values()) group.sort((a, b) => a.time - b.time);
+    const range = (group: T.FluxRow[], time: number, gap: number) => {
+      const lower = (t: number) => {
+        let lo = 0,
+          hi = group.length;
+        while (lo < hi) {
+          const m = (lo + hi) >>> 1;
+          if (group[m].time < t) lo = m + 1;
+          else hi = m;
+        }
+        return lo;
+      };
+      return group.slice(lower(time - gap), lower(time + gap + 1));
+    };
+    for (const r of rows) {
+      const ds = (diagnosticMap.get(r.id) ?? []).filter(
+        (d) => d.code !== "neighbour_outlier",
+      );
+      if (r.source === "robot" && r.N2O_qc !== "error") {
+        let peers = range(
+          treatments.get(r.treatmentId) ?? [],
+          r.time,
+          3 * 86400000,
+        );
+        if (peers.length < 6)
+          peers = range(plots.get(r.plotId) ?? [], r.time, 10 * 86400000);
+        if (peers.length >= 6)
+          for (const gas of ["N2O", "CO2"]) {
+            const vs = peers
+                .filter((p) => typeof p[gas + "_flux"] === "number")
+                .map((p) => Math.asinh(Number(p[gas + "_flux"]))),
+              m = median(vs),
+              mad = median(vs.map((v) => Math.abs(v - m))) * 1.4826,
+              z =
+                Math.abs(Math.asinh(Number(r[gas + "_flux"])) - m) /
+                Math.max(0.01, mad);
+            if (z > (config.diagnostics.neighbourZ ?? 5))
+              ds.push({
+                code: "neighbour_outlier",
+                severity: "warn",
+                gas,
+                value: z,
+                message:
+                  "This flux is far from comparable measurements in the same treatment and nearby dates.",
+              });
+          }
+      }
+      ds.sort(
+        (a, b) =>
+          ({ bad: 0, warn: 1, info: 2 })[a.severity] -
+          { bad: 0, warn: 1, info: 2 }[b.severity],
+      );
+      diagnosticMap.set(r.id, ds);
+      r.diag = [...new Set(ds.map((d) => d.code))].join(",");
+      r.attention = score(ds);
+    }
   }
   function makeRow(id: number, manual = false): T.FluxRow {
     const i = id - 1,
-      p = layout.plots[i % 36],
+      p = layout.plots[i % Math.max(1, layout.plots.length)] ?? {
+        id: 0,
+        label: "Unassigned",
+        treatmentId: 0,
+      },
       time = manual
         ? start + ((i * 4) % 728) * 86400000
         : start + Math.floor(i / 72) * 7 * 86400000 + (i % 72) * 190000;
@@ -305,7 +372,9 @@ export function createMock(seed = 42): T.FfrApi {
       plotId: p.id,
       plotLabel: p.label,
       treatmentId: p.treatmentId,
-      treatmentName: names[p.treatmentId - 1],
+      treatmentName:
+        layout.treatments.find((t) => t.id === p.treatmentId)?.name ??
+        "Unassigned",
       excluded: false,
       reviewed: i % 5 === 0,
       overridden: false,
@@ -526,7 +595,7 @@ export function createMock(seed = 42): T.FfrApi {
         r.source === "manual"
           ? []
           : gases.map((g) => {
-              const tr = trace(r, g, o),
+              const tr = trace(r, g, { ...o, ...o.perGas?.[g] }),
                 fit = regs.find((v) => v.gas === g)!;
               tr.used = tr.used.map(
                 (v, i) =>
@@ -607,6 +676,8 @@ export function createMock(seed = 42): T.FfrApi {
       path = p;
       config.name = name;
       rows.splice(0);
+      layout = { treatments: [], plots: [] };
+      diagnosticMap.clear();
       opts.clear();
       series = [];
       undoStack.length = 0;
@@ -775,7 +846,7 @@ export function createMock(seed = 42): T.FfrApi {
             : key.endsWith("_resid")
               ? "ppm"
               : key.endsWith("_slope")
-                ? "ppm s??"
+                ? "ppm s⁻¹"
                 : key.endsWith("_flux")
                   ? "µg m⁻² h⁻¹"
                   : key === "airTemp"
@@ -785,7 +856,9 @@ export function createMock(seed = 42): T.FfrApi {
       return {
         columns,
         rows: rows.length,
-        data: Object.fromEntries(keys.map((k) => [k, rows.map((r) => r[k]??null)])),
+        data: Object.fromEntries(
+          keys.map((k) => [k, rows.map((r) => r[k] ?? null)]),
+        ),
       };
     },
     getFluxDetail: async (id) => detail(id),
@@ -879,6 +952,7 @@ export function createMock(seed = 42): T.FfrApi {
     recomputeAll: async () => {
       await progress("Recompute");
       rows.filter((r) => r.source === "robot").forEach(refresh);
+      neighbours();
     },
     undo: async () => {
       const c = undoStack.pop();

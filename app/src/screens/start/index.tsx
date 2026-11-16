@@ -1,11 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { api } from "../../api";
 import { Field, Panel, Status, pick, useAction } from "../../shared/common";
 import { useStore } from "../../store";
 export function Start() {
   const action = useAction(),
-    s = useStore();
+    s = useStore(useShallow(({ nav }) => ({ nav })));
   const [wizard, setWizard] = useState(false),
     [dir, setDir] = useState(""),
     [raw, setRaw] = useState(""),

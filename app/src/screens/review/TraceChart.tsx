@@ -2,7 +2,7 @@ import type { EChartsCoreOption } from "echarts/core";
 import { useRef } from "react";
 import type { AnalysisOptions, FluxDetail, Gas } from "../../api/types";
 import { Chart } from "../../shared/charts/Chart";
-import { Panel, plotBase } from "../../shared/common";
+import { Empty, Panel, plotBase } from "../../shared/common";
 export function TraceChart({
   detail,
   gas,
@@ -21,6 +21,15 @@ export function TraceChart({
     sib = detail.sibling.find((r) => r.gas === gas),
     drag = useRef(options);
   drag.current = options;
+  if (!r)
+    return (
+      <Panel title={gas + " concentration"}>
+        <Empty>
+          No fit: measurement failed validation. Inspect the finding before
+          including this flux.
+        </Empty>
+      </Panel>
+    );
   const series: object[] = [0, 1, 2].map((side) => ({
     name: side === 0 ? "Discarded" : side === 1 ? "Left" : "Right",
     type: "scatter",
@@ -54,12 +63,19 @@ export function TraceChart({
       [r.start, r.intercept + r.slope * r.start],
       [r.stop, r.intercept + r.slope * r.stop],
     ],
+    markLine: {
+      silent: true,
+      symbol: "none",
+      label: { show: false },
+      lineStyle: { type: "dashed", color: "#a771be", opacity: 0.65 },
+      data: detail.switches.map((sw) => ({ xAxis: sw.t + detail.valveLagS })),
+    },
     markArea: {
       silent: true,
       itemStyle: { color: "rgba(100,145,145,.06)" },
       data: detail.switches.map((sw) => [
         {
-          xAxis: sw.t,
+          xAxis: sw.t + options.valveOffset,
           itemStyle: {
             color:
               sw.side === "left"
@@ -67,7 +83,7 @@ export function TraceChart({
                 : "rgba(213,94,0,.035)",
           },
         },
-        { xAxis: sw.t + 20 },
+        { xAxis: sw.t + options.valveOffset + 20 },
       ]),
     },
   });
@@ -157,8 +173,103 @@ export function TraceChart({
               </span>
             </div>
           ))}
+          <div
+            className="window-handle offset-handle"
+            role="slider"
+            tabIndex={0}
+            aria-label={gas + " valve offset handle"}
+            aria-valuemin={-10}
+            aria-valuemax={10}
+            aria-valuenow={options.valveOffset}
+            style={{ left: ((20 + options.valveOffset) / 185) * 100 + "%" }}
+            onPointerDown={(e) =>
+              e.currentTarget.setPointerCapture(e.pointerId)
+            }
+            onPointerMove={(e) => {
+              if (!e.currentTarget.hasPointerCapture(e.pointerId)) return;
+              const box =
+                  e.currentTarget.parentElement!.getBoundingClientRect(),
+                valveOffset = Math.max(
+                  -10,
+                  Math.min(
+                    10,
+                    Math.round(
+                      (((e.clientX - box.left) / box.width) * 185 - 20) * 2,
+                    ) / 2,
+                  ),
+                );
+              const next = { ...drag.current, valveOffset };
+              drag.current = next;
+              preview(next);
+            }}
+            onPointerUp={(e) => {
+              e.currentTarget.releasePointerCapture(e.pointerId);
+              commit(drag.current);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+                e.preventDefault();
+                const next = {
+                  ...options,
+                  valveOffset: Math.max(
+                    -10,
+                    Math.min(
+                      10,
+                      options.valveOffset +
+                        (e.key === "ArrowRight" ? 0.5 : -0.5),
+                    ),
+                  ),
+                };
+                preview(next);
+                commit(next);
+              }
+            }}
+          >
+            <span>valve {options.valveOffset}s</span>
+          </div>
         </div>
       </div>
+      <Chart
+        label={gas + " residual strip"}
+        height={88}
+        option={
+          {
+            animation: false,
+            grid: { left: 65, right: 25, top: 12, bottom: 25 },
+            tooltip: { trigger: "axis" },
+            xAxis: {
+              type: "value",
+              min: 0,
+              max: 185,
+              axisLabel: { show: false },
+            },
+            yAxis: {
+              type: "value",
+              splitNumber: 2,
+              axisLabel: {
+                formatter: (v: number) => v.toExponential(1),
+                fontSize: 9,
+              },
+            },
+            series: [
+              {
+                type: "scatter",
+                symbolSize: 3,
+                itemStyle: { color: "#7486a1" },
+                data: tr.t.flatMap((t, i) =>
+                  tr.fit[i] !== null ? [[t, tr.y[i] - tr.fit[i]!]] : [],
+                ),
+                markLine: {
+                  silent: true,
+                  symbol: "none",
+                  label: { show: false },
+                  data: [{ yAxis: 0 }],
+                },
+              },
+            ],
+          } as EChartsCoreOption
+        }
+      />
     </Panel>
   );
 }
