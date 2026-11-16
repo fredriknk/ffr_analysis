@@ -140,3 +140,13 @@ dmypy.json
 /.idea
 **/specific_options.pickle
 
+
+# FFR Analyzer 2
+node_modules/
+/app/dist/
+/app/src-tauri/target/
+/app/src-tauri/gen/schemas/
+*.ffr
+*.ffr-journal
+*.local.json
+/local/

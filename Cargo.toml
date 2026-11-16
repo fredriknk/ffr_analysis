@@ -1,0 +1,19 @@
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+exclude = ["app/src-tauri"]
+
+[workspace.package]
+version = "2.0.0-alpha.1"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/fredriknk/ffr_analysis"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+strip = true
+
+# Regressions over thousands of files are too slow unoptimised.
+[profile.dev.package."*"]
+opt-level = 2
