@@ -62,7 +62,7 @@ export function Outliers() {
       x: gas + "_rsq",
       y: gas + "_flux",
       xLabel: "R²",
-      yLabel: gas + (gas === "N2O" ? " - ?g N m⁻² h⁻¹" : " - ?g C m⁻² h⁻¹"),
+      yLabel: gas + (gas === "N2O" ? " - µg N m⁻² h⁻¹" : " - µg C m⁻² h⁻¹"),
     },
     {
       label: "Valve lag over time",
@@ -77,7 +77,7 @@ export function Outliers() {
       x: "time",
       y: gas + "_flux",
       xLabel: "Date",
-      yLabel: gas + (gas === "N2O" ? " - ?g N m⁻² h⁻¹" : " - ?g C m⁻² h⁻¹"),
+      yLabel: gas + (gas === "N2O" ? " - µg N m⁻² h⁻¹" : " - µg C m⁻² h⁻¹"),
       time: true,
     },
   ];
@@ -99,7 +99,7 @@ export function Outliers() {
       >
         <Chart
           label={pair.label}
-          height={285}
+          height={240}
           onClick={(p) => {
             const v = p.value as number[];
             if (v?.[2]) s.openFlux(v[2]);
@@ -184,6 +184,7 @@ export function Outliers() {
               series: [
                 {
                   type: "scatter",
+                  progressive: 0,
                   symbolSize: (_v: number[], p: { dataIndex: number }) =>
                     selectedSet.has(visible[p.dataIndex].id)
                       ? 10

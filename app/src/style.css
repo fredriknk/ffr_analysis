@@ -1324,3 +1324,13 @@ td {
     grid-template-columns: 210px minmax(300px, 1fr);
   }
 }
+
+.table-scroll th button {
+  text-transform: none;
+}
+.diagnostic-thresholds {
+  margin: 15px 0;
+}
+.diagnostic-thresholds > .form-grid {
+  margin-top: 12px;
+}

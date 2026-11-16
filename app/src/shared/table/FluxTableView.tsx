@@ -47,6 +47,13 @@ export function FluxTableView({
               {hg.headers.map((h) => (
                 <th
                   key={h.id}
+                  aria-sort={
+                    h.column.getIsSorted() === "asc"
+                      ? "ascending"
+                      : h.column.getIsSorted() === "desc"
+                        ? "descending"
+                        : "none"
+                  }
                   style={{
                     minWidth:
                       h.id === "id"
@@ -65,11 +72,13 @@ export function FluxTableView({
                 >
                   <button onClick={h.column.getToggleSortingHandler()}>
                     {flexRender(h.column.columnDef.header, h.getContext())}
-                    {h.column.getIsSorted() === "asc"
-                      ? " ?"
-                      : h.column.getIsSorted() === "desc"
-                        ? " ?"
-                        : ""}
+                    <span aria-hidden="true">
+                      {h.column.getIsSorted() === "asc"
+                        ? " ↑"
+                        : h.column.getIsSorted() === "desc"
+                          ? " ↓"
+                          : ""}
+                    </span>
                   </button>
                   {data?.columns.find((c) => c.key === h.id) && (
                     <ColumnFilter

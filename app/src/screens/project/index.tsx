@@ -19,6 +19,8 @@ export function Project() {
     > | null>(null);
   const cfg = draft ?? q.data,
     layout = edited ?? l.data;
+  const columns = Math.max(1, Math.ceil(Math.sqrt(layout?.plots.length ?? 0))),
+    mapRows = Math.ceil((layout?.plots.length ?? 0) / columns);
   return (
     <div className="page">
       <div className="page-heading">
@@ -175,7 +177,12 @@ export function Project() {
           </Panel>
           <Panel
             title="Field layout"
-            extra={<small>36 plots · 3 replicates per treatment</small>}
+            extra={
+              <small>
+                {layout?.plots.length ?? 0} plots /{" "}
+                {layout?.treatments.length ?? 0} treatments
+              </small>
+            }
           >
             <Chart
               label="Field plot map"
@@ -190,7 +197,7 @@ export function Project() {
                     nameLocation: "middle",
                     nameGap: 25,
                     min: -1,
-                    max: 6,
+                    max: columns,
                   },
                   yAxis: {
                     type: "value",
@@ -198,7 +205,7 @@ export function Project() {
                     nameLocation: "middle",
                     nameGap: 25,
                     min: -1,
-                    max: 6,
+                    max: Math.max(1, mapRows),
                   },
                   series: [
                     {
@@ -207,7 +214,10 @@ export function Project() {
                       symbolSize: 36,
                       data: layout?.plots.map((p, i) => ({
                         name: p.label,
-                        value: [i % 6, 5 - Math.floor(i / 6)],
+                        value: [
+                          i % columns,
+                          mapRows - 1 - Math.floor(i / columns),
+                        ],
                         itemStyle: {
                           color: layout.treatments.find(
                             (t) => t.id === p.treatmentId,

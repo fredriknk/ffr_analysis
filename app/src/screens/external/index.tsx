@@ -93,26 +93,35 @@ export function External() {
           }
         >
           <Status loading={points.isLoading} error={points.error} />
-          <Chart
-            label="External series preview"
-            height={290}
-            option={
-              {
-                grid: { left: 55, right: 25, top: 20, bottom: 65 },
-                tooltip: { trigger: "axis" },
-                xAxis: { type: "time" },
-                yAxis: { type: "value", scale: true },
-                dataZoom: [{ type: "inside" }, { type: "slider", height: 18 }],
-                series: points.data?.map((p) => ({
-                  type: "line",
-                  showSymbol: false,
-                  lineStyle: { color: "#24877b", width: 1 },
-                  areaStyle: { opacity: 0.08 },
-                  data: p.points.map((v) => [v.time, v.value]),
-                })),
-              } as EChartsCoreOption
-            }
-          />
+          {series.data?.some((s) => s.id === selected) ? (
+            <Chart
+              label="External series preview"
+              height={290}
+              option={
+                {
+                  grid: { left: 55, right: 25, top: 20, bottom: 65 },
+                  tooltip: { trigger: "axis" },
+                  xAxis: { type: "time" },
+                  yAxis: { type: "value", scale: true },
+                  dataZoom: [
+                    { type: "inside" },
+                    { type: "slider", height: 18 },
+                  ],
+                  series: points.data?.map((p) => ({
+                    type: "line",
+                    showSymbol: false,
+                    lineStyle: { color: "#24877b", width: 1 },
+                    areaStyle: { opacity: 0.08 },
+                    data: p.points.map((v) => [v.time, v.value]),
+                  })),
+                } as EChartsCoreOption
+              }
+            />
+          ) : (
+            <Empty>
+              No series selected. Import or choose a series to preview it.
+            </Empty>
+          )}
         </Panel>
       </div>
       {wizard && (

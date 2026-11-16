@@ -42,7 +42,7 @@ export function findings(
         code: "error",
         severity: "bad",
         message:
-          "The measurement failed validation: the analyzer stream is missing.",
+          "The measurement failed validation: a valve event is incomplete, so no chamber fit is available.",
       },
     ];
   const limits = { ...thresholds, ...cfg.diagnostics },

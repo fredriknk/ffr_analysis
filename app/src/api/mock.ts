@@ -224,6 +224,27 @@ export function createMock(seed = 42): T.FfrApi {
   const diagnosticMap = new Map<number, T.Diagnostic[]>(),
     lagCache = new Map<number, { lag: number; improvement: number }>();
   function analyse(r: T.FluxRow, o: T.AnalysisOptions) {
+    if (r.source === "manual")
+      return {
+        regs: gases.map((g) => ({
+          ...regression([], [], g, r.airTemp),
+          flux: Number(r[g + "_flux"] ?? 0),
+          slope:
+            Number(r[g + "_flux"] ?? 0) /
+            fluxConversion(
+              1,
+              r.airTemp,
+              g,
+              config.chamberHeight,
+              config.pressure,
+            ),
+          qc: "manual",
+        })),
+        traces: [],
+        lag: 0,
+        diagnostics: [] as T.Diagnostic[],
+      };
+
     const failed = r.measurementId === 106,
       regs = failed ? [] : results(r, o),
       traces = gases.map((g) => trace(r, g, o));
@@ -252,6 +273,14 @@ export function createMock(seed = 42): T.FfrApi {
     };
   }
   function refresh(r: T.FluxRow) {
+    if (r.source === "manual")
+      for (const gas of gases)
+        if (typeof r[gas + "_flux"] !== "number")
+          r[gas + "_flux"] = fluxConversion(
+            (gas === "N2O" ? 0.00004 : 0.2) * (1 + Math.sin(r.id)),
+            r.airTemp,
+            gas,
+          );
     const a = analyse(r, opts.get(r.id) ?? config.defaults);
     gases.forEach((g) => {
       const v = a.regs.find((r) => r.gas === g);
@@ -421,7 +450,7 @@ export function createMock(seed = 42): T.FfrApi {
   let series: T.SeriesMeta[] = [
     ["Air temperature", "°C", "Weather"],
     ["Precipitation", "mm", "Weather"],
-    ["Soil moisture", "m³ m?³", "Logger"],
+    ["Soil moisture", "m³ m⁻³", "Logger"],
     ["Soil temperature", "°C", "Logger"],
   ].map(([name, unit, source], i) => ({
     id: i + 1,
@@ -501,6 +530,7 @@ export function createMock(seed = 42): T.FfrApi {
           });
       }
       rows.filter((r) => r.source === "robot").forEach(refresh);
+      neighbours();
     }
   } catch {
     /* browser or test without storage */

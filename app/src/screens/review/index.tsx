@@ -29,6 +29,10 @@ export function Review() {
     [scope, setScope] = useState<"flux" | "file" | "day">("flux"),
     [goto, setGoto] = useState(""),
     [showGoto, setShowGoto] = useState(false);
+  const layoutQuery = useQuery({
+    queryKey: ["layout"],
+    queryFn: () => api.getLayout(),
+  });
   const detail = useQuery({
     queryKey: ["detail", s.selected],
     queryFn: () => api.getFluxDetail(s.selected),
@@ -452,7 +456,7 @@ export function Review() {
                 .map((r) => (
                   <div key={r.gas} className="result">
                     <div className="result-title">
-                      <strong>{r.gas === "N2O" ? "N2O" : "CO2"}</strong>
+                      <strong>{r.gas}</strong>
                       <span className={r.qc === "OK" ? "good" : "warning"}>
                         {r.qc}
                       </span>
@@ -609,8 +613,13 @@ export function Review() {
                   {fmt(d.flux.x, 1)}, {fmt(d.flux.y, 1)}
                 </dd>
               </dl>
+              <Status
+                loading={layoutQuery.isLoading}
+                error={layoutQuery.error}
+              />
               <Field label="Plot assignment">
                 <select
+                  disabled={!layoutQuery.data?.plots.length}
                   value={d.flux.plotId}
                   onChange={(e) =>
                     void action(() =>
@@ -620,9 +629,16 @@ export function Review() {
                     )
                   }
                 >
-                  {Array.from({ length: 36 }, (_, i) => (
-                    <option key={i} value={i + 1}>
-                      P{String(i + 1).padStart(2, "0")}
+                  {!layoutQuery.data?.plots.some(
+                    (p) => p.id === d.flux.plotId,
+                  ) && (
+                    <option value={d.flux.plotId} disabled>
+                      Unassigned plot
+                    </option>
+                  )}
+                  {layoutQuery.data?.plots.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.label}
                     </option>
                   ))}
                 </select>

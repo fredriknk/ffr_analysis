@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { useShallow } from "zustand/react/shallow";
-import { api } from "../../api";
+import { api, mockMode } from "../../api";
 import { Field, Panel, Status, pick, useAction } from "../../shared/common";
 import { useStore } from "../../store";
 export function Start() {
@@ -31,9 +31,11 @@ export function Start() {
         One project. A complete, traceable analysis.
       </p>
       <div className="start-actions">
-        <button className="primary" onClick={() => openProject("demo.ffr")}>
-          Open demo project <span>→</span>
-        </button>
+        {mockMode && (
+          <button className="primary" onClick={() => openProject("demo.ffr")}>
+            Open demo project <span>→</span>
+          </button>
+        )}
         <button
           onClick={() =>
             void pick().then((p) => (p ? openProject(p) : undefined))
@@ -68,7 +70,10 @@ export function Start() {
               <span className="project-icon">▦</span>
               <span>
                 <strong>{p.name}</strong>
-                <small>{p.path} · Synthetic demonstration</small>
+                <small>
+                  {p.path}
+                  {mockMode ? " - Synthetic demonstration" : ""}
+                </small>
               </span>
               <span>↗</span>
             </button>
@@ -135,11 +140,13 @@ export function Start() {
           )}
         </Panel>
       )}
-      <div className="start-foot">
-        <span>7,638 synthetic fluxes</span>
-        <span>12 treatments · 36 plots</span>
-        <span>Two years in the field</span>
-      </div>
+      {mockMode && (
+        <div className="start-foot">
+          <span>7,638 synthetic fluxes</span>
+          <span>12 treatments · 36 plots</span>
+          <span>Two years in the field</span>
+        </div>
+      )}
     </div>
   );
 }

@@ -163,9 +163,11 @@ export function summarize(
   const valid = rows.filter(
     (r) =>
       !r.excluded &&
+      typeof r[q.gas + "_flux"] === "number" &&
+      Number.isFinite(r[q.gas + "_flux"]) &&
       q.sources.includes(r.source) &&
-      (!q.from || r.time >= q.from) &&
-      (!q.to || r.time <= q.to) &&
+      (q.from === undefined || r.time >= q.from) &&
+      (q.to === undefined || r.time <= q.to) &&
       (!selected || selected.has(r.id)),
   );
   const ps = plots.map((p) => {
