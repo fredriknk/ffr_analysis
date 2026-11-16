@@ -45,6 +45,27 @@ impl Default for AnalysisOptions {
         }
     }
 }
+impl AnalysisOptions {
+    pub fn validate(&self) -> crate::Result<()> {
+        if !["fixed", "auto", "manual"].contains(&self.mode.as_str())
+            || !self.start.is_finite()
+            || !self.stop.is_finite()
+            || self.start >= self.stop
+            || !self.cut_beginnings.is_finite()
+            || !self.cut_ends.is_finite()
+            || self.cut_beginnings < 0.
+            || self.cut_ends < 0.
+            || !self.interval.is_finite()
+            || self.interval <= 0.
+            || !["steepest", "mse"].contains(&self.crit.as_str())
+            || (self.mode == "manual" && self.slope.is_none())
+            || self.slope.is_some_and(|v| !v.is_finite())
+        {
+            return Err(crate::Error::Invalid("invalid analysis options".into()));
+        }
+        Ok(())
+    }
+}
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct ProjectConfig {

@@ -17,7 +17,9 @@ pub struct Regression {
     pub start: f64,
     pub stop: f64,
     pub n: usize,
+    #[serde(deserialize_with = "null_float")]
     pub rsq: f64,
+    #[serde(deserialize_with = "null_float")]
     pub pval: f64,
     pub mse: f64,
     pub se_slope: f64,
@@ -28,6 +30,9 @@ pub struct Regression {
     pub flux: f64,
     pub flux_unit: String,
     pub qc: String,
+}
+fn null_float<'de, D: serde::Deserializer<'de>>(d: D) -> std::result::Result<f64, D::Error> {
+    Ok(Option::<f64>::deserialize(d)?.unwrap_or(f64::NAN))
 }
 pub fn nearest(x: &[f64], v: f64) -> usize {
     let (mut lo, mut hi) = (0, x.len());
@@ -228,6 +233,8 @@ pub fn legacy_options(o: &AnalysisOptions) -> Value {
         m.insert("cut_beginnings".into(), json!(o.cut_beginnings));
         m.insert("cut_ends".into(), json!(o.cut_ends));
         if o.mode == "auto" {
+            m.insert("auto_start".into(), json!(o.start));
+            m.insert("auto_stop".into(), json!(o.stop));
             m.remove("start");
             m.remove("stop");
         }
@@ -262,7 +269,7 @@ pub fn compute(
             continue;
         };
         let ranges = group_ranges(t, &raw.switches, beg, end);
-        let (x, y): (Vec<_>, Vec<_>) = ranges
+        let (mut x, mut y): (Vec<_>, Vec<_>) = ranges
             .into_iter()
             .filter(|(_, _, s)| *s == side)
             .flat_map(|(a, b, _)| a..b)
@@ -278,12 +285,40 @@ pub fn compute(
             specific,
             defaults,
         );
+        if let (Some(a), Some(b)) = (o["auto_start"].as_f64(), o["auto_stop"].as_f64()) {
+            (x, y) = x
+                .into_iter()
+                .zip(y)
+                .filter(|(t, _)| *t >= a && *t <= b)
+                .unzip();
+            if x.len() < 3 {
+                return Err(Error::Invalid(
+                    "auto search bounds contain fewer than three points".into(),
+                ));
+            }
+        }
         let start = o["start"].as_f64();
         let stop = o["stop"].as_f64();
         let mut r = if let Some(s) = o["slope"].as_f64() {
-            let mut r = fit(&x, &y)?;
-            r.slope = s;
-            r
+            Regression {
+                gas: gas.into(),
+                slope: s,
+                intercept: y[0] - s * x[0],
+                start: x[0],
+                stop: x[x.len() - 1],
+                n: 0,
+                rsq: 0.,
+                pval: 1.,
+                mse: 0.,
+                se_slope: 0.,
+                se_intercept: 0.,
+                min_y: y.iter().copied().fold(f64::INFINITY, f64::min),
+                max_y: y.iter().copied().fold(f64::NEG_INFINITY, f64::max),
+                first_y: y[0],
+                flux: 0.,
+                flux_unit: String::new(),
+                qc: String::new(),
+            }
         } else if let (Some(a), Some(b)) = (start, stop) {
             within(&x, &y, a, b)?
         } else if gas != "CO2" && o["co2_guides"].as_bool().unwrap_or(false) && guide.is_some() {

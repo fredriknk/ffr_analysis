@@ -174,6 +174,27 @@ impl Session {
             .parse()
             .map_err(|_| Error::Invalid("invalid time zone".into()))?;
         let tx = self.db()?.unchecked_transaction()?;
+        cfg.defaults.validate()?;
+        if cfg.pressure <= 0. || cfg.chamber_height <= 0. {
+            return Err(Error::Invalid(
+                "pressure and chamber height must be positive".into(),
+            ));
+        }
+        if self.get_config()?.time_zone != cfg.time_zone {
+            let mut query = self
+                .db()?
+                .prepare("SELECT id,filename FROM measurements WHERE status='ok'")?;
+            let measurements = query
+                .query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))?
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+            for (id, name) in measurements {
+                let metadata = raw::filename(&name, &cfg.time_zone)?;
+                self.db()?.execute(
+                    "UPDATE measurements SET metadata=?2 WHERE id=?1",
+                    params![id, serde_json::to_string(&metadata)?],
+                )?;
+            }
+        }
         self.edit_meta("config", &cfg)?;
         self.recompute_all(progress)?;
         tx.commit()?;
@@ -248,6 +269,37 @@ impl Session {
         let mut rows = self.rows()?;
         self.join_rows(&mut rows)?;
         let mut keys: BTreeMap<String, String> = BTreeMap::new();
+        for (key, kind) in [
+            ("id", "number"),
+            ("measurementId", "number"),
+            ("source", "category"),
+            ("time", "time"),
+            ("filename", "string"),
+            ("side", "category"),
+            ("plotId", "category"),
+            ("plotLabel", "category"),
+            ("treatmentId", "category"),
+            ("treatmentName", "category"),
+            ("excluded", "boolean"),
+            ("reviewed", "boolean"),
+            ("overridden", "boolean"),
+            ("note", "string"),
+            ("airTemp", "number"),
+            ("precip", "number"),
+            ("N2O_qc", "category"),
+        ] {
+            keys.insert(key.into(), kind.into());
+        }
+        for gas in regression::GASES {
+            for suffix in ["slope", "rsq", "pval", "flux"] {
+                keys.insert(format!("{gas}_{suffix}"), "number".into());
+            }
+        }
+        for series in self.list_series()? {
+            if let Some(name) = series["name"].as_str() {
+                keys.insert(name.into(), "number".into());
+            }
+        }
         for row in &rows {
             for (k, v) in row {
                 keys.entry(k.clone()).or_insert_with(|| {
@@ -360,18 +412,26 @@ impl Session {
             if let Some((t, y)) = raw.channels.get(gas) {
                 let sides =
                     raw::group_indices(t, &raw.switches, options.cut_beginnings, options.cut_ends);
-                let used: Vec<bool> = t
-                    .iter()
-                    .zip(y)
-                    .zip(&sides)
-                    .map(|((t, y), s)| {
-                        *s == side
-                            && *y != 0.
-                            && results
-                                .get(gas)
-                                .is_some_and(|r| *t >= r.start && *t < r.stop)
-                    })
-                    .collect();
+                let indices: Vec<usize> =
+                    raw::group_ranges(t, &raw.switches, options.cut_beginnings, options.cut_ends)
+                        .into_iter()
+                        .filter(|(_, _, s)| *s == side)
+                        .flat_map(|(a, b, _)| a..b)
+                        .filter(|i| y[*i] != 0.)
+                        .collect();
+                let x: Vec<f64> = indices.iter().map(|i| t[*i]).collect();
+                let mut used = vec![false; t.len()];
+                if let Some(r) = results.get(gas) {
+                    if !x.is_empty() && r.n > 0 {
+                        let a = regression::nearest(&x, r.start);
+                        let b = regression::nearest(&x, r.stop);
+                        if a < b {
+                            for i in &indices[a..b] {
+                                used[*i] = true;
+                            }
+                        }
+                    }
+                }
                 traces.push(json!({"gas":gas,"unit":"ppm","t":t,"y":y,"side":sides,"used":used}));
             }
         }
@@ -390,6 +450,7 @@ impl Session {
     }
 
     pub fn preview_flux(&self, id: i64, options: AnalysisOptions) -> Result<FluxDetail> {
+        options.validate()?;
         Ok(serde_json::from_value(self.detail(id, Some(options))?)?)
     }
 
@@ -411,6 +472,9 @@ impl Session {
         ids: &[i64],
         options: Option<AnalysisOptions>,
     ) -> Result<Vec<FluxRow>> {
+        if let Some(o) = &options {
+            o.validate()?;
+        }
         let tx = self.db()?.unchecked_transaction()?;
         let mut before = vec![];
         let mut after = vec![];
@@ -547,6 +611,7 @@ impl Session {
         overridden: bool,
         mut results: BTreeMap<String, crate::regression::Regression>,
     ) -> Result<()> {
+        row.insert("time".into(), json!(raw.metadata.time));
         let side = if row["side"] == "left" { 1 } else { 2 };
         let factor = cfg.pressure / 101000. * cfg.chamber_height / 0.5;
         for r in results.values_mut() {
@@ -1006,6 +1071,9 @@ pub(crate) fn assign(
     }
     row.insert("chamberX".into(), json!(x));
     row.insert("chamberY".into(), json!(y));
+    for key in ["plotId", "plotLabel", "treatmentId", "treatmentName"] {
+        row.insert(key.into(), Value::Null);
+    }
     let plot = layout.plots.iter().find(|p| {
         if let Some(id) = row.get("plotOverride").filter(|v| !v.is_null()) {
             return &p["id"] == id;
