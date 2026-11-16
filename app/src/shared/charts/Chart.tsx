@@ -1,24 +1,24 @@
-import { useEffect, useRef } from "react";
-import * as echarts from "echarts/core";
 import {
-  LineChart,
-  ScatterChart,
   BarChart,
   BoxplotChart,
   CustomChart,
+  LineChart,
+  ScatterChart,
 } from "echarts/charts";
 import {
-  GridComponent,
-  TooltipComponent,
-  LegendComponent,
   DataZoomComponent,
-  MarkLineComponent,
-  MarkAreaComponent,
   GraphicComponent,
+  GridComponent,
+  LegendComponent,
+  MarkAreaComponent,
+  MarkLineComponent,
+  TooltipComponent,
 } from "echarts/components";
+import type { ECElementEvent, EChartsCoreOption } from "echarts/core";
+import * as echarts from "echarts/core";
 import { CanvasRenderer } from "echarts/renderers";
-import type { EChartsCoreOption, ECElementEvent } from "echarts/core";
-import { useStore } from "../store";
+import { useEffect, useRef } from "react";
+import { useStore } from "../../store";
 echarts.use([
   LineChart,
   ScatterChart,

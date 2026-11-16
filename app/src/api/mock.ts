@@ -1,12 +1,12 @@
-import type * as T from "./types";
 import {
   defaults,
+  fluxConversion,
   gases,
   random,
   regression,
   summarize,
-  fluxConversion,
 } from "./maths";
+import type * as T from "./types";
 const colours = [
   "#217a70",
   "#b46c28",

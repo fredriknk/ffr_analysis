@@ -1,12 +1,12 @@
 import type {
   AnalysisOptions,
-  Gas,
-  Regression,
   FluxRow,
-  TreatmentSummary,
-  SummaryQuery,
+  Gas,
   Plot,
+  Regression,
+  SummaryQuery,
   Treatment,
+  TreatmentSummary,
 } from "./types";
 export const gases: Gas[] = ["N2O", "CO2", "CO", "H2O", "licor_H2O"];
 export const defaults: AnalysisOptions = {

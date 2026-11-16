@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { expect,test } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 test("complete synthetic workspace in both themes", async ({ page }) => {
   mkdirSync("screenshots", { recursive: true });
@@ -66,7 +66,7 @@ test("complete synthetic workspace in both themes", async ({ page }) => {
   await shot("treatments-detail-dark");
   await page.getByLabel("Toggle theme").click();
   const point = await page.evaluate(async () => {
-    const modulePath = "/src/ui/Chart.tsx";
+    const modulePath = "/src/shared/charts/Chart.tsx";
     const { echarts } = await import(modulePath);
     const element = document.querySelector(
       '[aria-label="Individual fluxes over time"]',

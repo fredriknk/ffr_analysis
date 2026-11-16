@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { regression, fluxConversion, summarize } from "./maths";
+import { describe, expect, it } from "vitest";
+import { fluxConversion, regression, summarize } from "./maths";
 import { createMock } from "./mock";
 import type { FluxRow, Plot, Treatment } from "./types";
 describe("scientific calculations", () => {
