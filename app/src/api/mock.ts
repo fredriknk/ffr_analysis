@@ -1,10 +1,12 @@
+import { diagnosticLabels,score } from "./diagnosticMeta";
+import { estimateLag,findings,median,thresholds } from "./diagnostics";
 import {
-  defaults,
-  fluxConversion,
-  gases,
-  random,
-  regression,
-  summarize,
+defaults,
+fluxConversion,
+gases,
+random,
+regression,
+summarize,
 } from "./maths";
 import type * as T from "./types";
 const colours = [
@@ -47,6 +49,7 @@ export function createMock(seed = 42): T.FfrApi {
     chamberHeight: 0.5,
     pressure: 101000,
     qcThreshold: 0.8,
+    diagnostics: { ...thresholds },
     plotAssignment: "polygons",
   };
   let layout: T.Layout = {
@@ -88,28 +91,48 @@ export function createMock(seed = 42): T.FfrApi {
         gas === "N2O" ? 0.33 : gas === "CO2" ? 420 : gas === "CO" ? 0.12 : 9000;
     const growth =
       gas === "N2O" ? 0.02 : gas === "CO2" ? 80 : gas === "CO" ? 0.01 : 300;
-    const k = (row.measurementId ?? row.id) % 29,
-      rate =
-        (growth * (0.08 + (row.treatmentId / 12) * 0.7 + rng() * 0.22)) / 185;
-    const t = Array.from({ length: 186 }, (_, i) => i),
-      side = t.map((v) =>
-        v % 20 < options.cutBeginnings || v % 20 >= 20 - options.cutEnds
-          ? 0
-          : Math.floor(v / 20) % 2
-            ? 2
-            : 1,
-      ) as (0 | 1 | 2)[];
+    const k = (row.measurementId ?? row.id) % 29;
+    const campaign = Math.floor((row.time - start) / 86400000 / 7),
+      trueLag = campaign >= 14 && campaign <= 18 ? 3 + (campaign % 3) : 0;
+    const rate =
+      (growth * (0.08 + (row.treatmentId / 12) * 0.7 + rng() * 0.22)) / 185;
+    const t = Array.from({ length: 186 }, (_, i) => i);
+    const side = t.map((v) => {
+      const shifted = v - options.valveOffset,
+        phase = ((shifted % 20) + 20) % 20;
+      return shifted < 0 ||
+        phase < options.cutBeginnings ||
+        phase >= 20 - options.cutEnds
+        ? 0
+        : Math.floor((shifted + 200) / 20) % 2
+          ? 2
+          : 1;
+    }) as (0 | 1 | 2)[];
     const y = t.map((v) => {
-      const chamber = Math.floor(v / 20) % 2,
-        slope = k === 0 ? 0 : k === 1 ? -rate : rate;
-      const signal = k === 3 ? slope * v * Math.exp(-v / 130) : slope * v;
+      const physical = v - trueLag,
+        phase = ((physical % 20) + 20) % 20,
+        chamber = Math.floor((physical + 200) / 20) % 2;
+      const leak = k === 1 || k === 4;
+      const slope = leak
+        ? gas === "N2O"
+          ? -rate
+          : gas === "CO2"
+            ? k === 4
+              ? 0
+              : -rate * 0.35
+            : rate
+        : k === 0
+          ? 0
+          : rate;
+      const signal = k === 3 ? slope * v * Math.exp(-v / 90) : slope * v;
+      const neighbour = (row.measurementId ?? 0) % 317 === 0 ? 4 : 1;
       return (
         base +
-        chamber * growth * 0.035 +
-        signal * (chamber ? 1.17 : 1) +
+        chamber * growth * 0.12 +
+        signal * (chamber ? 1.17 : 1) * neighbour +
         (rng() - 0.5) * growth * 0.012 +
-        (v % 20 < 4 ? growth * 0.08 * Math.exp(-(v % 20)) : 0) +
-        (k === 2 && v === 92 ? growth * 0.3 : 0)
+        (phase < 2 ? growth * 0.025 * Math.exp(-phase) : 0) +
+        (k === 2 && v % 20 === 10 ? growth * 0.3 : 0)
       );
     });
     return {
@@ -118,6 +141,7 @@ export function createMock(seed = 42): T.FfrApi {
       t,
       y,
       side,
+      fit: t.map(() => null),
       used: t.map(
         (v, i) =>
           side[i] === (row.side === "left" ? 1 : 2) &&
@@ -197,15 +221,68 @@ export function createMock(seed = 42): T.FfrApi {
     }
     return gases.map((g) => fit(r, g, actual));
   }
+  const diagnosticMap = new Map<number, T.Diagnostic[]>(),
+    lagCache = new Map<number, { lag: number; improvement: number }>();
+  function analyse(r: T.FluxRow, o: T.AnalysisOptions) {
+    const failed = r.measurementId === 106,
+      regs = failed ? [] : results(r, o),
+      traces = gases.map((g) => trace(r, g, o));
+    const rawLag =
+      lagCache.get(r.measurementId ?? r.id) ??
+      estimateLag(traces.find((t) => t.gas === "CO2")!, {
+        ...defaults,
+        valveOffset: 0,
+      });
+    lagCache.set(r.measurementId ?? r.id, rawLag);
+    const improvement =
+      Math.abs(rawLag.lag - o.valveOffset) < 1.5 ? 0 : rawLag.improvement;
+    return {
+      regs,
+      traces,
+      lag: rawLag.lag,
+      diagnostics: findings(
+        r,
+        regs,
+        traces,
+        o,
+        config,
+        rawLag.lag,
+        improvement,
+      ),
+    };
+  }
   function refresh(r: T.FluxRow) {
-    results(r, opts.get(r.id) ?? config.defaults).forEach((v) => {
-      r[v.gas + "_flux"] = v.flux;
-      r[v.gas + "_slope"] = v.slope;
-      r[v.gas + "_rsq"] = v.rsq;
-      r[v.gas + "_pval"] = v.pval;
-      if (v.gas === "N2O") r.N2O_qc = v.qc;
+    const a = analyse(r, opts.get(r.id) ?? config.defaults);
+    gases.forEach((g) => {
+      const v = a.regs.find((r) => r.gas === g);
+      for (const [key, value] of Object.entries({
+        flux: v?.flux ?? null,
+        slope: v?.slope ?? null,
+        rsq: v?.rsq ?? null,
+        pval: v?.pval ?? null,
+        n: v?.n ?? 0,
+        resid: v ? Math.sqrt(v.mse) : null,
+      }))
+        r[g + "_" + key] = value;
     });
+    r.N2O_qc = a.regs.find((r) => r.gas === "N2O")?.qc ?? "error";
+    r.valveLagS = a.lag;
     r.overridden = opts.has(r.id);
+    diagnosticMap.set(r.id, a.diagnostics);
+    r.diag = [...new Set(a.diagnostics.map((d) => d.code))].join(",");
+    r.attention = score(a.diagnostics);
+  }
+  function neighbours(){
+   const treatments=new Map<number,T.FluxRow[]>(),plots=new Map<number,T.FluxRow[]>();
+   for(const r of rows){if(r.excluded)continue;for(const [map,key] of [[treatments,r.treatmentId],[plots,r.plotId]] as const){let group=map.get(key);if(!group){group=[];map.set(key,group);}group.push(r);}}
+   for(const map of [treatments,plots])for(const group of map.values())group.sort((a,b)=>a.time-b.time);
+   const range=(group:T.FluxRow[],time:number,gap:number)=>{const lower=(t:number)=>{let lo=0,hi=group.length;while(lo<hi){const m=(lo+hi)>>>1;if(group[m].time<t)lo=m+1;else hi=m;}return lo;};return group.slice(lower(time-gap),lower(time+gap+1));};
+   for(const r of rows){const ds=(diagnosticMap.get(r.id)??[]).filter(d=>d.code!=='neighbour_outlier');
+    if(r.source==='robot'&&r.N2O_qc!=='error'){let peers=range(treatments.get(r.treatmentId)??[],r.time,3*86400000);if(peers.length<6)peers=range(plots.get(r.plotId)??[],r.time,10*86400000);
+     if(peers.length>=6)for(const gas of ['N2O','CO2']){const vs=peers.filter(p=>typeof p[gas+'_flux']==='number').map(p=>Math.asinh(Number(p[gas+'_flux']))),m=median(vs),mad=median(vs.map(v=>Math.abs(v-m)))*1.4826,z=Math.abs(Math.asinh(Number(r[gas+'_flux']))-m)/Math.max(.01,mad);if(z>(config.diagnostics.neighbourZ??5))ds.push({code:'neighbour_outlier',severity:'warn',gas,value:z,message:'This flux is far from comparable measurements in the same treatment and nearby dates.'});}
+    }
+    ds.sort((a,b)=>({bad:0,warn:1,info:2}[a.severity]-{bad:0,warn:1,info:2}[b.severity]));diagnosticMap.set(r.id,ds);r.diag=[...new Set(ds.map(d=>d.code))].join(',');r.attention=score(ds);
+   }
   }
   function makeRow(id: number, manual = false): T.FluxRow {
     const i = id - 1,
@@ -239,6 +316,9 @@ export function createMock(seed = 42): T.FfrApi {
       soilTemperature:
         8 + 11 * Math.sin(((time - start) / 86400000 / 365) * Math.PI * 2),
       precip: Math.max(0, Math.sin(i * 7) * 4 - 2),
+      attention: 0,
+      diag: "",
+      valveLagS: 0,
       x: (p.id % 6) * 5 + 2,
       y: Math.floor((p.id - 1) / 6) * 5 + 2,
     };
@@ -260,7 +340,9 @@ export function createMock(seed = 42): T.FfrApi {
     r.N2O_qc = "manual";
     rows.push(r);
   }
+  neighbours();
   type Snapshot = {
+    diagnostics: [number, T.Diagnostic[]][];
     rows: T.FluxRow[];
     opts: [number, T.AnalysisOptions][];
     config: T.ProjectConfig;
@@ -284,9 +366,20 @@ export function createMock(seed = 42): T.FfrApi {
       [],
     redoStack: typeof undoStack = [];
   const snapshot = (): Snapshot =>
-    structuredClone({ rows, opts: [...opts], config, layout, series });
+    structuredClone({
+      rows,
+      diagnostics: [...diagnosticMap],
+      opts: [...opts],
+      config,
+      layout,
+      series,
+    });
   const restore = (s: Snapshot) => {
     rows.splice(0, rows.length, ...structuredClone(s.rows));
+    diagnosticMap.clear();
+    s.diagnostics.forEach(([id, ds]) =>
+      diagnosticMap.set(id, structuredClone(ds)),
+    );
     opts.clear();
     s.opts.forEach(([id, o]) => opts.set(id, structuredClone(o)));
     config = structuredClone(s.config);
@@ -317,9 +410,13 @@ export function createMock(seed = 42): T.FfrApi {
   try {
     const s = JSON.parse(sessionStorage.getItem("ffr-mock-edits") ?? "null");
     if (s) {
-      config = s.config;
+      config = {
+        ...s.config,
+        diagnostics: { ...thresholds, ...s.config.diagnostics },
+        defaults: { ...defaults, ...s.config.defaults },
+      };
       layout = s.layout;
-      for (const [id, o] of s.opts) opts.set(id, o);
+      for (const [id, o] of s.opts) opts.set(id, { ...defaults, ...o });
       for (const f of s.flags) {
         const r = rows[f.id - 1];
         if (!r) continue;
@@ -342,6 +439,7 @@ export function createMock(seed = 42): T.FfrApi {
   function change(kind: string, ids: number[], fn: () => void) {
     const before = snapshot();
     fn();
+    neighbours();
     undoStack.push({
       before,
       after: snapshot(),
@@ -407,8 +505,15 @@ export function createMock(seed = 42): T.FfrApi {
   ): T.FluxDetail => {
     const r = row(id),
       sibling = r.source === "manual" ? null : row(id % 2 ? id + 1 : id - 1),
-      regs = results(r, o);
+      a = analyse(r, o),
+      regs = a.regs;
     return {
+      diagnostics: a.diagnostics.concat(
+        (diagnosticMap.get(id) ?? []).filter(
+          (d) => d.code === "neighbour_outlier",
+        ),
+      ),
+      valveLagS: a.lag,
       flux: { ...r },
       options: structuredClone(o),
       isOverridden: opts.has(id),
@@ -424,7 +529,13 @@ export function createMock(seed = 42): T.FfrApi {
               const tr = trace(r, g, o),
                 fit = regs.find((v) => v.gas === g)!;
               tr.used = tr.used.map(
-                (v, i) => v && tr.t[i] >= fit.start && tr.t[i] <= fit.stop,
+                (v, i) =>
+                  v &&
+                  tr.t[i] >= (fit?.start ?? Infinity) &&
+                  tr.t[i] <= (fit?.stop ?? -Infinity),
+              );
+              tr.fit = tr.t.map((t, i) =>
+                tr.used[i] && fit ? fit.intercept + fit.slope * t : null,
               );
               return tr;
             }),
@@ -596,7 +707,45 @@ export function createMock(seed = 42): T.FfrApi {
       const keys = Object.keys(example);
       const columns: T.ColumnMeta[] = keys.map((key) => ({
         key,
-        label: key.replaceAll("_", " "),
+        label:
+          (
+            {
+              id: "Flux ID",
+              measurementId: "File ID",
+              source: "Source",
+              time: "Measured at",
+              filename: "Raw file",
+              side: "Chamber",
+              plotId: "Plot ID",
+              plotLabel: "Plot",
+              treatmentId: "Treatment ID",
+              treatmentName: "Treatment",
+              excluded: "Excluded",
+              reviewed: "Reviewed",
+              overridden: "Custom options",
+              note: "Note",
+              airTemp: "Air temperature",
+              precip: "Precipitation",
+              soilMoisture: "Soil moisture",
+              soilTemperature: "Soil temperature",
+              attention: "Attention score",
+              diag: "Diagnostic codes",
+              valveLagS: "Estimated valve lag",
+            } as Record<string, string>
+          )[key] ??
+          key.replace(
+            /_(slope|rsq|pval|flux|n|resid|qc)$/,
+            (v) =>
+              ({
+                _slope: " slope",
+                _rsq: " R?",
+                _pval: " p value",
+                _flux: " flux",
+                _n: " points",
+                _resid: " residual SD",
+                _qc: " quality",
+              })[v] ?? v,
+          ),
         type:
           key === "time"
             ? "time"
@@ -620,16 +769,23 @@ export function createMock(seed = 42): T.FfrApi {
               )
             ? "External"
             : "Measurement",
-        unit: key.endsWith("_flux")
-          ? "µg m⁻² h⁻¹"
-          : key === "airTemp"
-            ? "°C"
-            : undefined,
+        unit:
+          key === "valveLagS"
+            ? "s"
+            : key.endsWith("_resid")
+              ? "ppm"
+              : key.endsWith("_slope")
+                ? "ppm s??"
+                : key.endsWith("_flux")
+                  ? "µg m⁻² h⁻¹"
+                  : key === "airTemp"
+                    ? "°C"
+                    : undefined,
       }));
       return {
         columns,
         rows: rows.length,
-        data: Object.fromEntries(keys.map((k) => [k, rows.map((r) => r[k])])),
+        data: Object.fromEntries(keys.map((k) => [k, rows.map((r) => r[k]??null)])),
       };
     },
     getFluxDetail: async (id) => detail(id),
@@ -667,6 +823,59 @@ export function createMock(seed = 42): T.FfrApi {
       );
       return ids.map((id) => ({ ...row(id) }));
     },
+    patchFluxOptions: async (ids, partial) => {
+      change("Patch analysis options", ids, () =>
+        ids.forEach((id) => {
+          const effective = opts.get(id) ?? config.defaults;
+          opts.set(id, {
+            ...effective,
+            ...structuredClone(partial),
+            perGas: partial.perGas
+              ? { ...effective.perGas, ...partial.perGas }
+              : effective.perGas,
+          });
+          refresh(row(id));
+        }),
+      );
+      return ids.map((id) => ({ ...row(id) }));
+    },
+    getFluxThumbs: async (ids, gas, maxPoints = 60) =>
+      ids.map((id) => {
+        const r = row(id),
+          d = detail(id),
+          tr = d.traces.find((t) => t.gas === gas),
+          reg = d.regressions.find((r) => r.gas === gas),
+          indices =
+            tr?.t.flatMap((_, i) =>
+              tr.side[i] === (r.side === "left" ? 1 : 2) ? [i] : [],
+            ) ?? [],
+          step = Math.max(
+            1,
+            Math.ceil(indices.length / Math.max(2, maxPoints)),
+          ),
+          selected = indices.filter((_, i) => i % step === 0);
+        return {
+          fluxId: id,
+          t: selected.map((i) => tr!.t[i]),
+          y: selected.map((i) => tr!.y[i]),
+          used: selected.map((i) => tr!.used[i]),
+          slope: reg?.slope ?? 0,
+          intercept: reg?.intercept ?? 0,
+        };
+      }),
+    diagnosticsSummary: async () =>
+      Object.entries(diagnosticLabels).map(([code, label]) => {
+        const found = rows.filter((r) => r.diag.split(",").includes(code)),
+          d = [...diagnosticMap.values()].flat().find((d) => d.code === code);
+        return {
+          code,
+          label,
+          description: d?.message ?? label,
+          severity: d?.severity ?? "info",
+          count: found.length,
+          unreviewed: found.filter((r) => !r.reviewed).length,
+        };
+      }),
     recomputeAll: async () => {
       await progress("Recompute");
       rows.filter((r) => r.source === "robot").forEach(refresh);

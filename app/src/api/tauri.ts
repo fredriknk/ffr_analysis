@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import type { FfrApi, Progress } from "./types";
+import type { FfrApi,Progress } from "./types";
 export const tauriApi: FfrApi = {
   projectCreate: (path, name) => invoke("project_create", { path, name }),
   projectOpen: (path) => invoke("project_open", { path }),
@@ -22,6 +22,11 @@ export const tauriApi: FfrApi = {
     invoke("set_flux_options", { fluxIds, options }),
   setFluxFlags: (fluxIds, flags) =>
     invoke("set_flux_flags", { fluxIds, flags }),
+  patchFluxOptions: (fluxIds, partial) =>
+    invoke("patch_flux_options", { fluxIds, partial }),
+  getFluxThumbs: (fluxIds, gas, maxPoints = 60) =>
+    invoke("get_flux_thumbs", { fluxIds, gas, maxPoints }),
+  diagnosticsSummary: () => invoke("diagnostics_summary"),
   recomputeAll: () => invoke("recompute_all"),
   undo: () => invoke("undo"),
   redo: () => invoke("redo"),

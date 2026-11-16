@@ -36,6 +36,7 @@ export interface AnalysisOptions {
   co2Guides: boolean;
   cutBeginnings: number;
   cutEnds: number;
+  valveOffset: number;
   slope?: number;
   perGas?: Partial<Record<Gas, Partial<AnalysisOptions>>>;
 }
@@ -48,6 +49,7 @@ export interface ProjectConfig {
   chamberHeight: number;
   pressure: number;
   qcThreshold: number;
+  diagnostics: Record<string, number>;
   plotAssignment: "polygons" | "waypoint";
 }
 export interface Treatment {
@@ -97,6 +99,9 @@ export interface FluxRow {
   note: string;
   airTemp: number;
   precip: number;
+  attention: number;
+  diag: string;
+  valveLagS: number;
   x: number;
   y: number;
   [key: string]: Cell;
@@ -127,8 +132,34 @@ export interface Trace {
   y: number[];
   side: (0 | 1 | 2)[];
   used: boolean[];
+  fit: (number | null)[];
+}
+export interface Diagnostic {
+  code: string;
+  severity: "info" | "warn" | "bad";
+  gas?: string;
+  value?: number;
+  message: string;
+}
+export interface DiagnosticCount {
+  code: string;
+  label: string;
+  description: string;
+  severity: Diagnostic["severity"];
+  count: number;
+  unreviewed: number;
+}
+export interface FluxThumb {
+  fluxId: number;
+  t: number[];
+  y: number[];
+  used: boolean[];
+  slope: number;
+  intercept: number;
 }
 export interface FluxDetail {
+  diagnostics: Diagnostic[];
+  valveLagS: number;
   flux: FluxRow;
   options: AnalysisOptions;
   isOverridden: boolean;
@@ -277,6 +308,16 @@ export interface FfrApi {
     options: AnalysisOptions | null,
   ): Promise<FluxRow[]>;
   setFluxFlags(fluxIds: number[], flags: FluxFlags): Promise<FluxRow[]>;
+  patchFluxOptions(
+    fluxIds: number[],
+    partial: Partial<AnalysisOptions>,
+  ): Promise<FluxRow[]>;
+  getFluxThumbs(
+    fluxIds: number[],
+    gas: Gas,
+    maxPoints?: number,
+  ): Promise<FluxThumb[]>;
+  diagnosticsSummary(): Promise<DiagnosticCount[]>;
   recomputeAll(): Promise<void>;
   undo(): Promise<UndoResult>;
   redo(): Promise<UndoResult>;
