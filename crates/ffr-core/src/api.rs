@@ -211,7 +211,7 @@ pub struct FluxDetail {
     #[serde(default)]
     pub robust: Vec<crate::diagnostics::RobustFit>,
     #[serde(default, rename = "N2O_lagS")]
-    pub n2o_lag_s: f64,
+    pub n2o_lag_s: Option<f64>,
     pub diagnostics: Vec<crate::diagnostics::Diagnostic>,
     pub valve_lag_s: f64,
     pub flux: FluxRow,

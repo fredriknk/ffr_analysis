@@ -1,4 +1,4 @@
-﻿"""Reproducible CO2/N2O contact sheets through the public CLI contract.
+"""Reproducible CO2/N2O contact sheets through the public CLI contract.
 Adapted from the local sheet.py draft; no measurement data is embedded here.
 """
 import argparse,concurrent.futures,json,math,pathlib,random,subprocess
@@ -20,6 +20,14 @@ else:
  for code in sorted({c for r in robot for c in (r['diag'] or '').split(',') if c}):
   ids=[r['id'] for r in robot if code in (r['diag'] or '').split(',')];groups[code]=rng.sample(ids,min(16,len(ids)))
  clean=[r['id'] for r in robot if r['attention']==0];groups['attention_zero']=rng.sample(clean,min(16,len(clean)))
+# Remove only PNGs recorded by this tool's previous manifest, within this output directory.
+manifest=a.out/'index.json'
+if manifest.exists():
+ previous=json.loads(manifest.read_text(encoding='utf8'))
+ for group in previous:
+  if not group or any(c not in 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-' for c in group):continue
+  for old in a.out.glob(group+'-*.png'):
+   if old.resolve().parent==a.out.resolve():old.unlink()
 (a.out/'index.json').write_text(json.dumps(groups,indent=2),encoding='utf8')
 cache={}
 def load(i):return i,invoke('getFluxDetail',{'fluxId':i})

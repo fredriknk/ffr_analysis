@@ -245,7 +245,11 @@ pub fn contextualise(
                     } else {
                         "N2O_lagS".into()
                     },
-                    json!(lag.meaningful.then_some(lag.lag_s)),
+                    if gas == "CO2" {
+                        json!(lag.lag_s)
+                    } else {
+                        json!(lag.meaningful.then_some(lag.lag_s))
+                    },
                 );
             }
             let residual = r

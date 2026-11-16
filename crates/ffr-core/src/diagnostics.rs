@@ -520,83 +520,6 @@ pub fn analyse(
         valve_improvement: lag.1,
     }
 }
-pub fn neighbours(rows: &mut [FluxRow], findings: &mut [Vec<Diagnostic>], c: &DiagnosticsConfig) {
-    for gas in ["N2O", "CO2"] {
-        let key = format!("{gas}_flux");
-        let mut treatment: BTreeMap<i64, Vec<(i64, i64, f64)>> = BTreeMap::new();
-        let mut plot: BTreeMap<i64, Vec<(i64, i64, f64)>> = BTreeMap::new();
-        for r in rows
-            .iter()
-            .filter(|r| r["source"] == "robot" && r["excluded"] != true)
-        {
-            let Some(v) = r.get(&key).and_then(|v| v.as_f64()) else {
-                continue;
-            };
-            let point = (
-                r["time"].as_i64().unwrap_or(0),
-                r["id"].as_i64().unwrap_or(0),
-                v.asinh(),
-            );
-            if let Some(id) = r["treatmentId"].as_i64().filter(|id| *id > 0) {
-                treatment.entry(id).or_default().push(point);
-            }
-            if let Some(id) = r["plotId"].as_i64().filter(|id| *id > 0) {
-                plot.entry(id).or_default().push(point);
-            }
-        }
-        for points in treatment.values_mut().chain(plot.values_mut()) {
-            points.sort_by_key(|p| p.0);
-        }
-        for (i, r) in rows.iter().enumerate() {
-            if r["source"] != "robot" {
-                continue;
-            }
-            let Some(v) = r.get(&key).and_then(|v| v.as_f64()) else {
-                continue;
-            };
-            let time = r["time"].as_i64().unwrap_or(0);
-            let id = r["id"].as_i64().unwrap_or(0);
-            let collect = |group: &BTreeMap<i64, Vec<(i64, i64, f64)>>, key: &str, days: f64| {
-                let pts = r[key]
-                    .as_i64()
-                    .and_then(|id| group.get(&id))
-                    .map(Vec::as_slice)
-                    .unwrap_or(&[]);
-                let range = (days * 86400000.) as i64;
-                let a = pts.partition_point(|p| p.0 < time - range);
-                let b = pts.partition_point(|p| p.0 <= time + range);
-                pts[a..b]
-                    .iter()
-                    .filter(|p| p.1 != id)
-                    .map(|p| p.2)
-                    .collect::<Vec<_>>()
-            };
-            let mut values = collect(&treatment, "treatmentId", c.neighbour_days);
-            if values.len() < c.min_neighbours {
-                values = collect(&plot, "plotId", c.neighbour_fallback_days);
-            }
-            if values.len() < c.min_neighbours {
-                continue;
-            }
-            let scale = mad(&values);
-            if scale > 1e-12 {
-                let z = (v.asinh() - median(&values)).abs() / scale;
-                if z > c.neighbour_z {
-                    findings[i].push(finding(
-                        "neighbour_outlier",
-                        "warn",
-                        Some(gas),
-                        z,
-                        format!(
-                            "Flux is {z:.1} robust SD from {} comparable non-excluded neighbours.",
-                            values.len()
-                        ),
-                    ));
-                }
-            }
-        }
-    }
-}
 pub const RULES: [(&str, &str, &str); 15] = [
     (
         "noisy",
@@ -886,9 +809,35 @@ mod tests {
     }
     #[test]
     fn neighbours_and_attention() {
-        let mut rows:Vec<FluxRow>=(0..12).map(|i|serde_json::from_value(json!({"id":i,"source":"robot","time":i*1000,"excluded":false,"treatmentId":1,"plotId":1,"N2O_flux":if i==11{10000.}else{10.+i as f64*0.1}})).expect("row")).collect();
+        let mut rows:Vec<FluxRow>=(0..12).map(|i|serde_json::from_value(json!({"id":i,"measurementId":i,"source":"robot","time":i*1000,"excluded":false,"treatmentId":1,"plotId":1,"N2O_flux":if i==11{10000.}else{10.+i as f64*0.1}})).expect("row")).collect();
         let mut f = vec![vec![]; rows.len()];
-        neighbours(&mut rows, &mut f, &DiagnosticsConfig::default());
+        let baseline: Baseline = [
+            (
+                "N2O".into(),
+                GasBaseline {
+                    floor: 0.1,
+                    median_residual_sd: 1.,
+                },
+            ),
+            (
+                "CO2".into(),
+                GasBaseline {
+                    floor: 1.,
+                    median_residual_sd: 1.,
+                },
+            ),
+        ]
+        .into_iter()
+        .collect();
+        let analyses = vec![Findings::default(); rows.len()];
+        contextualise(
+            &mut rows,
+            &mut f,
+            &analyses,
+            &baseline,
+            &DiagnosticsConfig::default(),
+            chrono_tz::Europe::Oslo,
+        );
         assert!(f[11].iter().any(|d| d.code == "neighbour_outlier"));
         assert!(score(&mut f[11]) >= 30.);
     }

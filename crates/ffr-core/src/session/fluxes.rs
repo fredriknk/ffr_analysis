@@ -322,7 +322,11 @@ impl Session {
             .lags
             .get("N2O")
             .filter(|l| l.meaningful)
-            .map_or(0., |l| l.lag_s);
+            .map(|l| l.lag_s);
+        let valve_lag = analysis
+            .lags
+            .get("CO2")
+            .map_or(lag.0 + options.valve_offset, |l| l.lag_s);
         for (gas, r) in &results {
             for (key, v) in [
                 ("slope", r.slope),
@@ -353,11 +357,11 @@ impl Session {
             row = rows.remove(0);
             diagnostics = f.remove(0);
         }
-        crate::diagnostics::decorate(&mut row, &mut diagnostics, lag.0 + options.valve_offset);
+        crate::diagnostics::decorate(&mut row, &mut diagnostics, valve_lag);
         Ok(json!({
         "robust":analysis.robust,"N2O_lagS":n2o_lag,
         "diagnostics":diagnostics,
-        "valveLagS":lag.0+options.valve_offset,
+        "valveLagS":valve_lag,
         "flux":row,
         "options":options,
         "isOverridden":overridden,
