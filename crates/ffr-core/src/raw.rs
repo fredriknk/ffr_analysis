@@ -175,7 +175,9 @@ pub fn from_value(metadata: Metadata, mut original: Value) -> Result<Raw> {
                 return Err(Error::Invalid("valves must differ".into()));
             }
             switches.push((
-                (p[0][0].as_f64().unwrap_or(0.) + p[1][0].as_f64().unwrap_or(0.)) / 2. - epoch,
+                ((p[0][0].as_f64().unwrap_or(0.) - epoch)
+                    + (p[1][0].as_f64().unwrap_or(0.) - epoch))
+                    / 2.,
                 p[0][1][0].as_u64().unwrap_or(1) as u8,
             ));
         }
@@ -190,16 +192,46 @@ pub fn from_value(metadata: Metadata, mut original: Value) -> Result<Raw> {
 /// Legacy search_sorted is deliberately a ceiling, not nearest to either neighbour.
 pub fn group_indices(t: &[f64], switches: &[(f64, u8)], beg: f64, end: f64) -> Vec<u8> {
     let mut sides = vec![0; t.len()];
+    for (a, b, side) in group_ranges(t, switches, beg, end) {
+        sides[a..b].fill(side);
+    }
+    sides
+}
+pub fn group_ranges(
+    t: &[f64],
+    switches: &[(f64, u8)],
+    beg: f64,
+    end: f64,
+) -> Vec<(usize, usize, u8)> {
+    let mut ranges = vec![];
     if t.is_empty() {
-        return sides;
+        return ranges;
     }
     for (i, (s, side)) in switches.iter().enumerate() {
         let next = switches.get(i + 1).map_or(t[t.len() - 1], |x| x.0);
-        let a = t.partition_point(|x| *x < s + beg).min(t.len() - 1);
-        let b = (t.partition_point(|x| *x < next - end).min(t.len() - 1) + 1).min(t.len());
+        let a = search_sorted(t, s + beg);
+        let b = search_sorted(t, next - end) + 1;
         if a < b {
-            sides[a..b].fill(*side);
+            ranges.push((a, b, *side));
         }
     }
-    sides
+    ranges
+}
+
+// Keep the legacy binary-search path and subsequent neighbour check even when
+// an instrument's clock jumps backwards inside a file.
+pub fn search_sorted(t: &[f64], value: f64) -> usize {
+    let (mut lo, mut hi) = (0, t.len());
+    while lo < hi {
+        let mid = (lo + hi) / 2;
+        if t[mid] < value {
+            lo = mid + 1;
+        } else {
+            hi = mid;
+        }
+    }
+    if lo < t.len() - 1 && (t[lo + 1] - value).abs() < (t[lo] - value).abs() {
+        lo += 1;
+    }
+    lo.min(t.len() - 1)
 }

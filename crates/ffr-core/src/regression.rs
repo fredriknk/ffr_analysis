@@ -1,6 +1,6 @@
 use crate::{
     api::AnalysisOptions,
-    raw::{group_indices, Raw},
+    raw::{group_ranges, Raw},
     Error, Result,
 };
 use serde::{Deserialize, Serialize};
@@ -30,7 +30,16 @@ pub struct Regression {
     pub qc: String,
 }
 pub fn nearest(x: &[f64], v: f64) -> usize {
-    let i = x.partition_point(|p| *p <= v).saturating_sub(1);
+    let (mut lo, mut hi) = (0, x.len());
+    while lo < hi {
+        let mid = (lo + hi) / 2;
+        if v < x[mid] {
+            hi = mid;
+        } else {
+            lo = mid + 1;
+        }
+    }
+    let i = lo.saturating_sub(1);
     if i + 1 < x.len() && (x[i + 1] - v).abs() < (x[i] - v).abs() {
         i + 1
     } else {
@@ -136,28 +145,36 @@ pub fn auto(x: &[f64], y: &[f64], interval: f64, crit: &str) -> Result<Regressio
         .ok_or_else(|| Error::Invalid("no automatic window".into()))
 }
 pub fn qc(r: &Regression, side: u8) -> String {
+    qc_with(r, side, &crate::api::QcThresholds::default())
+}
+pub fn qc_with(r: &Regression, side: u8, q: &crate::api::QcThresholds) -> String {
     let range = r.max_y - r.min_y;
     let curve = if range == 0. {
         -1.
     } else {
         r.slope.abs() / range
     };
-    let s = if range > 0.14
-        || curve > if side == 1 { 0.0081 } else { 0.0066 }
-        || (r.pval > 0.0001 && r.pval < 0.001 && range > 0.003)
+    let s = if range > q.max_range
+        || curve
+            > if side == 1 {
+                q.left_curve
+            } else {
+                q.right_curve
+            }
+        || (r.pval > 0.0001 && r.pval < q.p_value && range > q.zero_range)
         || curve == -1.
     {
         "Outliers likely"
-    } else if r.min_y < 0.31 || r.min_y > 0.34 || (r.slope < 0. && r.max_y > 0.34) {
-        if r.pval > 0.001 && range < 0.003 {
+    } else if r.min_y < q.min_y || r.min_y > q.max_y || (r.slope < 0. && r.max_y > q.max_y) {
+        if r.pval > q.p_value && range < q.zero_range {
             "Out of range - possibly zero slope"
         } else if r.slope < 0. {
             "Out of range and negative"
         } else {
             "Out of range"
         }
-    } else if r.pval > 0.001 {
-        if range > 0.003 {
+    } else if r.pval > q.p_value {
+        if range > q.zero_range {
             "Fails p-test for other reason"
         } else {
             "Probably zero slope"
@@ -244,13 +261,13 @@ pub fn compute(
         let Some((t, y)) = raw.channels.get(gas) else {
             continue;
         };
-        let sides = group_indices(t, &raw.switches, beg, end);
-        let (x, y): (Vec<_>, Vec<_>) = t
-            .iter()
-            .zip(y)
-            .zip(sides)
-            .filter(|((_, y), s)| *s == side && **y != 0.)
-            .map(|((t, y), _)| (*t, *y))
+        let ranges = group_ranges(t, &raw.switches, beg, end);
+        let (x, y): (Vec<_>, Vec<_>) = ranges
+            .into_iter()
+            .filter(|(_, _, s)| *s == side)
+            .flat_map(|(a, b, _)| a..b)
+            .filter(|i| y[*i] != 0.)
+            .map(|i| (t[i], y[i]))
             .unzip();
         if x.len() < 3 {
             continue;
@@ -294,9 +311,9 @@ pub fn compute(
                 _ => 1.,
             };
         r.flux_unit = match gas {
-            "N2O" => "µg N2O-N m?² h?¹",
-            "CO2" => "µg CO2-C m?² h?¹",
-            _ => "mol m?² s?¹",
+            "N2O" => "ug N2O-N m^-2 h^-1",
+            "CO2" => "ug CO2-C m^-2 h^-1",
+            _ => "mol m^-2 s^-1",
         }
         .into();
         if gas == "N2O" {

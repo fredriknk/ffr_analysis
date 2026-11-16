@@ -56,6 +56,7 @@ pub struct ProjectConfig {
     pub chamber_distance: f64,
     pub chamber_forward_distance: f64,
     pub preset: Option<String>,
+    pub qc: QcThresholds,
 }
 impl Default for ProjectConfig {
     fn default() -> Self {
@@ -68,6 +69,31 @@ impl Default for ProjectConfig {
             chamber_distance: 2.,
             chamber_forward_distance: 0.2,
             preset: None,
+            qc: QcThresholds::default(),
+        }
+    }
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct QcThresholds {
+    pub max_range: f64,
+    pub left_curve: f64,
+    pub right_curve: f64,
+    pub min_y: f64,
+    pub max_y: f64,
+    pub p_value: f64,
+    pub zero_range: f64,
+}
+impl Default for QcThresholds {
+    fn default() -> Self {
+        Self {
+            max_range: 0.14,
+            left_curve: 0.0081,
+            right_curve: 0.0066,
+            min_y: 0.31,
+            max_y: 0.34,
+            p_value: 0.001,
+            zero_range: 0.003,
         }
     }
 }
@@ -99,6 +125,32 @@ pub struct Progress {
     pub message: Option<String>,
 }
 pub type FluxRow = BTreeMap<String, Value>;
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ValveSwitch {
+    pub t: f64,
+    pub side: String,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Trace {
+    pub gas: String,
+    pub unit: String,
+    pub t: Vec<f64>,
+    pub y: Vec<f64>,
+    pub side: Vec<u8>,
+    pub used: Vec<bool>,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FluxDetail {
+    pub flux: FluxRow,
+    pub options: AnalysisOptions,
+    pub is_overridden: bool,
+    pub sibling_flux_id: Option<i64>,
+    pub switches: Vec<ValveSwitch>,
+    pub traces: Vec<Trace>,
+    pub regressions: Vec<crate::regression::Regression>,
+    pub sibling: Vec<crate::regression::Regression>,
+}
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ColumnMeta {
     pub key: String,
