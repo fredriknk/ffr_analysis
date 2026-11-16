@@ -50,6 +50,7 @@ export function TimeBrush({ rows }: { rows: FluxRow[] }) {
                 .toISOString()
                 .slice(0, 10);
             s.set({
+              treatmentZoom: null,
               from: zoom.start < 0.01 ? "" : day(zoom.start),
               to: zoom.end > 99.99 ? "" : day(zoom.end),
             });

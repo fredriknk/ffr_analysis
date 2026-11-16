@@ -1,4 +1,4 @@
-import { flexRender, type Table } from "@tanstack/react-table";
+import { flexRender, type Column, type Table } from "@tanstack/react-table";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useRef } from "react";
 import type { ColumnMeta, FluxRow } from "../../api/types";
@@ -24,13 +24,31 @@ export function FluxTableView({
     estimateSize: () => 39,
     overscan: 12,
   });
+  const pinned = (column: Column<FluxRow>) =>
+    column.getIsPinned()
+      ? {
+          position: "sticky" as const,
+          left: column.getStart("left") + 34,
+          zIndex: 3,
+          background: "var(--panel)",
+        }
+      : {};
   return (
     <div className="table-scroll panel" ref={parent}>
-      <table>
+      <table style={{ width: table.getTotalSize() + 34 }}>
         <thead>
           {table.getHeaderGroups().map((hg) => (
             <tr key={hg.id}>
-              <th>
+              <th
+                style={{
+                  position: "sticky",
+                  left: 0,
+                  zIndex: 5,
+                  width: 34,
+                  minWidth: 34,
+                  background: "var(--rail)",
+                }}
+              >
                 <input
                   aria-label="Select all matching rows"
                   type="checkbox"
@@ -47,6 +65,7 @@ export function FluxTableView({
               {hg.headers.map((h) => (
                 <th
                   key={h.id}
+                  data-column-key={h.id}
                   aria-sort={
                     h.column.getIsSorted() === "asc"
                       ? "ascending"
@@ -55,19 +74,11 @@ export function FluxTableView({
                         : "none"
                   }
                   style={{
-                    minWidth:
-                      h.id === "id"
-                        ? 55
-                        : [
-                              "source",
-                              "side",
-                              "reviewed",
-                              "excluded",
-                              "overridden",
-                              "plotLabel",
-                            ].includes(h.id)
-                          ? 85
-                          : 125,
+                    width: h.column.getSize(),
+                    minWidth: h.column.getSize(),
+                    maxWidth: h.column.getSize(),
+                    ...pinned(h.column),
+                    zIndex: 4,
                   }}
                 >
                   <button onClick={h.column.getToggleSortingHandler()}>
@@ -105,7 +116,16 @@ export function FluxTableView({
                 className={r.original.excluded ? "excluded" : ""}
                 style={{ height: 39 }}
               >
-                <td>
+                <td
+                  style={{
+                    position: "sticky",
+                    left: 0,
+                    zIndex: 3,
+                    background: "var(--panel)",
+                    width: 34,
+                    minWidth: 34,
+                  }}
+                >
                   <input
                     aria-label={"Select flux " + r.id}
                     type="checkbox"
@@ -114,7 +134,14 @@ export function FluxTableView({
                   />
                 </td>
                 {r.getVisibleCells().map((c) => (
-                  <td key={c.id}>
+                  <td
+                    key={c.id}
+                    style={{
+                      width: c.column.getSize(),
+                      minWidth: c.column.getSize(),
+                      ...pinned(c.column),
+                    }}
+                  >
                     <button
                       className="cell"
                       onClick={() => onOpen(r.original.id)}

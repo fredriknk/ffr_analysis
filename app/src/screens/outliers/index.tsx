@@ -1,21 +1,13 @@
-import { useQuery } from "@tanstack/react-query";
-import type { EChartsCoreOption } from "echarts/core";
-import { useMemo, useState } from "react";
+﻿import { useQuery } from "@tanstack/react-query";
+import { useCallback, useMemo, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { api } from "../../api";
-import type { Gas } from "../../api/types";
-import { Chart } from "../../shared/charts/Chart";
-import {
-  Empty,
-  Field,
-  fmt,
-  Panel,
-  Status,
-  useAction,
-  useRows,
-} from "../../shared/common";
-import { codes, diagnosticLabels } from "../../shared/diagnostics";
+import type { FluxRow, Gas } from "../../api/types";
+import { Status, unit, useAction, useRows } from "../../shared/common";
+import { codes } from "../../shared/diagnostics";
 import { useStore } from "../../store";
+import { ScatterPlot, type ScatterSpec } from "./ScatterPlot";
+import { quantile, type AxisScale } from "./axes";
 export function Outliers() {
   const s = useStore(
       useShallow(({ openFlux, reviewThese }) => ({ openFlux, reviewThese })),
@@ -26,214 +18,115 @@ export function Outliers() {
     [diagnostic, setDiagnostic] = useState<string | null>(null),
     [excluded, setExcluded] = useState(false),
     [gas, setGas] = useState<Gas>("N2O"),
-    [log, setLog] = useState(false);
+    [lagGas, setLagGas] = useState<"N2O" | "CO2">("CO2"),
+    [scale, setScale] = useState<AxisScale>("asinh"),
+    [full, setFull] = useState(false),
+    [colour, setColour] = useState<"severity" | "treatment">("severity");
   const counts = useQuery({
       queryKey: ["diagnostics"],
       queryFn: () => api.diagnosticsSummary(),
     }),
     layout = useQuery({ queryKey: ["layout"], queryFn: () => api.getLayout() });
-  const rows = useMemo(
-    () =>
-      data.data?.rows.filter(
+  const rows = useMemo(() => {
+    const raw = data.data?.rows ?? [],
+      formatter = new Intl.DateTimeFormat("en-CA", {
+        timeZone: useStore.getState().timeZone,
+      }),
+      days = new Map<string, number[]>();
+    raw
+      .filter((r) => !r.excluded && typeof r.CO2_flux === "number")
+      .forEach((r) => {
+        const day = formatter.format(r.time);
+        let values = days.get(day);
+        if (!values) {
+          values = [];
+          days.set(day, values);
+        }
+        values.push(Number(r.CO2_flux));
+      });
+    const medians = new Map([...days].map(([d, vs]) => [d, quantile(vs, 0.5)]));
+    return raw
+      .filter(
         (r) =>
           (excluded || !r.excluded) &&
           (!diagnostic || codes(r.diag).includes(diagnostic)),
-      ) ?? [],
-    [data.data, excluded, diagnostic],
+      )
+      .map((r) => ({
+        ...r,
+        dayMedian: medians.get(formatter.format(r.time)) ?? null,
+      }));
+  }, [data.data, excluded, diagnostic]);
+  const specs = useMemo<ScatterSpec[]>(
+    () => [
+      {
+        label: "N₂O versus CO₂",
+        x: "CO2_flux",
+        y: "N2O_flux",
+        xLabel: unit("CO2-C · ug m^-2 h^-1"),
+        yLabel: unit("N2O-N · ug m^-2 h^-1"),
+      },
+      {
+        label: "Impact versus flux",
+        x: gas + "_flux",
+        y: gas + "_impact",
+        xLabel: gas + " flux",
+        yLabel: "Impact · fraction",
+      },
+      {
+        label: "CO₂ flux versus day median",
+        x: "dayMedian",
+        y: "CO2_flux",
+        xLabel: "Day median CO₂ flux",
+        yLabel: "CO₂ flux",
+      },
+      {
+        label: "Valve lag over time",
+        x: "time",
+        y: lagGas === "N2O" ? "N2O_lagS" : "valveLagS",
+        xLabel: "Date",
+        yLabel: lagGas + " lag · s",
+        time: true,
+      },
+      {
+        label: "Fit quality versus flux",
+        x: gas + "_rsq",
+        y: gas + "_flux",
+        xLabel: "R²",
+        yLabel: gas + " flux",
+      },
+      {
+        label: "Fluxes by treatment",
+        x: "time",
+        y: gas + "_flux",
+        xLabel: "Date",
+        yLabel: gas + " flux",
+        time: true,
+      },
+    ],
+    [gas, lagGas],
   );
-  const selectedSet = new Set(selected);
-  const pairs: {
-    label: string;
-    x: string;
-    y: string;
-    xLabel: string;
-    yLabel: string;
-    time?: boolean;
-  }[] = [
-    {
-      label: "N₂O versus CO₂",
-      x: "CO2_flux",
-      y: "N2O_flux",
-      xLabel: "CO₂ · µg C m⁻² h⁻¹",
-      yLabel: "N₂O · µg N m⁻² h⁻¹",
-    },
-    {
-      label: "Fit quality versus flux",
-      x: gas + "_rsq",
-      y: gas + "_flux",
-      xLabel: "R²",
-      yLabel: gas + (gas === "N2O" ? " - µg N m⁻² h⁻¹" : " - µg C m⁻² h⁻¹"),
-    },
-    {
-      label: "Valve lag over time",
-      x: "time",
-      y: "valveLagS",
-      xLabel: "Date",
-      yLabel: "Estimated lag · s",
-      time: true,
-    },
-    {
-      label: "Fluxes by treatment",
-      x: "time",
-      y: gas + "_flux",
-      xLabel: "Date",
-      yLabel: gas + (gas === "N2O" ? " - µg N m⁻² h⁻¹" : " - µg C m⁻² h⁻¹"),
-      time: true,
-    },
-  ];
-  function plot(pair: (typeof pairs)[number]) {
-    const visible = rows.filter(
-      (r) =>
-        typeof r[pair.x] === "number" &&
-        typeof r[pair.y] === "number" &&
-        (!log || !pair.x.includes("flux") || Number(r[pair.x]) > 0) &&
-        (!log || !pair.y.includes("flux") || Number(r[pair.y]) > 0),
-    );
-    return (
-      <Panel
-        key={pair.label}
-        title={pair.label}
-        extra={
-          <small>Click to inspect · drag a box or polygon to select</small>
-        }
-      >
-        <Chart
-          label={pair.label}
-          height={240}
-          onClick={(p) => {
-            const v = p.value as number[];
-            if (v?.[2]) s.openFlux(v[2]);
-          }}
-          onReady={(c) => {
-            c.on("brushselected", (event: unknown) => {
-              const ev = event as {
-                batch?: {
-                  selected: { seriesIndex: number; dataIndex: number[] }[];
-                }[];
-              };
-              const ids = [
-                ...new Set(
-                  ev.batch?.flatMap((b) =>
-                    b.selected.flatMap((sel) =>
-                      sel.dataIndex
-                        .map((i) => visible[i]?.id)
-                        .filter((v): v is number => v !== undefined),
-                    ),
-                  ) ?? [],
-                ),
-              ];
-              if (ids.length)
-                setSelected((prev) =>
-                  prev.join(",") === ids.join(",") ? prev : ids,
-                );
-            });
-          }}
-          option={
-            {
-              animation: false,
-              grid: { left: 75, right: 25, top: 35, bottom: 55 },
-              tooltip: {
-                trigger: "item",
-                formatter: (p: { value: number[] }) =>
-                  "Flux #" +
-                  p.value[2] +
-                  "<br/>" +
-                  fmt(p.value[0], 2) +
-                  " / " +
-                  fmt(p.value[1], 2),
-              },
-              toolbox: {
-                right: 15,
-                top: 0,
-                feature: { brush: { type: ["rect", "polygon", "clear"] } },
-              },
-              brush: {
-                toolbox: ["rect", "polygon", "clear"],
-                brushMode: "multiple",
-                xAxisIndex: 0,
-                yAxisIndex: 0,
-              },
-              xAxis: {
-                type: pair.time
-                  ? "time"
-                  : log && pair.x.includes("flux")
-                    ? "log"
-                    : "value",
-                name: pair.xLabel,
-                nameLocation: "middle",
-                nameGap: 30,
-                axisLabel: {
-                  hideOverlap: true,
-                  formatter: pair.time
-                    ? undefined
-                    : (v: number) =>
-                        new Intl.NumberFormat("en-GB", {
-                          notation: "compact",
-                          maximumFractionDigits: 2,
-                        }).format(v),
-                },
-                scale: true,
-              },
-              yAxis: {
-                type: log && pair.y.includes("flux") ? "log" : "value",
-                name: pair.yLabel,
-                nameTextStyle: { fontSize: 10 },
-                scale: true,
-                splitNumber: 4,
-              },
-              series: [
-                {
-                  type: "scatter",
-                  progressive: 0,
-                  symbolSize: (_v: number[], p: { dataIndex: number }) =>
-                    selectedSet.has(visible[p.dataIndex].id)
-                      ? 10
-                      : visible[p.dataIndex].attention >= 30
-                        ? 7
-                        : 4,
-                  data: visible.map((r) => ({
-                    value: [r[pair.x], r[pair.y], r.id],
-                    symbol: r.attention >= 30 ? "diamond" : "circle",
-                    itemStyle: {
-                      color: selectedSet.has(r.id)
-                        ? "#d55e00"
-                        : (layout.data?.treatments.find(
-                            (t) => t.id === r.treatmentId,
-                          )?.colour ?? "#258c80"),
-                      opacity: r.excluded
-                        ? 0.2
-                        : selectedSet.size && !selectedSet.has(r.id)
-                          ? 0.15
-                          : 0.8,
-                      borderColor: r.attention >= 70 ? "#c34f48" : undefined,
-                      borderWidth: r.attention >= 70 ? 1 : 0,
-                    },
-                  })),
-                },
-              ],
-            } as EChartsCoreOption
-          }
-        />
-      </Panel>
-    );
-  }
-  const selectedIds = selected.filter((id) => rows.some((r) => r.id === id));
+  const onSelect = useCallback(
+    (ids: number[]) =>
+      setSelected((prev) => (prev.join(",") === ids.join(",") ? prev : ids)),
+    [],
+  );
+  const available = new Set(rows.map((r) => r.id)),
+    selectedIds = selected.filter((id) => available.has(id));
   return (
-    <div className="page">
+    <div className="page outliers-page">
       <div className="page-heading">
         <div>
           <h2>Outlier hunting</h2>
           <p>
-            Link unusual fluxes to their raw evidence. Diagnostics guide review;
-            they never exclude data automatically.
+            Find changes that matter: amber = warning, red = bad, faint circles
+            = unflagged.
           </p>
         </div>
-        <span className="badge">
-          {rows.length.toLocaleString()} visible fluxes
-        </span>
+        <span className="badge">{rows.length.toLocaleString()} fluxes</span>
       </div>
       <div className="toolbar panel">
-        <Field label="Gas">
+        <label>
+          Gas{" "}
           <select
             aria-label="Outlier gas"
             value={gas}
@@ -242,7 +135,49 @@ export function Outliers() {
             <option>N2O</option>
             <option>CO2</option>
           </select>
-        </Field>
+        </label>
+        <label>
+          Axes{" "}
+          <select
+            aria-label="Outlier scale"
+            value={scale}
+            onChange={(e) => setScale(e.target.value as AxisScale)}
+          >
+            <option value="asinh">Symmetric log (asinh)</option>
+            <option value="linear">Linear</option>
+            <option value="log">Log (positive only)</option>
+          </select>
+        </label>
+        <label>
+          Colour by{" "}
+          <select
+            aria-label="Colour by"
+            value={colour}
+            onChange={(e) => setColour(e.target.value as typeof colour)}
+          >
+            <option value="severity">Severity</option>
+            <option value="treatment">Treatment</option>
+          </select>
+        </label>
+        <label>
+          Lag{" "}
+          <select
+            aria-label="Lag gas"
+            value={lagGas}
+            onChange={(e) => setLagGas(e.target.value as typeof lagGas)}
+          >
+            <option>CO2</option>
+            <option>N2O</option>
+          </select>
+        </label>
+        <label>
+          <input
+            type="checkbox"
+            checked={full}
+            onChange={(e) => setFull(e.target.checked)}
+          />
+          Full range
+        </label>
         <label>
           <input
             type="checkbox"
@@ -251,15 +186,11 @@ export function Outliers() {
           />
           Show excluded
         </label>
-        <label>
-          <input
-            type="checkbox"
-            checked={log}
-            onChange={(e) => setLog(e.target.checked)}
-          />
-          Log flux axes
-        </label>
-        <strong>{selectedIds.length} selected</strong>
+      </div>
+      <div className="toolbar">
+        <strong data-testid="outlier-selection">
+          {selectedIds.length} selected
+        </strong>
         <button onClick={() => setSelected(rows.map((r) => r.id))}>
           Select all visible
         </button>
@@ -294,13 +225,12 @@ export function Outliers() {
         >
           Clear selection & filter
         </button>
-        {log && <small>Log axes show positive fluxes only.</small>}
       </div>
       <Status loading={data.isLoading} error={data.error} />
       <Status loading={layout.isLoading} error={layout.error} />
       <div className="outliers-layout">
         <aside className="panel diagnostic-bars">
-          <h3>Findings across the project</h3>
+          <h3>Findings</h3>
           <Status loading={counts.isLoading} error={counts.error} />
           {counts.data
             ?.filter((c) => c.count)
@@ -308,36 +238,43 @@ export function Outliers() {
               <button
                 className={diagnostic === c.code ? "active" : ""}
                 key={c.code}
+                title={c.description}
                 onClick={() => {
                   setDiagnostic(diagnostic === c.code ? null : c.code);
                   setSelected([]);
                 }}
-                title={c.description}
               >
-                <span>{diagnosticLabels[c.code] ?? c.label}</span>
+                <span>{c.label}</span>
                 <strong>{c.count.toLocaleString()}</strong>
                 <i
                   style={{
                     width:
                       (c.count /
-                        Math.max(...counts.data!.map((c) => c.count))) *
+                        Math.max(1, ...counts.data!.map((d) => d.count))) *
                         100 +
                       "%",
                   }}
                 />
               </button>
             ))}
-          {!counts.isLoading && !counts.data?.some((c) => c.count) && (
-            <Empty>No findings.</Empty>
-          )}
         </aside>
-        <div className="outlier-plots two">{pairs.map(plot)}</div>
+        <div className="outlier-plots two">
+          {specs.map((spec) => (
+            <ScatterPlot
+              key={spec.label}
+              spec={spec}
+              rows={rows as FluxRow[]}
+              layout={layout.data}
+              scale={scale}
+              full={full}
+              colour={colour}
+              selected={selectedIds}
+              onSelect={onSelect}
+              onOpen={s.openFlux}
+            />
+          ))}
+        </div>
       </div>
-      {!rows.length && <Empty>No fluxes match this view.</Empty>}
-      <p className="muted">
-        Diamonds indicate findings; red outlines indicate severe findings. A
-        selection is highlighted across all four charts.
-      </p>
     </div>
   );
 }

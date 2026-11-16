@@ -14,7 +14,6 @@ import { useShallow } from "zustand/react/shallow";
 import { api, isTauri, mockMode } from "../../api";
 import type { Cell, ExportArgs, FluxRow } from "../../api/types";
 import {
-  date,
   Field,
   fmt,
   Panel,
@@ -23,6 +22,7 @@ import {
   useRows,
 } from "../../shared/common";
 import { codes, DiagnosticPicker } from "../../shared/diagnostics";
+import { attention, dateTime, significant } from "../../shared/format";
 import { FluxTableView } from "../../shared/table/FluxTableView";
 import { useStore } from "../../store";
 export function Data() {
@@ -50,6 +50,7 @@ export function Data() {
       licor_H2O_slope: false,
     }),
     [chooser, setChooser] = useState(false),
+    [columnSearch, setColumnSearch] = useState(""),
     [selection, setSelection] = useState<Record<string, boolean>>({}),
     [exporting, setExporting] = useState(false),
     [mode, setMode] = useState<"flat" | "sheetPerPlot" | "dailyPerPlot">(
@@ -83,11 +84,15 @@ export function Data() {
             "time",
             "plotLabel",
             "treatmentName",
+            "side",
             "N2O_flux",
             "CO2_flux",
-            "N2O_qc",
-            "source",
-            "side",
+            "N2O_rsq",
+            "attention",
+            "diag",
+            "excluded",
+            "reviewed",
+            "airTemp",
           ];
           const rank = (key: string) =>
             order.includes(key) ? order.indexOf(key) : 99;
@@ -96,6 +101,15 @@ export function Data() {
         .map((c) => ({
           id: c.key,
           accessorKey: c.key,
+          size:
+            c.key === "id"
+              ? 60
+              : c.key === "time"
+                ? 175
+                : c.key === "diag"
+                  ? 210
+                  : 115,
+          enableHiding: !["id", "time"].includes(c.key),
           header: () => (
             <span>
               {c.label}
@@ -122,20 +136,37 @@ export function Data() {
               .includes(String(value ?? "").toLowerCase());
           },
           cell: (info) =>
-            c.type === "boolean"
-              ? info.getValue()
-                ? "✓"
-                : "—"
-              : c.type === "time"
-                ? date(Number(info.getValue()))
-                : typeof info.getValue() === "number"
-                  ? fmt(
-                      info.getValue(),
-                      c.key === "id" ? 0 : c.key.endsWith("slope") ? 6 : 2,
-                    )
-                  : String(info.getValue() ?? "—"),
+            c.key === "attention"
+              ? attention(info.getValue())
+              : c.key.endsWith("_flux") || c.key.endsWith("_robustFlux")
+                ? significant(info.getValue())
+                : c.key === "diag"
+                  ? String(info.getValue() ?? "")
+                      .split(",")
+                      .map(
+                        (code) =>
+                          diagnostics.data?.find((d) => d.code === code)
+                            ?.label ?? code.replaceAll("_", " "),
+                      )
+                      .join(", ")
+                  : c.type === "boolean"
+                    ? info.getValue()
+                      ? "✓"
+                      : "—"
+                    : c.type === "time"
+                      ? dateTime(Number(info.getValue()))
+                      : typeof info.getValue() === "number"
+                        ? fmt(
+                            info.getValue(),
+                            c.key === "id"
+                              ? 0
+                              : c.key.endsWith("slope")
+                                ? 6
+                                : 2,
+                          )
+                        : String(info.getValue() ?? "—"),
         })) ?? [],
-    [data.data],
+    [data.data, diagnostics.data],
   );
   const defaultVisible = useMemo(() => {
     const v = { ...visible };
@@ -144,17 +175,18 @@ export function Data() {
         !(c.key in v) &&
         ![
           "id",
-          "source",
           "time",
-          "side",
           "plotLabel",
           "treatmentName",
-          "excluded",
-          "reviewed",
-          "overridden",
+          "side",
           "N2O_flux",
           "CO2_flux",
-          "N2O_qc",
+          "N2O_rsq",
+          "attention",
+          "diag",
+          "excluded",
+          "reviewed",
+          "airTemp",
         ].includes(c.key)
       )
         v[c.key] = false;
@@ -166,6 +198,7 @@ export function Data() {
     columns,
     state: {
       sorting,
+      columnPinning: { left: ["id", "time"] },
       columnFilters: filters,
       columnVisibility: defaultVisible,
       globalFilter: s.dataSearch,
@@ -282,6 +315,12 @@ export function Data() {
       </div>
       {chooser && (
         <Panel title="Visible columns">
+          <input
+            aria-label="Search columns"
+            placeholder="Find a column?"
+            value={columnSearch}
+            onChange={(e) => setColumnSearch(e.target.value)}
+          />
           <div className="column-groups">
             {[...new Set(data.data?.columns.map((c) => c.group))].map(
               (group) => (
@@ -292,7 +331,13 @@ export function Data() {
                     .filter(
                       (col) =>
                         data.data?.columns.find((c) => c.key === col.id)
-                          ?.group === group,
+                          ?.group === group &&
+                        (
+                          data.data?.columns.find((c) => c.key === col.id)
+                            ?.label ?? ""
+                        )
+                          .toLowerCase()
+                          .includes(columnSearch.toLowerCase()),
                     )
                     .map((col) => (
                       <label
@@ -303,6 +348,7 @@ export function Data() {
                       >
                         <input
                           type="checkbox"
+                          disabled={!col.getCanHide()}
                           checked={col.getIsVisible()}
                           onChange={col.getToggleVisibilityHandler()}
                         />

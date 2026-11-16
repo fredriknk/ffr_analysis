@@ -5,34 +5,40 @@ import { useShallow } from "zustand/react/shallow";
 import { api } from "../../api";
 import type { Gas } from "../../api/types";
 import { Chart } from "../../shared/charts/Chart";
-import {
-  Empty,
-  Field,
-  Panel,
-  Status,
-  date,
-  fmt,
-  useRows,
-} from "../../shared/common";
+import { Empty, Field, Panel, Status, fmt, useRows } from "../../shared/common";
 import { TimeBrush } from "../../shared/filters/TimeBrush";
+import { dateTime, unit } from "../../shared/format";
 import { useStore } from "../../store";
+import { quantile } from "../outliers/axes";
 export function Treatments() {
   const allFluxes = useRows();
   const s = useStore(
       useShallow(
-        ({ gas, from, to, sources, subset, focus, set, openFlux }) => ({
+        ({
           gas,
           from,
           to,
           sources,
           subset,
           focus,
+          treatmentZoom,
+          set,
+          openFlux,
+        }) => ({
+          gas,
+          from,
+          to,
+          sources,
+          subset,
+          focus,
+          treatmentZoom,
           set,
           openFlux,
         }),
       ),
     ),
     [log, setLog] = useState(false),
+    [hidden, setHidden] = useState<number[]>([]),
     [showExcluded, setShowExcluded] = useState(false);
   const seriesMeta = useQuery({
     queryKey: ["series"],
@@ -82,15 +88,48 @@ export function Treatments() {
     });
   const fluxLookup = new Map(allFluxes.data?.rows.map((r) => [r.id, r]));
   const d = result.data,
-    ts = d?.treatments.filter((t) => !s.focus || t.id === s.focus) ?? [],
-    ps = d?.plots.filter((p) => !s.focus || p.treatmentId === s.focus) ?? [];
+    ts =
+      d?.treatments.filter(
+        (t) => (!s.focus || t.id === s.focus) && !hidden.includes(t.id),
+      ) ?? [],
+    ps =
+      d?.plots.filter(
+        (p) =>
+          (!s.focus || p.treatmentId === s.focus) &&
+          !hidden.includes(p.treatmentId),
+      ) ?? [];
   const colour = (id: number) => d?.treatments.find((t) => t.id === id)?.colour;
   const seriesTime = {
     grid: { left: 65, right: 30, top: 25, bottom: 65 },
     tooltip: { trigger: "axis" },
     xAxis: { type: "time", min: q.from, max: q.to },
     yAxis: { type: "value", scale: true },
+    dataZoom: [
+      {
+        type: "inside",
+        startValue: s.treatmentZoom?.[0],
+        endValue: s.treatmentZoom?.[1],
+        filterMode: "none",
+      },
+    ],
   };
+  const distributions = ts.map((t) => {
+    const daily = ps
+        .filter((p) => p.treatmentId === t.id)
+        .flatMap((p) =>
+          p.daily.map((day) => ({
+            value: day.mean,
+            fluxId: p.points.find((v) => Math.abs(v.time - day.time) < 86400000)
+              ?.fluxId,
+          })),
+        )
+        .filter((v) => Number.isFinite(v.value) && (!log || v.value > 0)),
+      values = daily.map((v) => v.value);
+    return {
+      box: [0.05, 0.25, 0.5, 0.75, 0.95].map((p) => quantile(values, p)),
+      daily,
+    };
+  });
   return (
     <div className="page">
       <div className="page-heading">
@@ -123,7 +162,9 @@ export function Treatments() {
             aria-label="Summary from"
             type="date"
             value={s.from}
-            onChange={(e) => s.set({ from: e.target.value })}
+            onChange={(e) =>
+              s.set({ from: e.target.value, treatmentZoom: null })
+            }
           />
         </Field>
         <Field label="To">
@@ -131,7 +172,7 @@ export function Treatments() {
             aria-label="Summary to"
             type="date"
             value={s.to}
-            onChange={(e) => s.set({ to: e.target.value })}
+            onChange={(e) => s.set({ to: e.target.value, treatmentZoom: null })}
           />
         </Field>
         {(["robot", "manual"] as const).map((source) => (
@@ -151,9 +192,16 @@ export function Treatments() {
           </label>
         ))}
         <button
-          onClick={() =>
-            s.set({ focus: null, from: "", to: "", subset: undefined })
-          }
+          onClick={() => {
+            setHidden([]);
+            s.set({
+              focus: null,
+              from: "",
+              to: "",
+              subset: undefined,
+              treatmentZoom: null,
+            });
+          }}
         >
           Reset view
         </button>
@@ -177,8 +225,23 @@ export function Treatments() {
             {d.treatments.map((t) => (
               <button
                 key={t.id}
-                className={s.focus === t.id ? "active" : ""}
-                onClick={() => s.set({ focus: s.focus === t.id ? null : t.id })}
+                className={
+                  hidden.includes(t.id) ? "hidden-treatment" : "active"
+                }
+                onDoubleClick={() => {
+                  s.set({ focus: null });
+                  setHidden(
+                    d.treatments.filter((v) => v.id !== t.id).map((v) => v.id),
+                  );
+                }}
+                onClick={() => {
+                  s.set({ focus: null });
+                  setHidden((v) =>
+                    v.includes(t.id)
+                      ? v.filter((id) => id !== t.id)
+                      : [...v, t.id],
+                  );
+                }}
               >
                 <span className="dot" style={{ background: t.colour }} />
                 {t.name}
@@ -188,7 +251,9 @@ export function Treatments() {
           <div className="two charts">
             <Panel
               title="Cumulative total by treatment"
-              extra={<small>{d.cumulativeUnit} · mean ± population SD</small>}
+              extra={
+                <small>{unit(d.cumulativeUnit)} · mean ± population SD</small>
+              }
             >
               <Chart
                 label="Treatment cumulative totals"
@@ -265,7 +330,7 @@ export function Treatments() {
               />
             </Panel>
             <Panel
-              title="Distribution of daily means"
+              title="Daily means ? whiskers 5th?95th percentile"
               extra={
                 <label>
                   <input
@@ -280,6 +345,11 @@ export function Treatments() {
               <Chart
                 label="Daily means box plot"
                 height={280}
+                onClick={(p) => {
+                  const value = p.value as number[];
+                  if (p.seriesType === "scatter" && value?.[2])
+                    s.openFlux(value[2]);
+                }}
                 option={
                   {
                     grid: { left: 65, right: 20, top: 25, bottom: 80 },
@@ -293,15 +363,28 @@ export function Treatments() {
                     series: [
                       {
                         type: "boxplot",
-                        data: ts.map((t) => ({
-                          value: log
-                            ? t.box.map((v) => Math.max(0.001, v))
-                            : t.box,
+                        data: ts.map((t, i) => ({
+                          value: distributions[i].box,
                           itemStyle: {
                             color: t.colour + "55",
                             borderColor: t.colour,
                           },
                         })),
+                      },
+                      {
+                        type: "scatter",
+                        symbolSize: 4,
+                        data: distributions.flatMap((dist, i) =>
+                          dist.daily
+                            .filter(
+                              (v) =>
+                                v.value < dist.box[0] || v.value > dist.box[4],
+                            )
+                            .map((v) => ({
+                              value: [i, v.value, v.fluxId],
+                              itemStyle: { color: ts[i].colour, opacity: 0.6 },
+                            })),
+                        ),
                       },
                     ],
                   } as EChartsCoreOption
@@ -339,6 +422,17 @@ export function Treatments() {
           >
             <Chart
               label="Individual fluxes over time"
+              onReady={(c) => {
+                c.on("datazoom", () => {
+                  const z = (
+                    c.getOption() as {
+                      dataZoom: { startValue?: number; endValue?: number }[];
+                    }
+                  ).dataZoom[0];
+                  if (z.startValue !== undefined && z.endValue !== undefined)
+                    s.set({ treatmentZoom: [z.startValue, z.endValue] });
+                });
+              }}
               height={290}
               onClick={(p) => {
                 const value = p.value as number[];
@@ -352,7 +446,7 @@ export function Treatments() {
                     formatter: (p: { value: number[]; seriesName: string }) =>
                       p.seriesName +
                       " · " +
-                      date(p.value[0]) +
+                      dateTime(p.value[0]) +
                       "<br/>Flux #" +
                       p.value[2] +
                       ": " +
