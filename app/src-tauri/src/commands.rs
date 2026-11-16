@@ -76,13 +76,43 @@ fn progress(app: &AppHandle, p: Progress) {
     let _ = app.emit("progress", p);
 }
 
+async fn run_task<T: Send + 'static>(
+    app: AppHandle,
+    task: &'static str,
+    f: impl FnOnce(&mut Session, &AppHandle) -> Result<T, ApiError> + Send + 'static,
+) -> Result<T, ApiError> {
+    run(app, move |s, app| {
+        progress(
+            app,
+            Progress {
+                task: task.into(),
+                done: 0,
+                total: 1,
+                message: None,
+            },
+        );
+        let result = f(s, app);
+        progress(
+            app,
+            Progress {
+                task: task.into(),
+                done: 1,
+                total: 1,
+                message: None,
+            },
+        );
+        result
+    })
+    .await
+}
+
 #[tauri::command]
 async fn project_create(
     app: AppHandle,
     path: String,
     name: String,
 ) -> Result<ProjectInfo, ApiError> {
-    run(app, move |s, app| {
+    run_task(app, "project_create", move |s, app| {
         let _ = &s;
         let _ = &app;
         let info = s.project_create(&path, &name)?;
@@ -94,7 +124,7 @@ async fn project_create(
 
 #[tauri::command]
 async fn project_open(app: AppHandle, path: String) -> Result<ProjectInfo, ApiError> {
-    run(app, move |s, app| {
+    run_task(app, "project_open", move |s, app| {
         let _ = &s;
         let _ = &app;
         let info = s.project_open(&path)?;
@@ -127,7 +157,7 @@ async fn project_info(app: AppHandle) -> Result<Option<ProjectInfo>, ApiError> {
 
 #[tauri::command]
 async fn project_save_copy(app: AppHandle, path: String) -> Result<(), ApiError> {
-    run(app, move |s, app| {
+    run_task(app, "project_save_copy", move |s, app| {
         let _ = &s;
         let _ = &app;
         Ok(s.project_save_copy(&path)?)
@@ -257,7 +287,7 @@ async fn set_flux_options(
     flux_ids: Vec<i64>,
     options: Option<AnalysisOptions>,
 ) -> Result<Vec<FluxRow>, ApiError> {
-    run(app, move |s, app| {
+    run_task(app, "set_flux_options", move |s, app| {
         let _ = &s;
         let _ = &app;
         Ok(s.set_flux_options(&flux_ids, options)?)
@@ -271,7 +301,7 @@ async fn set_flux_flags(
     flux_ids: Vec<i64>,
     flags: Value,
 ) -> Result<Vec<FluxRow>, ApiError> {
-    run(app, move |s, app| {
+    run_task(app, "set_flux_flags", move |s, app| {
         let _ = &s;
         let _ = &app;
         Ok(s.set_flux_flags(&flux_ids, flags)?)
@@ -291,7 +321,7 @@ async fn recompute_all(app: AppHandle) -> Result<(), ApiError> {
 
 #[tauri::command]
 async fn undo(app: AppHandle) -> Result<UndoResult, ApiError> {
-    run(app, move |s, app| {
+    run_task(app, "undo", move |s, app| {
         let _ = &s;
         let _ = &app;
         Ok(s.undo()?)
@@ -301,7 +331,7 @@ async fn undo(app: AppHandle) -> Result<UndoResult, ApiError> {
 
 #[tauri::command]
 async fn redo(app: AppHandle) -> Result<UndoResult, ApiError> {
-    run(app, move |s, app| {
+    run_task(app, "redo", move |s, app| {
         let _ = &s;
         let _ = &app;
         Ok(s.redo()?)
@@ -361,7 +391,7 @@ async fn preview_table(
     path: String,
     opts: Value,
 ) -> Result<TablePreview, ApiError> {
-    run(app, move |s, app| {
+    run_task(app, "preview_table", move |s, app| {
         let _ = &s;
         let _ = &app;
         Ok(s.preview_table(&path, opts)?)
@@ -371,7 +401,7 @@ async fn preview_table(
 
 #[tauri::command]
 async fn import_series(app: AppHandle, args: Value) -> Result<(), ApiError> {
-    run(app, move |s, app| {
+    run_task(app, "import_series", move |s, app| {
         let _ = &s;
         let _ = &app;
         s.import_series(args)?;
@@ -382,7 +412,7 @@ async fn import_series(app: AppHandle, args: Value) -> Result<(), ApiError> {
 
 #[tauri::command]
 async fn delete_series(app: AppHandle, id: i64) -> Result<(), ApiError> {
-    run(app, move |s, app| {
+    run_task(app, "delete_series", move |s, app| {
         let _ = &s;
         let _ = &app;
         Ok(s.delete_series(id)?)
@@ -392,7 +422,7 @@ async fn delete_series(app: AppHandle, id: i64) -> Result<(), ApiError> {
 
 #[tauri::command]
 async fn import_manual_fluxes(app: AppHandle, args: Value) -> Result<ImportReport, ApiError> {
-    run(app, move |s, app| {
+    run_task(app, "import_manual_fluxes", move |s, app| {
         let _ = &s;
         let _ = &app;
         Ok(s.import_manual_fluxes(args)?)
@@ -439,7 +469,7 @@ async fn metno_fetch(app: AppHandle, args: Value) -> Result<(), ApiError> {
 
 #[tauri::command]
 async fn export_xlsx(app: AppHandle, args: ExportArgs) -> Result<(), ApiError> {
-    run(app, move |s, app| {
+    run_task(app, "export_xlsx", move |s, app| {
         let _ = &s;
         let _ = &app;
         Ok(s.export_xlsx(args)?)
@@ -449,7 +479,7 @@ async fn export_xlsx(app: AppHandle, args: ExportArgs) -> Result<(), ApiError> {
 
 #[tauri::command]
 async fn export_csv(app: AppHandle, args: ExportArgs) -> Result<(), ApiError> {
-    run(app, move |s, app| {
+    run_task(app, "export_csv", move |s, app| {
         let _ = &s;
         let _ = &app;
         Ok(s.export_csv(args)?)
@@ -463,7 +493,7 @@ async fn patch_flux_options(
     flux_ids: Vec<i64>,
     partial: Value,
 ) -> Result<Vec<FluxRow>, ApiError> {
-    run(app, move |s, _| {
+    run_task(app, "patch_flux_options", move |s, _| {
         Ok(s.patch_flux_options(&flux_ids, partial)?)
     })
     .await
