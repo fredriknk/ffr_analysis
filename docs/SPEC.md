@@ -169,6 +169,41 @@ sources (robot, manual).
 
 Every flux row can be joined with every series (value nearest in time, with a maximum gap).
 
+### 4.9 Diagnostics (new, not in the legacy program)
+
+Finding bad fluxes is the main job of the program, so the core scores every flux and says
+*why* it looks suspicious. Diagnostics never change a flux value and never exclude anything
+on their own; they order the review queue and explain themselves. They are recomputed with
+the results and all thresholds live in `config.diagnostics` (defaults below, tune them on the
+real Capture data so that each code flags a plausible share of fluxes and report the rates).
+
+`Diagnostic = { code, severity: 'info' | 'warn' | 'bad', gas?: string, value?: number, message: string }`
+
+| code | meaning (default rule) |
+|---|---|
+| `error` | the measurement failed validation (no fit) — bad |
+| `n2o_negative` | N2O slope < 0 and p < 0.01: chamber probably not sealed — bad |
+| `co2_not_rising` | CO2 slope ≤ 0: a sealed chamber over soil accumulates CO2 — bad |
+| `co2_low_r2` | CO2 r² < 0.95: leak, lifted chamber or wind — warn (bad below 0.8) |
+| `curvature` | a quadratic fit is significantly better than the line (F-test p < 0.001) and the slope of the first half differs from the second half by more than 40 % — warn; per gas |
+| `valve_timing` | the valve times do not match the signal. Estimate the lag δ (search −10…+10 s in 0.5 s steps) that minimises the summed SSE of the two chambers' CO2 line fits when the switch times are shifted by δ (use small cuts for this estimate). Flag when \|δ\| ≥ 2 s and the SSE drops by ≥ 30 %. `value` = δ. Stored per measurement as `valveLagS` even when not flagged |
+| `edge_transient` | the first/last used point of the valve segments sit systematically off the fit (mean \|standardised residual\| of edge points > 2.5 × interior): cuts too small or timing off — warn |
+| `valves_irregular` | number or length of valve segments deviates from the project's normal pattern (missing switch, one chamber never sampled, segment length off by > 50 %) — warn |
+| `spike` | a used point with \|residual\| > 6 robust SD (MAD) — warn; per gas |
+| `few_points` | fewer than 20 used points, or used window shorter than 60 s — warn |
+| `legacy_qc` | the ported legacy N2O quality check is not OK — info |
+| `neighbour_outlier` | the flux is far from comparable fluxes: robust z (median/MAD on asinh-scaled flux) > 5 against non-excluded fluxes of the same treatment within ±3 days (fall back to the same plot ±10 days when fewer than 6 neighbours) — warn; per gas (N2O, CO2). Second pass over the whole project |
+| `temp_fallback` | no air temperature, fallback used — info |
+| `no_plot` | chamber position is in no plot — info |
+
+`attention` (0–100) is one score per flux for sorting: bad ≥ 70, warn 30–69, info < 30,
+increasing with the number and strength of findings. Reviewed fluxes keep their score; the UI
+decides what to hide.
+
+**Valve offset.** `AnalysisOptions.valveOffset` (seconds, default 0 = legacy parity) shifts
+every switch time before points are attributed to chambers. This is the fix for a timing
+mismatch, and it can be applied to many fluxes at once (a whole day usually shares the lag).
+
 ## 5. Project file
 
 SQLite, `application_id` set, `user_version` = schema version. Suggested tables (the core
@@ -196,6 +231,7 @@ owner may refine, but keep these concepts):
   "interval": 100, "crit": "steepest",  // auto mode
   "co2Guides": true,                    // auto mode
   "cutBeginnings": 4, "cutEnds": 3,
+  "valveOffset": 0,                     // seconds added to every valve switch time (4.9)
   "perGas": { "N2O": { "start": 20, "stop": 150 } }   // optional per-gas window
 }
 ```
@@ -251,7 +287,20 @@ field lists may grow, but do not rename.
 - `previewFlux(fluxId, options) → FluxDetail` — compute without saving (live while dragging)
 - `setFluxOptions(fluxIds, options | null) → FluxRow[]` — `null` resets to defaults
 - `setFluxFlags(fluxIds, { excluded?, reviewed?, note?, plotOverride? }) → FluxRow[]`
+- `patchFluxOptions(fluxIds, partial: Partial<AnalysisOptions>) → FluxRow[]` — merge the
+  given fields into each flux's effective options (e.g. `{ valveOffset: 3 }` for a whole day);
+  one undo step
 - `recomputeAll()` — with progress
+- `getFluxThumbs(fluxIds, gas, maxPoints = 60) → { fluxId, t: number[], y: number[], used: boolean[], slope, intercept }[]`
+  — decimated points of that flux's chamber only, for a contact-sheet grid; must be fast for
+  ~200 ids
+- `diagnosticsSummary() → { code, label, description, severity, count, unreviewed }[]`
+
+Diagnostics in the existing shapes: `FluxTable` gains columns `attention` (number), `diag`
+(string: comma-separated codes, worst first), `valveLagS` (number), `<gas>_n`, and
+`<gas>_resid` (residual SD of the fit); `FluxDetail` gains `diagnostics: Diagnostic[]`,
+`valveLagS`, and each trace gains `fit: (number|null)[]` = fitted value at each used point;
+`ProjectConfig` gains `diagnostics` (thresholds) .
 - `undo() → UndoResult`, `redo() → UndoResult`, `history(limit) → Change[]`
 
 **Treatment summary**
@@ -303,13 +352,24 @@ Screens:
    (daily precipitation bars, temperature band) on a shared time axis; date-range brush; gas
    selector; robot/manual toggles. Clicking a treatment filters to its plots. **Clicking any
    flux point opens it in Review** (and Back returns here with state intact).
-4. **Data** — the full flux table: column chooser, per-column filters (numeric range,
+   - **Triage**: the queue can be ordered by `attention` and filtered by diagnostic code;
+     every flux shows its findings as chips with the plain-language reason, and the chart
+     shows the evidence (residual strip under the trace, the estimated valve lag as ghost
+     switch lines with an "apply offset" button for this flux / this file / this day).
+   - **Contact sheet**: a grid of small trace thumbnails (N2O or CO2) of the current queue
+     for fast visual scanning; click opens the flux, `X` excludes, multi-select for bulk
+     exclude / mark reviewed.
+4. **Outliers** — linked scatter plots for hunting bad fluxes: N2O flux vs CO2 flux, r² vs
+   flux, valve lag vs date, flux vs date per treatment with flagged points marked, counts per
+   diagnostic code. Box-select points → open as a Review queue, bulk exclude, bulk mark
+   reviewed.
+5. **Data** — the full flux table: column chooser, per-column filters (numeric range,
    category set, date range, text), sorting, saved filter presets, row click opens Review,
    "show these in Treatments", export to Excel/CSV with the three modes.
-5. **External data** — list of series with a preview chart; import wizard for
+6. **External data** — list of series with a preview chart; import wizard for
    Excel/CSV (pick sheet, header row, time column, value columns, aggregate); met.no fetch;
    manual flux import.
-6. **Project** — name, time zone, default analysis options, gases/units, treatments and
+7. **Project** — name, time zone, default analysis options, gases/units, treatments and
    plots (table editor, plus a field map of chamber positions coloured by plot), backup copy.
 
 ## 8. Conventions
