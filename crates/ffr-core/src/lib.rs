@@ -12,6 +12,12 @@ pub use session::Session;
 pub enum Error {
     #[error("{0}")]
     Invalid(String),
+    #[error("{path}: {source}")]
+    Path {
+        path: String,
+        #[source]
+        source: std::io::Error,
+    },
     #[error(transparent)]
     Io(#[from] std::io::Error),
     #[error(transparent)]
@@ -22,3 +28,12 @@ pub enum Error {
     Pickle(#[from] serde_pickle::Error),
 }
 pub type Result<T> = std::result::Result<T, Error>;
+
+impl Error {
+    pub fn at(path: impl AsRef<std::path::Path>, source: std::io::Error) -> Self {
+        Self::Path {
+            path: path.as_ref().display().to_string(),
+            source,
+        }
+    }
+}

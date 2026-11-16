@@ -3,7 +3,13 @@ use serde_json::{json, Value};
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 fn main() {
     if let Err(e) = run() {
-        eprintln!("{}", json!({"code":"cli","message":e.to_string()}));
+        eprintln!(
+            "{}",
+            json!({
+            "code":"cli",
+            "message":e.to_string()}
+            )
+        );
         std::process::exit(1);
     }
 }
@@ -120,16 +126,107 @@ fn run() -> Result<()> {
     let a: Vec<String> = std::env::args().skip(1).collect();
     let arg = |i: usize| a.get(i).map(String::as_str).ok_or("missing argument");
     let mut s = Session::default();
-    let result=match arg(0)? {
- "diagnostics"=>{s.project_open(arg(1)?)?;s.diagnostics_report()?},
- "parity"=>{let raw=std::path::Path::new(arg(1)?);let slopes=std::path::Path::new(arg(2)?);let report=ffr_core::parity::parity(raw,slopes)?;if a.len()>=5 {json!({"regressions":report,"endToEnd":ffr_core::parity::end_to_end(raw,slopes,std::path::Path::new(arg(3)?),std::path::Path::new(arg(4)?))?})}else{json!(report)}},
- "import-legacy"=>json!(s.legacy_import(LegacyImportArgs{legacy_dir:arg(1)?.into(),raw_dir:Some(arg(2)?.into()),out_path:arg(3)?.into(),manual_path:std::env::var("FFR_CAPTURE_MANUAL").ok(),logger_path:std::env::var("FFR_CAPTURE_LOGGER").ok(),metno_pickle_path:std::env::var("FFR_METNO_PICKLE").ok(),preset:None},|p|{if p.done%500==0{eprintln!("{} {}/{}",p.task,p.done,p.total);}})?),
- "info"=>json!(s.project_open(arg(1)?)?),
- "recompute"=>{s.project_open(arg(1)?)?;s.recompute_all(|_|{})?;json!(s.project_info()?)},
- "summary"=>{s.project_open(arg(1)?)?;json!(s.treatment_summary(SummaryQuery{gas:a.get(2).cloned().unwrap_or("N2O".into()),from:None,to:None,sources:vec!["robot".into(),"manual".into()],flux_ids:None})?)},
- "export"=>{s.project_open(arg(1)?)?;let table=s.list_fluxes()?;let opts=ExportArgs{path:arg(2)?.into(),flux_ids:table.data.get("id").into_iter().flatten().filter_map(Value::as_i64).collect(),columns:table.columns.iter().map(|c|c.key.clone()).collect(),mode:a.get(3).cloned().unwrap_or("flat".into())};if opts.path.to_lowercase().ends_with(".csv"){s.export_csv(opts)?;}else{s.export_xlsx(opts)?;}Value::Null},
- "dump-json"=>{let args:Value=if let Some(text)=a.get(2){let text=if let Some(path)=text.strip_prefix('@'){std::fs::read_to_string(path)?}else{text.clone()};serde_json::from_str(&text)?}else{json!({})};if let Some(path)=args["projectPath"].as_str(){s.project_open(path)?;}call(&mut s,arg(1)?,args)?},
- _=>return Err("usage: ffr-cli import-legacy <legacy> <raw> <out> | info <project> | parity <raw> <slopes.txt> [df.csv metno.pickle] | recompute <project> | export <project> <out> [mode] | summary <project> [gas] | dump-json <command> [JSON or @file]".into())};
+    let result = match arg(0)? {
+        "diagnostics" => {
+            s.project_open(arg(1)?)?;
+            s.diagnostics_report()?
+        }
+        "parity" => {
+            let raw = std::path::Path::new(arg(1)?);
+            let slopes = std::path::Path::new(arg(2)?);
+            let report = ffr_core::parity::parity(raw, slopes)?;
+            if a.len() >= 5 {
+                json!({
+                "regressions":report,
+                "endToEnd":ffr_core::parity::end_to_end(raw,
+                slopes,
+                std::path::Path::new(arg(3)?),
+                std::path::Path::new(arg(4)?))?}
+                )
+            } else {
+                json!(report)
+            }
+        }
+        "import-legacy" => json!(s.legacy_import(
+            LegacyImportArgs {
+                legacy_dir: arg(1)?.into(),
+                raw_dir: Some(arg(2)?.into()),
+                out_path: arg(3)?.into(),
+                manual_path: std::env::var("FFR_CAPTURE_MANUAL").ok(),
+                logger_path: std::env::var("FFR_CAPTURE_LOGGER").ok(),
+                metno_pickle_path: std::env::var("FFR_METNO_PICKLE").ok(),
+                preset: None
+            },
+            |p| {
+                if p.done % 500 == 0 {
+                    eprintln!("{} {}/{}", p.task, p.done, p.total);
+                }
+            }
+        )?),
+        "info" => json!(s.project_open(arg(1)?)?),
+        "recompute" => {
+            s.project_open(arg(1)?)?;
+            s.recompute_all(|_| {})?;
+            json!(s.project_info()?)
+        }
+        "summary" => {
+            s.project_open(arg(1)?)?;
+            json!(s.treatment_summary(SummaryQuery {
+                gas: a.get(2).cloned().unwrap_or("N2O".into()),
+                from: None,
+                to: None,
+                sources: vec!["robot".into(), "manual".into()],
+                flux_ids: None
+            })?)
+        }
+        "export" => {
+            s.project_open(arg(1)?)?;
+            let table = s.list_fluxes()?;
+            let opts = ExportArgs {
+                path: arg(2)?.into(),
+                flux_ids: table
+                    .data
+                    .get("id")
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_i64)
+                    .collect(),
+                columns: table.columns.iter().map(|c| c.key.clone()).collect(),
+                mode: a.get(3).cloned().unwrap_or("flat".into()),
+            };
+            if opts.path.to_lowercase().ends_with(".csv") {
+                s.export_csv(opts)?;
+            } else {
+                s.export_xlsx(opts)?;
+            }
+            Value::Null
+        }
+        "dump-json" => {
+            let args: Value = if let Some(text) = a.get(2) {
+                let text = if let Some(path) = text.strip_prefix('@') {
+                    std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?
+                } else {
+                    text.clone()
+                };
+                serde_json::from_str(&text)?
+            } else {
+                json!({})
+            };
+            if let Some(path) = args["projectPath"].as_str() {
+                s.project_open(path)?;
+            }
+            call(&mut s, arg(1)?, args)?
+        }
+        _ => {
+            return Err(concat!(
+                "usage: ffr-cli import-legacy <legacy> <raw> <out> | info <project> | ",
+                "parity <raw> <slopes.txt> [df.csv metno.pickle] | recompute <project> | ",
+                "export <project> <out> [mode] | summary <project> [gas] | ",
+                "diagnostics <project> | dump-json <command> [JSON or @file]"
+            )
+            .into())
+        }
+    };
     println!("{}", serde_json::to_string_pretty(&result)?);
     Ok(())
 }

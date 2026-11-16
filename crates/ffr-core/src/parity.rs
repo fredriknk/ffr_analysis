@@ -23,7 +23,8 @@ pub struct ParityReport {
 pub fn parity(raw_dir: &Path, golden_jsonl: &Path) -> Result<ParityReport> {
     let start = std::time::Instant::now();
 
-    let text = std::fs::read_to_string(golden_jsonl)?;
+    let text =
+        std::fs::read_to_string(golden_jsonl).map_err(|e| crate::Error::at(golden_jsonl, e))?;
 
     let lines: Vec<Value> = text
         .lines()
@@ -48,27 +49,60 @@ pub fn parity(raw_dir: &Path, golden_jsonl: &Path) -> Result<ParityReport> {
         })
         .collect::<Result<_>>()?;
 
-    let results:Vec<_>=lines.par_iter().map(|v|{let mut report=ParityReport{lines:1,..Default::default()};
-let name=v["filename"].as_str().unwrap_or("");
-let side=if v["side"]=="left"{1}else{2};
-let path=raw_dir.join(name);
-let path=if path.exists(){path}else{raw_dir.join(format!("{name}.gz"))};
-let result=raw::load(&path,"Europe/Oslo").and_then(|r|regression::compute(&r,side,&v["options"][0],&v["options"][1],20.));
-match result{Err(e) => report.mismatches.push(format!("{name}: {e}")),Ok(regs) => {for gas in regression::GASES{let Some(r)=regs.get(gas)else{report.mismatches.push(format!("{name}: missing {gas}"));
-continue;
-};
-for (suffix,actual) in [("",r.slope),("_intercept",r.intercept),("_rsq",r.rsq),("_pval",r.pval),("_min",r.min_y),("_max",r.max_y),("_first",r.first_y)]{let key=format!("{gas}{suffix}");
-if let Some(expected)=v["values"][&key].as_str().and_then(|s|s.parse::<f64>().ok()).or(v["values"][&key].as_f64()){report.comparisons+=1;
-let rel=(actual-expected).abs()/expected.abs().max(1e-300);
-if suffix.is_empty(){report.max_slope_relative_error=report.max_slope_relative_error.max(rel);
-}
-if (actual-expected).abs()>1e-9*expected.abs().max(if suffix=="_pval"{1e-12}else{1e-10}){report.mismatches.push(format!("{name} {} {key}: {actual:e} != {expected:e} (relative {rel:e})",v["side"]));
-}}}
-if gas=="N2O" {report.comparisons+=1;
-if v["values"]["N2O_quality_check"].as_str().unwrap_or("")!=r.qc{report.mismatches.push(format!("{name}: QC mismatch"));
-}}}}}
-if report.mismatches.is_empty(){report.matched_lines=1;
-}report}).collect();
+    let results: Vec<_> = lines.par_iter().map(|v| {
+        let mut report = ParityReport { lines: 1, ..Default::default() };
+        let name = v["filename"].as_str().unwrap_or("");
+        let side = if v["side"] == "left" { 1 } else { 2 };
+        let path = raw_dir.join(name);
+        let path = if path.exists() { path } else { raw_dir.join(format!("{name}.gz")) };
+        let result = raw::load(&path, "Europe/Oslo").and_then(|r| {
+            regression::compute(&r, side, &v["options"][0], &v["options"][1], 20.)
+        });
+        match result {
+            Err(e) => report.mismatches.push(format!("{name}: {e}")),
+            Ok(regs) => {
+                for gas in regression::GASES {
+                    let Some(r) = regs.get(gas) else {
+                        report.mismatches.push(format!("{name}: missing {gas}"));
+                        continue;
+                    };
+                    let metrics = [
+                        ("", r.slope), ("_intercept", r.intercept), ("_rsq", r.rsq),
+                        ("_pval", r.pval), ("_min", r.min_y), ("_max", r.max_y),
+                        ("_first", r.first_y)
+                    ];
+                    for (suffix, actual) in metrics {
+                        let key = format!("{gas}{suffix}");
+                        let expected = v["values"][&key].as_str()
+                            .and_then(|s| s.parse::<f64>().ok())
+                            .or(v["values"][&key].as_f64());
+                        if let Some(expected) = expected {
+                            report.comparisons += 1;
+                            let rel = (actual - expected).abs() / expected.abs().max(1e-300);
+                            if suffix.is_empty() {
+                                report.max_slope_relative_error = report.max_slope_relative_error.max(rel);
+                            }
+                            let minimum = if suffix == "_pval" { 1e-12 } else { 1e-10 };
+                            if (actual - expected).abs() > 1e-9 * expected.abs().max(minimum) {
+                                report.mismatches.push(format!(
+                                    "{name} {} {key}: {actual:e} != {expected:e} (relative {rel:e})",
+                                    v["side"]
+                                ));
+                            }
+                        }
+                    }
+                    if gas == "N2O" {
+                        report.comparisons += 1;
+                        if v["values"]["N2O_quality_check"].as_str().unwrap_or("") != r.qc {
+                            report.mismatches.push(format!("{name}: QC mismatch"));
+                        }
+                    }
+                }
+            }
+        }
+        if report.mismatches.is_empty() { report.matched_lines = 1; }
+        report
+    }).collect();
 
     let mut out = ParityReport::default();
 
@@ -99,7 +133,7 @@ pub fn end_to_end(
 
     use std::collections::BTreeMap;
 
-    let text = std::fs::read_to_string(slopes)?;
+    let text = std::fs::read_to_string(slopes).map_err(|e| crate::Error::at(slopes, e))?;
 
     let mut options = BTreeMap::new();
 

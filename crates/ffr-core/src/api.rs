@@ -50,6 +50,26 @@ impl Default for AnalysisOptions {
     }
 }
 impl AnalysisOptions {
+    pub fn for_gas(&self, gas: &str) -> Self {
+        let mut o = self.clone();
+        if let Some(v) = self.per_gas.get(gas) {
+            for (key, target) in [
+                ("start", &mut o.start),
+                ("stop", &mut o.stop),
+                ("cutBeginnings", &mut o.cut_beginnings),
+                ("cutEnds", &mut o.cut_ends),
+                ("valveOffset", &mut o.valve_offset),
+            ] {
+                if let Some(value) = v.get(key).and_then(Value::as_f64) {
+                    *target = value;
+                }
+            }
+        }
+        o.per_gas.clear();
+        o
+    }
+}
+impl AnalysisOptions {
     pub fn validate(&self) -> crate::Result<()> {
         if !["fixed", "auto", "manual"].contains(&self.mode.as_str())
             || !self.start.is_finite()
@@ -188,6 +208,10 @@ pub struct Trace {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FluxDetail {
+    #[serde(default)]
+    pub robust: Vec<crate::diagnostics::RobustFit>,
+    #[serde(default, rename = "N2O_lagS")]
+    pub n2o_lag_s: Option<f64>,
     pub diagnostics: Vec<crate::diagnostics::Diagnostic>,
     pub valve_lag_s: f64,
     pub flux: FluxRow,
@@ -293,6 +317,7 @@ pub struct Plot {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SeriesMeta {
+    pub key: String,
     pub id: i64,
     pub name: String,
     pub unit: String,

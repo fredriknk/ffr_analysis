@@ -24,7 +24,7 @@ fn error(message: impl ToString) -> ApiError {
 }
 fn prefs_path(app: &AppHandle) -> Result<PathBuf, ApiError> {
     let dir = app.path().app_config_dir().map_err(error)?;
-    std::fs::create_dir_all(&dir).map_err(error)?;
+    std::fs::create_dir_all(&dir).map_err(|e| error(format!("{}: {e}", dir.display())))?;
     Ok(dir.join("preferences.json"))
 }
 fn prefs(app: &AppHandle) -> Result<Preferences, ApiError> {
@@ -32,7 +32,10 @@ fn prefs(app: &AppHandle) -> Result<Preferences, ApiError> {
     if !path.exists() {
         return Ok(Preferences::default());
     }
-    serde_json::from_slice(&std::fs::read(path).map_err(error)?).map_err(error)
+    serde_json::from_slice(
+        &std::fs::read(&path).map_err(|e| error(format!("{}: {e}", path.display())))?,
+    )
+    .map_err(error)
 }
 fn save_prefs(app: &AppHandle, prefs: &Preferences) -> Result<(), ApiError> {
     let path = prefs_path(app)?;

@@ -63,7 +63,27 @@ fn synthetic_pickle_and_gzip_keep_all_channels() {
     let name = "2022-09-01-13-07-15-x1_0-y2_0-z0_0-h-1_0_both_Plot_1_";
     let metadata = raw::filename(name, "Europe/Oslo").expect("metadata");
     let epoch = metadata.time as f64 / 1000.;
-    let original = json!({"aux":[[epoch,[1,1]],"",[epoch+0.1,[2,0]],[epoch+20.,[2,1]],[epoch+20.1,[1,0]]],"li-cor":{"t0":0,"dt":1,"ty":(0..45).map(|i|json!([i,[400.+i as f64,2.,3.,4.,5.]])).collect::<Vec<_>>()}});
+    let original = json!({"aux":[[epoch,
+        [1,
+        1]],
+        "",
+        [epoch+0.1,
+        [2,
+        0]],
+        [epoch+20.,
+        [2,
+        1]],
+        [epoch+20.1,
+        [1,
+        0]]],
+        "li-cor":{"t0":0,
+        "dt":1,
+        "ty":(0..45).map(|i|json!([i,
+        [400.+i as f64,
+        2.,
+        3.,
+        4.,
+        5.]])).collect::<Vec<_>>()}});
     let path = dir.path().join(name);
     let bytes = serde_pickle::to_vec(&original, serde_pickle::SerOptions::new()).expect("pickle");
     std::fs::write(&path, bytes).expect("write");
@@ -242,7 +262,7 @@ fn diagnostics_patch_and_v1_migration() {
     let info = s
         .project_open(project.to_str().expect("path"))
         .expect("migrate");
-    assert_eq!(info.schema_version, 2);
+    assert_eq!(info.schema_version, 3);
     assert!(!s.get_flux_detail(1).expect("detail").diagnostics.is_empty());
 }
 #[test]
@@ -273,4 +293,91 @@ fn invalid_raw_stays_reviewable() {
         .diagnostics
         .iter()
         .any(|d| d.code == "error"));
+}
+#[test]
+fn failed_import_is_atomic_and_names_the_path() {
+    let dir = tempfile::tempdir().expect("temp");
+    let mut s = Session::default();
+    let target = dir.path().join("failed.ffr");
+    let missing = dir.path().join("missing-raw");
+    let error = s
+        .legacy_import(
+            ffr_core::LegacyImportArgs {
+                legacy_dir: dir.path().to_string_lossy().into_owned(),
+                raw_dir: Some(missing.to_string_lossy().into_owned()),
+                manual_path: None,
+                logger_path: None,
+                metno_pickle_path: None,
+                out_path: target.to_string_lossy().into_owned(),
+                preset: None,
+            },
+            |_| {},
+        )
+        .expect_err("missing raw");
+    assert!(error.to_string().contains("missing-raw"));
+    assert!(!target.exists());
+    assert!(std::fs::read_dir(dir.path()).expect("listing").all(|e| !e
+        .expect("entry")
+        .file_name()
+        .to_string_lossy()
+        .starts_with(".ffr-import-")));
+}
+#[test]
+fn per_gas_timing_inherits_and_does_not_modify_sibling_gases() {
+    let mut o = AnalysisOptions::default();
+    o.per_gas.insert(
+        "N2O".into(),
+        json!({"cutBeginnings":9.,"cutEnds":5.,"valveOffset":4.}),
+    );
+    let n = o.for_gas("N2O");
+    let c = o.for_gas("CO2");
+    assert_eq!((n.cut_beginnings, n.cut_ends, n.valve_offset), (9., 5., 4.));
+    assert_eq!((c.cut_beginnings, c.cut_ends, c.valve_offset), (4., 3., 0.));
+    assert_eq!(n.start, o.start);
+}
+#[test]
+fn one_sided_files_do_not_create_unmeasured_chamber_errors() {
+    let dir = tempfile::tempdir().expect("temporary");
+    let name = "2022-09-01-13-07-15-x1_0-y2_0-z0_0-h0_0_right_Plot_1_";
+    let file = dir.path().join(name);
+    let meta = ffr_core::raw::filename(name, "Europe/Oslo").expect("metadata");
+    let epoch = meta.time as f64 / 1000.;
+    let data = json!({"aux":[[epoch,[2,1]],[epoch+0.1,[1,0]]],"li-cor":{"ty":(0..100).map(|i|json!([i,[400.+i as f64,1.,1.,1.]])).collect::<Vec<_>>()}});
+    std::fs::write(
+        &file,
+        serde_pickle::to_vec(&data, serde_pickle::SerOptions::new()).expect("pickle"),
+    )
+    .expect("write");
+    let path = dir.path().join("one.ffr");
+    let mut s = Session::default();
+    s.project_create(path.to_str().expect("path"), "One")
+        .expect("create");
+    s.import_raw_files(&[file.to_string_lossy().into_owned()], |_| {})
+        .expect("import");
+    let table = s.list_fluxes().expect("table");
+    assert_eq!(table.rows, 1);
+    assert_eq!(table.data["side"][0], "right");
+    let detail = s.get_flux_detail(1).expect("detail");
+    s.preview_flux(1, detail.options)
+        .expect("baseline exists after incremental import");
+    s.project_close();
+    let db = rusqlite::Connection::open(&path).expect("DB");
+    let row: String = db
+        .query_row("SELECT row FROM fluxes WHERE id=1", [], |r| r.get(0))
+        .expect("row");
+    let mut phantom: serde_json::Value = serde_json::from_str(&row).expect("JSON");
+    phantom["id"] = json!(2);
+    phantom["side"] = json!("left");
+    db.execute(
+        "INSERT INTO fluxes(id,measurement_id,row,results) VALUES(2,1,?1,'{}')",
+        [phantom.to_string()],
+    )
+    .expect("old phantom");
+    db.execute_batch("PRAGMA user_version=2;")
+        .expect("old version");
+    drop(db);
+    let info = s
+        .project_open(path.to_str().expect("path"))
+        .expect("migrate");
+    assert_eq!(info.counts.fluxes, 1);
 }
