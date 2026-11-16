@@ -18,6 +18,7 @@ use std::{collections::BTreeMap, path::Path};
 pub struct Session {
     db: Option<Connection>,
     path: String,
+    lag_cache: std::cell::RefCell<BTreeMap<(i64, u64), (f64, f64)>>,
     recent: Vec<Value>,
     client_id: Option<String>,
     series_cache: std::cell::RefCell<BTreeMap<i64, Vec<Value>>>,
@@ -36,7 +37,7 @@ impl Session {
             return Err(Error::Invalid("destination exists".into()));
         }
         let db = Connection::open(path)?;
-        db.execute_batch("PRAGMA journal_mode=DELETE; PRAGMA application_id=1179013682; PRAGMA user_version=1; PRAGMA foreign_keys=ON;
+        db.execute_batch("PRAGMA journal_mode=DELETE; PRAGMA application_id=1179013682; PRAGMA user_version=2; PRAGMA foreign_keys=ON;
 
  CREATE TABLE meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
 
@@ -46,6 +47,7 @@ impl Session {
 
  CREATE TABLE series(id INTEGER PRIMARY KEY,metadata TEXT NOT NULL,points TEXT NOT NULL);
 
+ CREATE TABLE diagnostics(flux_id INTEGER PRIMARY KEY REFERENCES fluxes(id),findings TEXT NOT NULL);
  CREATE TABLE changes(id INTEGER PRIMARY KEY,time INTEGER NOT NULL,kind TEXT NOT NULL,before TEXT NOT NULL,after TEXT NOT NULL,target INTEGER,action TEXT NOT NULL,original INTEGER);")?;
 
         db.execute("INSERT INTO meta VALUES ('name',?1)", [name])?;
@@ -57,6 +59,7 @@ impl Session {
             "INSERT INTO meta VALUES ('layout',?1)",
             [serde_json::to_string(&StoredLayout::default())?],
         )?;
+        self.lag_cache.borrow_mut().clear();
         self.series_cache.borrow_mut().clear();
         self.values_cache.borrow_mut().clear();
         self.db = Some(db);
@@ -69,16 +72,24 @@ impl Session {
         let db = Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE)?;
         let app: i64 = db.query_row("PRAGMA application_id", [], |r| r.get(0))?;
         let version: u32 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-        if app != 1179013682 || version != 1 {
+        if app != 1179013682 || !(1..=2).contains(&version) {
             return Err(Error::Invalid(
                 "unsupported project or schema version".into(),
             ));
         }
         db.execute_batch("PRAGMA journal_mode=DELETE; PRAGMA foreign_keys=ON;")?;
+        self.lag_cache.borrow_mut().clear();
         self.series_cache.borrow_mut().clear();
         self.values_cache.borrow_mut().clear();
         self.db = Some(db);
         self.path = path.into();
+        if version == 1 {
+            let tx = self.db()?.unchecked_transaction()?;
+            self.db()?.execute_batch("CREATE TABLE IF NOT EXISTS diagnostics(flux_id INTEGER PRIMARY KEY REFERENCES fluxes(id),findings TEXT NOT NULL);")?;
+            self.recompute_all(|_| {})?;
+            self.db()?.execute_batch("PRAGMA user_version=2;")?;
+            tx.commit()?;
+        }
         let info = self
             .project_info()?
             .ok_or_else(|| Error::Invalid("open failed".into()))?;
@@ -107,7 +118,7 @@ impl Session {
             path: self.path.clone(),
             name: db.query_row("SELECT value FROM meta WHERE key='name'", [], |r| r.get(0))?,
             time_zone: self.get_config()?.time_zone,
-            schema_version: 1,
+            schema_version: 2,
             counts: Counts {
                 measurements: db
                     .query_row("SELECT count(*) FROM measurements", [], |r| r.get(0))?,
@@ -175,13 +186,20 @@ impl Session {
         Ok(())
     }
 
-    pub fn set_config(&self, cfg: ProjectConfig, progress: impl Fn(Progress)) -> Result<()> {
+    pub fn set_config(&self, mut cfg: ProjectConfig, progress: impl Fn(Progress)) -> Result<()> {
         let _: chrono_tz::Tz = cfg
             .time_zone
             .parse()
             .map_err(|_| Error::Invalid("invalid time zone".into()))?;
         let tx = self.db()?.unchecked_transaction()?;
         cfg.defaults.validate()?;
+        cfg.diagnostics.validate()?;
+        if !(0. ..=1.).contains(&cfg.qc_threshold) {
+            return Err(Error::Invalid(
+                "QC probability threshold must be between zero and one".into(),
+            ));
+        }
+        cfg.qc.p_value = cfg.qc_threshold;
         if cfg.pressure <= 0. || cfg.chamber_height <= 0. {
             return Err(Error::Invalid(
                 "pressure and chamber height must be positive".into(),
@@ -290,6 +308,9 @@ impl Session {
         self.join_rows(&mut rows)?;
         let mut keys: BTreeMap<String, String> = BTreeMap::new();
         for (key, kind) in [
+            ("attention", "number"),
+            ("diag", "string"),
+            ("valveLagS", "number"),
             ("id", "number"),
             ("measurementId", "number"),
             ("source", "category"),
@@ -311,7 +332,7 @@ impl Session {
             keys.insert(key.into(), kind.into());
         }
         for gas in regression::GASES {
-            for suffix in ["slope", "rsq", "pval", "flux"] {
+            for suffix in ["slope", "rsq", "pval", "flux", "n", "resid"] {
                 keys.insert(format!("{gas}_{suffix}"), "number".into());
             }
         }
@@ -396,13 +417,21 @@ impl Session {
         let mut row = self.row(id)?;
         self.join_rows(std::slice::from_mut(&mut row))?;
         let (stored, overridden) = self.options(id)?;
+        let is_preview = preview.is_some();
         let options = preview.unwrap_or(stored);
         let Some(mid) = row["measurementId"].as_i64() else {
             return Ok(
-                json!({"flux":row,"options":options,"isOverridden":overridden,"siblingFluxId":null,"switches":[],"traces":[],"regressions":[],"sibling":[]}),
+                json!({"flux":row,"options":options,"isOverridden":overridden,"siblingFluxId":null,"switches":[],"traces":[],"regressions":[],"sibling":[],"diagnostics":[],"valveLagS":0.}),
             );
         };
-        let raw = self.measurement(mid)?;
+        let raw = match self.measurement(mid) {
+            Ok(raw) => raw,
+            Err(_) => {
+                return Ok(
+                    json!({"flux":row,"options":options,"isOverridden":overridden,"siblingFluxId":null,"switches":[],"traces":[],"regressions":[],"sibling":[],"diagnostics":self.load_findings(id)?,"valveLagS":0.}),
+                )
+            }
+        };
         let side = if row["side"] == "left" { 1 } else { 2 };
         let temp = row["airTemp"].as_f64().unwrap_or(20.);
         let mut results = regression::compute(
@@ -430,8 +459,12 @@ impl Session {
         let mut traces = vec![];
         for gas in regression::GASES {
             if let Some((t, y)) = raw.channels.get(gas) {
-                let sides =
-                    raw::group_indices(t, &raw.switches, options.cut_beginnings, options.cut_ends);
+                let sides = raw::group_indices(
+                    t,
+                    &crate::diagnostics::shifted(&raw, options.valve_offset),
+                    options.cut_beginnings,
+                    options.cut_ends,
+                );
                 let indices: Vec<usize> =
                     raw::group_ranges(t, &raw.switches, options.cut_beginnings, options.cut_ends)
                         .into_iter()
@@ -452,7 +485,20 @@ impl Session {
                         }
                     }
                 }
-                traces.push(json!({"gas":gas,"unit":"ppm","t":t,"y":y,"side":sides,"used":used}));
+                let fit: Vec<Option<f64>> = t
+                    .iter()
+                    .zip(&used)
+                    .map(|(t, used)| {
+                        if *used {
+                            results.get(gas).map(|r| r.intercept + r.slope * t)
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                traces.push(
+                    json!({"gas":gas,"unit":"ppm","t":t,"y":y,"side":sides,"used":used,"fit":fit}),
+                );
             }
         }
         let sibling_results: Value = sibling
@@ -460,8 +506,32 @@ impl Session {
             .map(|(_, s)| serde_json::from_str(s))
             .transpose()?
             .unwrap_or(json!({}));
+        let lag = self.cached_lag(&raw, &options, &cfg.diagnostics)?;
+        let mut diagnostics =
+            crate::diagnostics::analyse(&raw, side, &options, &results, &cfg.diagnostics, lag)
+                .diagnostics;
+        for d in self.load_findings(id)? {
+            if ["temp_fallback", "no_plot"].contains(&d.code.as_str())
+                || (!is_preview && d.code == "neighbour_outlier")
+            {
+                diagnostics.push(d);
+            }
+        }
+        for (gas, r) in &results {
+            for (key, v) in [
+                ("slope", r.slope),
+                ("rsq", r.rsq),
+                ("pval", r.pval),
+                ("flux", r.flux),
+                ("n", r.n as f64),
+                ("resid", r.mse.sqrt()),
+            ] {
+                row.insert(format!("{gas}_{key}"), json!(v));
+            }
+        }
+        crate::diagnostics::decorate(&mut row, &mut diagnostics, lag.0 + options.valve_offset);
         Ok(
-            json!({"flux":row,"options":options,"isOverridden":overridden,"siblingFluxId":sibling.as_ref().map(|s|s.0),"switches":raw.switches.iter().map(|(t,s)|json!({"t":t,"side":if *s==1{"left"}else{"right"}})).collect::<Vec<_>>(),"traces":traces,"regressions":results.values().collect::<Vec<_>>(),"sibling":sibling_results.as_object().map(|m|m.values().collect::<Vec<_>>()).unwrap_or_default()}),
+            json!({"diagnostics":diagnostics,"valveLagS":lag.0+options.valve_offset,"flux":row,"options":options,"isOverridden":overridden,"siblingFluxId":sibling.as_ref().map(|s|s.0),"switches":raw.switches.iter().map(|(t,s)|json!({"t":t,"side":if *s==1{"left"}else{"right"}})).collect::<Vec<_>>(),"traces":traces,"regressions":results.values().collect::<Vec<_>>(),"sibling":sibling_results.as_object().map(|m|m.values().collect::<Vec<_>>()).unwrap_or_default()}),
         )
     }
 
@@ -512,6 +582,7 @@ impl Session {
             self.recompute_one(*id)?;
             out.push(self.row(*id)?);
         }
+        self.neighbour_pass()?;
         self.log(
             "optionsBatch",
             None,
@@ -541,6 +612,7 @@ impl Session {
             self.recompute_one(*id)?;
             out.push(self.row(*id)?);
         }
+        self.neighbour_pass()?;
         self.log(
             "flagsBatch",
             None,
@@ -593,7 +665,13 @@ impl Session {
         let Some(mid) = row["measurementId"].as_i64() else {
             return Ok(());
         };
-        let raw = self.measurement(mid)?;
+        let raw = match self.measurement(mid) {
+            Ok(raw) => raw,
+            Err(e) => {
+                self.save_error_row(id, row, &e.to_string())?;
+                return Ok(());
+            }
+        };
         let cfg = self.get_config()?;
         let (opts, overridden) = self.options(id)?;
         let temp = self
@@ -620,7 +698,7 @@ impl Session {
             &regression::legacy_options(&opts),
             temp,
         )?;
-        self.persist_result(id, row, &raw, &cfg, overridden, results)
+        self.persist_result(id, row, &raw, &cfg, overridden, (results, None))
     }
     fn persist_result(
         &self,
@@ -629,8 +707,12 @@ impl Session {
         raw: &Raw,
         cfg: &ProjectConfig,
         overridden: bool,
-        mut results: BTreeMap<String, crate::regression::Regression>,
+        computation: (
+            BTreeMap<String, crate::regression::Regression>,
+            Option<crate::diagnostics::Findings>,
+        ),
     ) -> Result<()> {
+        let (mut results, findings) = computation;
         row.insert("time".into(), json!(raw.metadata.time));
         let side = if row["side"] == "left" { 1 } else { 2 };
         let factor = cfg.pressure / 101000. * cfg.chamber_height / 0.5;
@@ -643,12 +725,19 @@ impl Session {
         let layout = self.layout_value()?;
         assign(&mut row, &raw.metadata, side, cfg, &layout);
         row.insert("overridden".into(), json!(overridden));
+        for gas in regression::GASES {
+            for suffix in ["slope", "rsq", "pval", "flux", "n", "resid"] {
+                row.insert(format!("{gas}_{suffix}"), Value::Null);
+            }
+        }
         for (gas, r) in &results {
             for (key, v) in [
                 ("slope", r.slope),
                 ("rsq", r.rsq),
                 ("pval", r.pval),
                 ("flux", r.flux),
+                ("n", r.n as f64),
+                ("resid", r.mse.sqrt()),
             ] {
                 row.insert(format!("{gas}_{key}"), json!(v));
             }
@@ -674,6 +763,36 @@ impl Session {
                 row.insert(name.into(), json!(value));
             }
         }
+        let (opts, _) = self.options(id)?;
+        let mut findings = match findings {
+            Some(d) => d,
+            None => {
+                let lag = self.cached_lag(raw, &opts, &cfg.diagnostics)?;
+                crate::diagnostics::analyse(raw, side, &opts, &results, &cfg.diagnostics, lag)
+            }
+        };
+        if row["temperatureFallback"] == true {
+            findings.diagnostics.push(crate::diagnostics::Diagnostic {
+                code: "temp_fallback".into(),
+                severity: "info".into(),
+                gas: None,
+                value: None,
+                message: "No air temperature; fallback temperature used.".into(),
+            });
+        }
+        if row["plotId"].is_null() || row["plotId"] == 0 {
+            findings.diagnostics.push(crate::diagnostics::Diagnostic {
+                code: "no_plot".into(),
+                severity: "info".into(),
+                gas: None,
+                value: None,
+                message: "Chamber position belongs to no plot.".into(),
+            });
+        }
+        findings.valve_lag_s += opts.valve_offset;
+        crate::diagnostics::decorate(&mut row, &mut findings.diagnostics, findings.valve_lag_s);
+        row.insert("valveImprovement".into(), json!(findings.valve_improvement));
+        self.save_findings(id, &findings.diagnostics)?;
         self.write_row(id, &row)?;
         self.db()?.execute(
             "UPDATE fluxes SET results=?2 WHERE id=?1",
@@ -688,6 +807,7 @@ impl Session {
         } else {
             None
         };
+        self.lag_cache.borrow_mut().clear();
         let cfg = self.get_config()?;
         let mut jobs = vec![];
         for mut row in self.rows()? {
@@ -695,7 +815,13 @@ impl Session {
                 continue;
             };
             let id = row["id"].as_i64().unwrap_or(0);
-            let raw = self.measurement(mid)?;
+            let raw = match self.measurement(mid) {
+                Ok(raw) => raw,
+                Err(e) => {
+                    self.save_error_row(id, row, &e.to_string())?;
+                    continue;
+                }
+            };
             let (opts, overridden) = self.options(id)?;
             let temp = self.weather(raw.metadata.time, "air_temperature")?;
             row.insert(
@@ -723,13 +849,17 @@ impl Session {
         let results: Vec<_> = jobs
             .par_iter()
             .map(|(_, _, raw, side, opts, _, temp)| {
-                regression::compute(
+                let results = regression::compute(
                     raw,
                     *side,
                     &json!({}),
                     &regression::legacy_options(opts),
                     *temp,
-                )
+                )?;
+                let lag = crate::diagnostics::valve_lag(raw, opts, &cfg.diagnostics);
+                let diagnostics =
+                    crate::diagnostics::analyse(raw, *side, opts, &results, &cfg.diagnostics, lag);
+                Ok::<_, Error>((results, Some(diagnostics)))
             })
             .collect();
         let total = jobs.len();
@@ -744,6 +874,7 @@ impl Session {
                 message: None,
             });
         }
+        self.neighbour_pass()?;
         if let Some(tx) = tx {
             tx.commit()?;
         }
@@ -808,6 +939,29 @@ impl Session {
                         .transpose()?
                         .unwrap_or_else(|| "{}".into());
                     db.execute("INSERT INTO measurements(filename,metadata,status,error) VALUES(?1,?2,'error',?3)",params![name,metadata,e.to_string()])?;
+                    let mid = db.last_insert_rowid();
+                    let meta: Value = serde_json::from_str(&metadata)?;
+                    for side in ["left", "right"] {
+                        let mut row: FluxRow = serde_json::from_value(
+                            json!({"id":0,"measurementId":mid,"source":"robot","time":meta["time"],"filename":name,"side":side,"plotId":null,"plotLabel":null,"treatmentId":null,"treatmentName":null,"excluded":false,"reviewed":false,"overridden":false,"note":"","airTemp":null,"precip":null,"x":meta["x"],"y":meta["y"]}),
+                        )?;
+                        db.execute(
+                            "INSERT INTO fluxes(measurement_id,row,results) VALUES(?1,?2,'{}')",
+                            params![mid, serde_json::to_string(&row)?],
+                        )?;
+                        let id = db.last_insert_rowid();
+                        row.insert("id".into(), json!(id));
+                        let mut findings = vec![crate::diagnostics::Diagnostic {
+                            code: "error".into(),
+                            severity: "bad".into(),
+                            gas: None,
+                            value: None,
+                            message: e.to_string(),
+                        }];
+                        crate::diagnostics::decorate(&mut row, &mut findings, 0.);
+                        self.save_findings(id, &findings)?;
+                        self.write_row(id, &row)?;
+                    }
                 }
                 Ok(raw) => {
                     let bytes =
@@ -1017,6 +1171,12 @@ impl Session {
                     "UPDATE meta SET value=?2 WHERE key=?1",
                     params![kind, v.to_string()],
                 )?;
+                if kind == "config" {
+                    if let Some(name) = v["name"].as_str().filter(|s| !s.is_empty()) {
+                        self.db()?
+                            .execute("UPDATE meta SET value=?1 WHERE key='name'", [name])?;
+                    }
+                }
                 self.recompute_all(|_| {})?;
             }
             "options" => {
@@ -1047,6 +1207,7 @@ impl Session {
             if redo { "redo" } else { "undo" },
             h["id"].as_i64(),
         )?;
+        self.neighbour_pass()?;
         tx.commit()?;
         Ok(
             json!({"changed":true,"fluxIds":if let Some(entries)=v.as_array(){entries.iter().filter_map(|e|e["id"].as_i64()).collect::<Vec<_>>()}else{target.into_iter().collect::<Vec<_>>()}}),
@@ -1366,7 +1527,7 @@ impl Session {
         let (sheets, rows) = read_table(path, opts["sheet"].as_str())?;
         let header = opts["headerRow"].as_u64().unwrap_or(0) as usize;
         Ok(
-            json!({"sheets":sheets,"headerCandidates":(0..rows.len().min(5)).collect::<Vec<_>>(),"columns":rows.get(header),"rows":rows.iter().skip(header+1).take(20).collect::<Vec<_>>(),"totalRows":rows.len().saturating_sub(header+1)}),
+            json!({"sheets":sheets,"headerCandidates":(0..rows.len().min(5)).collect::<Vec<_>>(),"columns":rows.get(header).map(|r|r.iter().map(cell_text).collect::<Vec<_>>()).unwrap_or_default(),"rows":rows.iter().skip(header+1).take(20).collect::<Vec<_>>(),"totalRows":rows.len().saturating_sub(header+1)}),
         )
     }
 
@@ -1820,9 +1981,11 @@ fn number(v: &Value) -> Option<f64> {
 }
 
 fn column(headers: &[Value], v: &Value) -> Option<usize> {
-    v.as_u64()
-        .map(|i| i as usize)
-        .or_else(|| headers.iter().position(|h| h == v))
+    v.as_u64().map(|i| i as usize).or_else(|| {
+        headers
+            .iter()
+            .position(|h| h == v || cell_text(h) == cell_text(v))
+    })
 }
 
 fn parse_time(v: &Value, zone: &str) -> Option<i64> {
@@ -2106,5 +2269,334 @@ impl Session {
             can_undo: !undo.is_empty(),
             can_redo: !redo.is_empty(),
         })
+    }
+}
+impl Session {
+    fn save_error_row(&self, id: i64, mut row: FluxRow, message: &str) -> Result<()> {
+        let mut findings = vec![crate::diagnostics::Diagnostic {
+            code: "error".into(),
+            severity: "bad".into(),
+            gas: None,
+            value: None,
+            message: message.into(),
+        }];
+        crate::diagnostics::decorate(&mut row, &mut findings, 0.);
+        self.save_findings(id, &findings)?;
+        self.write_row(id, &row)
+    }
+    fn save_findings(&self, id: i64, findings: &[crate::diagnostics::Diagnostic]) -> Result<()> {
+        self.db()?.execute("INSERT INTO diagnostics(flux_id,findings) VALUES(?1,?2) ON CONFLICT(flux_id) DO UPDATE SET findings=excluded.findings",params![id,serde_json::to_string(findings)?])?;
+        Ok(())
+    }
+    fn load_findings(&self, id: i64) -> Result<Vec<crate::diagnostics::Diagnostic>> {
+        let text: Option<String> = self
+            .db()?
+            .query_row(
+                "SELECT findings FROM diagnostics WHERE flux_id=?1",
+                [id],
+                |r| r.get(0),
+            )
+            .optional()?;
+        Ok(text
+            .map(|s| serde_json::from_str(&s))
+            .transpose()?
+            .unwrap_or_default())
+    }
+    fn cached_lag(
+        &self,
+        raw: &Raw,
+        opts: &AnalysisOptions,
+        c: &crate::diagnostics::DiagnosticsConfig,
+    ) -> Result<(f64, f64)> {
+        let key = (raw.metadata.time, opts.valve_offset.to_bits());
+        if let Some(v) = self.lag_cache.borrow().get(&key) {
+            return Ok(*v);
+        }
+        let lag = crate::diagnostics::valve_lag(raw, opts, c);
+        self.lag_cache.borrow_mut().insert(key, lag);
+        Ok(lag)
+    }
+    fn neighbour_pass(&self) -> Result<()> {
+        let mut rows = self.rows()?;
+        let mut findings: Vec<_> = rows
+            .iter()
+            .map(|r| self.load_findings(r["id"].as_i64().unwrap_or(0)))
+            .collect::<Result<_>>()?;
+        for f in &mut findings {
+            f.retain(|d| d.code != "neighbour_outlier");
+        }
+        crate::diagnostics::neighbours(&mut rows, &mut findings, &self.get_config()?.diagnostics);
+        for (row, mut f) in rows.iter_mut().zip(findings) {
+            let id = row["id"].as_i64().unwrap_or(0);
+            let lag = row.get("valveLagS").and_then(Value::as_f64).unwrap_or(0.);
+            crate::diagnostics::decorate(row, &mut f, lag);
+            self.write_row(id, row)?;
+            self.save_findings(id, &f)?;
+        }
+        Ok(())
+    }
+    pub fn patch_flux_options(&self, ids: &[i64], partial: Value) -> Result<Vec<FluxRow>> {
+        let patch = partial
+            .as_object()
+            .ok_or_else(|| Error::Invalid("partial must be an options object".into()))?;
+        let tx = self.db()?.unchecked_transaction()?;
+        let mut before = vec![];
+        let mut after = vec![];
+        for id in ids {
+            let (opts, _) = self.options(*id)?;
+            let mut value = serde_json::to_value(opts)?;
+            for (key, v) in patch {
+                if ![
+                    "mode",
+                    "start",
+                    "stop",
+                    "interval",
+                    "crit",
+                    "co2Guides",
+                    "cutBeginnings",
+                    "cutEnds",
+                    "valveOffset",
+                    "slope",
+                    "perGas",
+                ]
+                .contains(&key.as_str())
+                {
+                    return Err(Error::Invalid(format!("unknown analysis field {key}")));
+                }
+                if key == "perGas" {
+                    let mut per_gas = value
+                        .get(key)
+                        .and_then(Value::as_object)
+                        .cloned()
+                        .unwrap_or_default();
+                    if let Some(gases) = v.as_object() {
+                        for (gas, fields) in gases {
+                            let mut existing = per_gas
+                                .get(gas)
+                                .and_then(Value::as_object)
+                                .cloned()
+                                .unwrap_or_default();
+                            if let Some(fields) = fields.as_object() {
+                                existing.extend(fields.clone());
+                            }
+                            per_gas.insert(gas.clone(), json!(existing));
+                        }
+                    }
+                    value[key] = json!(per_gas);
+                } else {
+                    value[key] = v.clone();
+                }
+            }
+            let opts: AnalysisOptions = serde_json::from_value(value)?;
+            opts.validate()?;
+            let old: Option<String> =
+                self.db()?
+                    .query_row("SELECT options FROM fluxes WHERE id=?1", [id], |r| r.get(0))?;
+            before.push(json!({"id":id,"options":old.map(|s|serde_json::from_str::<Value>(&s)).transpose()?}));
+            after.push(json!({"id":id,"options":opts}));
+            self.db()?.execute(
+                "UPDATE fluxes SET options=?2 WHERE id=?1",
+                params![id, serde_json::to_string(&opts)?],
+            )?;
+            self.recompute_one(*id)?;
+        }
+        self.neighbour_pass()?;
+        self.log(
+            "optionsBatch",
+            None,
+            &json!(before),
+            &json!(after),
+            "edit",
+            None,
+        )?;
+        self.neighbour_pass()?;
+        tx.commit()?;
+        ids.iter().map(|id| self.row(*id)).collect()
+    }
+    pub fn get_flux_thumbs(
+        &self,
+        ids: &[i64],
+        gas: &str,
+        max_points: usize,
+    ) -> Result<Vec<FluxThumb>> {
+        let mut cache = BTreeMap::new();
+        let mut out = vec![];
+        for id in ids {
+            let row = self.row(*id)?;
+            let Some(mid) = row["measurementId"].as_i64() else {
+                continue;
+            };
+            if let std::collections::btree_map::Entry::Vacant(entry) = cache.entry(mid) {
+                match self.measurement(mid) {
+                    Ok(raw) => {
+                        entry.insert(raw);
+                    }
+                    Err(_) => {
+                        out.push(FluxThumb {
+                            flux_id: *id,
+                            t: vec![],
+                            y: vec![],
+                            used: vec![],
+                            slope: 0.,
+                            intercept: 0.,
+                        });
+                        continue;
+                    }
+                }
+            }
+            let raw = &cache[&mid];
+            let Some((t, y)) = raw.channels.get(gas) else {
+                continue;
+            };
+            let result: String =
+                self.db()?
+                    .query_row("SELECT results FROM fluxes WHERE id=?1", [id], |r| r.get(0))?;
+            let results: BTreeMap<String, crate::regression::Regression> =
+                serde_json::from_str(&result)?;
+            let Some(r) = results.get(gas) else {
+                continue;
+            };
+            let (opts, _) = self.options(*id)?;
+            let side = if row["side"] == "left" { 1 } else { 2 };
+            let used: std::collections::BTreeSet<usize> =
+                crate::diagnostics::used_indices(raw, gas, side, &opts, r)
+                    .into_iter()
+                    .collect();
+            let all: Vec<usize> = raw::group_ranges(
+                t,
+                &crate::diagnostics::shifted(raw, opts.valve_offset),
+                opts.cut_beginnings,
+                opts.cut_ends,
+            )
+            .into_iter()
+            .filter(|r| r.2 == side)
+            .flat_map(|(a, b, _)| a..b)
+            .collect();
+            let n = all.len().min(max_points);
+            let indices: Vec<usize> = (0..n)
+                .map(|i| all[i * (all.len() - 1) / n.saturating_sub(1).max(1)])
+                .collect();
+            out.push(FluxThumb {
+                flux_id: *id,
+                t: indices.iter().map(|i| t[*i]).collect(),
+                y: indices.iter().map(|i| y[*i]).collect(),
+                used: indices.iter().map(|i| used.contains(i)).collect(),
+                slope: r.slope,
+                intercept: r.intercept,
+            });
+        }
+        Ok(out)
+    }
+    pub fn diagnostics_summary(&self) -> Result<Vec<crate::diagnostics::DiagnosticSummary>> {
+        let rows = self.rows()?;
+        let mut out = vec![];
+        for (code, label, description) in crate::diagnostics::RULES {
+            let mut count = 0;
+            let mut unreviewed = 0;
+            let mut severity = "info".to_string();
+            for row in &rows {
+                let matches: Vec<_> = self
+                    .load_findings(row["id"].as_i64().unwrap_or(0))?
+                    .into_iter()
+                    .filter(|d| d.code == code)
+                    .collect();
+                if !matches.is_empty() {
+                    count += 1;
+                    if row["reviewed"] != true {
+                        unreviewed += 1;
+                    }
+                    for d in matches {
+                        if crate::diagnostics::rank(&d.severity)
+                            > crate::diagnostics::rank(&severity)
+                        {
+                            severity = d.severity;
+                        }
+                    }
+                }
+            }
+            out.push(crate::diagnostics::DiagnosticSummary {
+                code: code.into(),
+                label: label.into(),
+                description: description.into(),
+                severity,
+                count,
+                unreviewed,
+            });
+        }
+        Ok(out)
+    }
+    pub fn diagnostics_report(&self) -> Result<Value> {
+        let rows = self.rows()?;
+        let robot: Vec<_> = rows.iter().filter(|r| r["source"] == "robot").collect();
+        let excluded = robot.iter().filter(|r| r["excluded"] == true).count();
+        let mut codes = vec![];
+        for (code, label, rule) in crate::diagnostics::RULES {
+            let count = |excluded: bool| {
+                robot
+                    .iter()
+                    .filter(|r| {
+                        (r["excluded"] == true) == excluded
+                            && r.get("diag")
+                                .and_then(Value::as_str)
+                                .unwrap_or("")
+                                .split(',')
+                                .any(|s| s == code)
+                    })
+                    .count()
+            };
+            codes.push(json!({"code":code,"label":label,"rule":rule,"excluded":count(true),"notExcluded":count(false)}));
+        }
+        let mut ranked = robot.clone();
+        ranked.sort_by(|a, b| {
+            b.get("attention")
+                .and_then(Value::as_f64)
+                .unwrap_or(0.)
+                .total_cmp(&a.get("attention").and_then(Value::as_f64).unwrap_or(0.))
+                .then(a["id"].as_i64().cmp(&b["id"].as_i64()))
+        });
+        let recalls:Vec<_>=[5,10,20].into_iter().map(|pct|{let n=(ranked.len()*pct).div_ceil(100);let hits=ranked[..n].iter().filter(|r|r["excluded"]==true).count();json!({"topPercent":pct,"rows":n,"excludedFound":hits,"excludedTotal":excluded,"share":if excluded>0{hits as f64/excluded as f64}else{0.},"cutoffAttention":ranked.get(n.saturating_sub(1)).and_then(|r|r.get("attention"))})}).collect();
+        let no_findings: Vec<_> = robot
+            .iter()
+            .filter(|r| {
+                r["excluded"] == true
+                    && r.get("diag")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .is_empty()
+            })
+            .map(|r| json!({"id":r["id"],"filename":r["filename"],"side":r["side"]}))
+            .collect();
+        let cfg = self.get_config()?;
+        let tz: chrono_tz::Tz = cfg
+            .time_zone
+            .parse()
+            .map_err(|_| Error::Invalid("time zone".into()))?;
+        let mut seen = std::collections::BTreeSet::new();
+        let mut by_date: BTreeMap<String, Vec<f64>> = BTreeMap::new();
+        let mut lags = vec![];
+        for r in &robot {
+            if !seen.insert(r["measurementId"].as_i64()) {
+                continue;
+            }
+            let lag = r.get("valveLagS").and_then(Value::as_f64).unwrap_or(0.);
+            let day = chrono::DateTime::from_timestamp_millis(r["time"].as_i64().unwrap_or(0))
+                .map(|d| d.with_timezone(&tz).format("%Y-%m-%d").to_string())
+                .unwrap_or_default();
+            by_date.entry(day).or_default().push(lag);
+            lags.push(lag);
+        }
+        lags.sort_by(f64::total_cmp);
+        let quantile = |p: f64| {
+            lags.get(((lags.len().saturating_sub(1)) as f64 * p) as usize)
+                .copied()
+        };
+        let mut histogram = BTreeMap::<String, usize>::new();
+        for v in &lags {
+            *histogram.entry(format!("{v:.1}")).or_default() += 1;
+        }
+        let dates:Vec<_>=by_date.into_iter().map(|(date,v)|json!({"date":date,"measurements":v.len(),"median":crate::diagnostics::median(&v),"min":v.iter().copied().fold(f64::INFINITY,f64::min),"max":v.iter().copied().fold(f64::NEG_INFINITY,f64::max)})).collect();
+        Ok(
+            json!({"robotFluxes":robot.len(),"excluded":excluded,"notExcluded":robot.len()-excluded,"codes":codes,"ranking":recalls,"excludedWithoutFindings":no_findings,"valveLag":{"measurements":lags.len(),"quantiles":[quantile(0.),quantile(0.1),quantile(0.5),quantile(0.9),quantile(1.)],"histogram":histogram,"byDate":dates},"thresholds":cfg.diagnostics}),
+        )
     }
 }

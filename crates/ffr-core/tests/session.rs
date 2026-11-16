@@ -176,3 +176,101 @@ fn treatment_integration_and_three_xlsx_modes() {
         }
     }
 }
+
+#[test]
+fn diagnostics_patch_and_v1_migration() {
+    let dir = tempfile::tempdir().expect("temp");
+    let project = dir.path().join("migrate.ffr");
+    let name = "2022-09-01-13-07-15-x1_0-y2_0-z0_0-h0_0_both_Plot_1_";
+    let raw = dir.path().join(name);
+    let meta = ffr_core::raw::filename(name, "Europe/Oslo").expect("meta");
+    let epoch = meta.time as f64 / 1000.;
+    let events: Vec<_> = (0..10)
+        .flat_map(|i| {
+            let side = if i % 2 == 0 { 1 } else { 2 };
+            [
+                json!([epoch + i as f64 * 20., [side, 1]]),
+                json!([epoch + i as f64 * 20. + 0.1, [3 - side, 0]]),
+            ]
+        })
+        .collect();
+    let data = json!({"aux":events,"li-cor":{"ty":(0..200).map(|i|json!([i as f64+0.25,[400.+i as f64*0.2,1.,1.,1.]])).collect::<Vec<_>>()}});
+    std::fs::write(
+        &raw,
+        serde_pickle::to_vec(&data, serde_pickle::SerOptions::new()).expect("pickle"),
+    )
+    .expect("write");
+    let mut s = Session::default();
+    s.project_create(project.to_str().expect("path"), "Test")
+        .expect("create");
+    s.import_raw_files(&[raw.to_string_lossy().into()], |_| {})
+        .expect("import");
+    let detail = s.get_flux_detail(1).expect("detail");
+    assert!(detail.diagnostics.iter().any(|d| d.code == "temp_fallback"));
+    assert!(detail.diagnostics.iter().any(|d| d.code == "no_plot"));
+    assert_eq!(detail.traces[0].fit.len(), detail.traces[0].t.len());
+    let originals: Vec<_> = [1, 2]
+        .into_iter()
+        .map(|id| s.get_flux_detail(id).expect("detail").options)
+        .collect();
+    s.patch_flux_options(&[1, 2], json!({"valveOffset":4.}))
+        .expect("patch");
+    for id in [1, 2] {
+        let o = s.get_flux_detail(id).expect("detail").options;
+        assert_eq!(o.valve_offset, 4.);
+        assert_eq!(o.start, originals[id as usize - 1].start);
+    }
+    s.undo().expect("undo");
+    assert_eq!(
+        s.get_flux_detail(1).expect("detail").options.valve_offset,
+        0.
+    );
+    assert_eq!(
+        s.get_flux_detail(2).expect("detail").options.valve_offset,
+        0.
+    );
+    let thumbs = s.get_flux_thumbs(&[1, 2], "CO2", 20).expect("thumbs");
+    assert_eq!(thumbs.len(), 2);
+    assert!(thumbs
+        .iter()
+        .all(|t| t.t.len() <= 20 && t.t.len() == t.used.len()));
+    s.project_close();
+    let db = rusqlite::Connection::open(&project).expect("sqlite");
+    db.execute_batch("DROP TABLE diagnostics; PRAGMA user_version=1;")
+        .expect("old schema");
+    drop(db);
+    let info = s
+        .project_open(project.to_str().expect("path"))
+        .expect("migrate");
+    assert_eq!(info.schema_version, 2);
+    assert!(!s.get_flux_detail(1).expect("detail").diagnostics.is_empty());
+}
+#[test]
+fn invalid_raw_stays_reviewable() {
+    let dir = tempfile::tempdir().expect("temp");
+    let raw = dir
+        .path()
+        .join("2022-09-01-13-07-15-x1_0-y2_0-z0_0-h0_0_both_Plot_1_");
+    std::fs::write(
+        &raw,
+        serde_pickle::to_vec(&json!({"aux":[]}), serde_pickle::SerOptions::new()).expect("pickle"),
+    )
+    .expect("write");
+    let mut s = Session::default();
+    s.project_create(dir.path().join("bad.ffr").to_str().expect("path"), "Test")
+        .expect("create");
+    let report = s
+        .import_raw_files(&[raw.to_string_lossy().into()], |_| {})
+        .expect("import");
+    assert_eq!(report.errors.len(), 1);
+    assert_eq!(s.list_fluxes().expect("table").rows, 2);
+    let d = s.get_flux_detail(1).expect("detail");
+    assert!(d.diagnostics.iter().any(|d| d.code == "error"));
+    s.recompute_all(|_| {}).expect("recompute");
+    assert!(s
+        .get_flux_detail(2)
+        .expect("detail")
+        .diagnostics
+        .iter()
+        .any(|d| d.code == "error"));
+}

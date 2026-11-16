@@ -26,6 +26,7 @@ pub struct AnalysisOptions {
     pub co2_guides: bool,
     pub cut_beginnings: f64,
     pub cut_ends: f64,
+    pub valve_offset: f64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub slope: Option<f64>,
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
@@ -42,6 +43,7 @@ impl Default for AnalysisOptions {
             co2_guides: true,
             cut_beginnings: 4.,
             cut_ends: 3.,
+            valve_offset: 0.,
             slope: None,
             per_gas: BTreeMap::new(),
         }
@@ -57,6 +59,8 @@ impl AnalysisOptions {
             || !self.cut_ends.is_finite()
             || self.cut_beginnings < 0.
             || self.cut_ends < 0.
+            || !self.valve_offset.is_finite()
+            || self.valve_offset.abs() > 60.
             || !self.interval.is_finite()
             || self.interval <= 0.
             || !["steepest", "mse"].contains(&self.crit.as_str())
@@ -71,6 +75,7 @@ impl AnalysisOptions {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct ProjectConfig {
+    pub diagnostics: crate::diagnostics::DiagnosticsConfig,
     pub name: String,
     pub gases: Vec<String>,
     pub qc_threshold: f64,
@@ -92,6 +97,7 @@ pub struct ProjectConfig {
 impl Default for ProjectConfig {
     fn default() -> Self {
         Self {
+            diagnostics: crate::diagnostics::DiagnosticsConfig::default(),
             name: String::new(),
             gases: crate::regression::GASES
                 .iter()
@@ -177,10 +183,13 @@ pub struct Trace {
     pub y: Vec<f64>,
     pub side: Vec<u8>,
     pub used: Vec<bool>,
+    pub fit: Vec<Option<f64>>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FluxDetail {
+    pub diagnostics: Vec<crate::diagnostics::Diagnostic>,
+    pub valve_lag_s: f64,
     pub flux: FluxRow,
     pub options: AnalysisOptions,
     pub is_overridden: bool,
@@ -391,4 +400,15 @@ pub struct RecentProject {
     pub path: String,
     pub name: String,
     pub opened_at: i64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FluxThumb {
+    pub flux_id: i64,
+    pub t: Vec<f64>,
+    pub y: Vec<f64>,
+    pub used: Vec<bool>,
+    pub slope: f64,
+    pub intercept: f64,
 }

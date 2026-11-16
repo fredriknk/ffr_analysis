@@ -232,6 +232,7 @@ pub fn legacy_options(o: &AnalysisOptions) -> Value {
         m.insert("co2_guides".into(), json!(o.co2_guides));
         m.insert("cut_beginnings".into(), json!(o.cut_beginnings));
         m.insert("cut_ends".into(), json!(o.cut_ends));
+        m.insert("valve_offset".into(), json!(o.valve_offset));
         if o.mode == "auto" {
             m.insert("auto_start".into(), json!(o.start));
             m.insert("auto_stop".into(), json!(o.stop));
@@ -262,13 +263,18 @@ pub fn compute(
         .as_f64()
         .or(defaults["cut_ends"].as_f64())
         .unwrap_or(3.);
+    let offset = specific["valve_offset"]
+        .as_f64()
+        .or(defaults["valve_offset"].as_f64())
+        .unwrap_or(0.);
+    let switches = crate::diagnostics::shifted(raw, offset);
     let mut out = BTreeMap::new();
     let mut guide = None;
     for gas in GASES {
         let Some((t, y)) = raw.channels.get(gas) else {
             continue;
         };
-        let ranges = group_ranges(t, &raw.switches, beg, end);
+        let ranges = group_ranges(t, &switches, beg, end);
         let (mut x, mut y): (Vec<_>, Vec<_>) = ranges
             .into_iter()
             .filter(|(_, _, s)| *s == side)

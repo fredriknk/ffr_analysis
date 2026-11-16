@@ -16,6 +16,7 @@ fn ids(v: &Value) -> Result<Vec<i64>> {
     Ok(serde_json::from_value(v.clone())?)
 }
 fn call(s: &mut Session, command: &str, a: Value) -> Result<Value> {
+    let a = a.get("args").cloned().unwrap_or(a);
     let id = || a["fluxId"].as_i64().ok_or("fluxId required");
     Ok(match command {
         "projectCreate" => json!(s.project_create(string(&a, "path")?, string(&a, "name")?)?),
@@ -38,7 +39,15 @@ fn call(s: &mut Session, command: &str, a: Value) -> Result<Value> {
         )?),
         "getConfig" => json!(s.get_config()?),
         "setConfig" => {
-            s.set_config(serde_json::from_value(a["config"].clone())?, |_| {})?;
+            s.set_config(
+                serde_json::from_value(
+                    a.get("cfg")
+                        .or_else(|| a.get("config"))
+                        .cloned()
+                        .ok_or("cfg required")?,
+                )?,
+                |_| {},
+            )?;
             Value::Null
         }
         "getLayout" => json!(s.get_layout()?),
@@ -56,6 +65,15 @@ fn call(s: &mut Session, command: &str, a: Value) -> Result<Value> {
             serde_json::from_value(a["options"].clone())?
         )?),
         "setFluxFlags" => json!(s.set_flux_flags(&ids(&a["fluxIds"])?, a["flags"].clone())?),
+        "patchFluxOptions" => {
+            json!(s.patch_flux_options(&ids(&a["fluxIds"])?, a["partial"].clone())?)
+        }
+        "getFluxThumbs" => json!(s.get_flux_thumbs(
+            &ids(&a["fluxIds"])?,
+            string(&a, "gas")?,
+            a["maxPoints"].as_u64().unwrap_or(60) as usize
+        )?),
+        "diagnosticsSummary" => json!(s.diagnostics_summary()?),
         "recomputeAll" => {
             s.recompute_all(|_| {})?;
             Value::Null
@@ -103,6 +121,7 @@ fn run() -> Result<()> {
     let arg = |i: usize| a.get(i).map(String::as_str).ok_or("missing argument");
     let mut s = Session::default();
     let result=match arg(0)? {
+ "diagnostics"=>{s.project_open(arg(1)?)?;s.diagnostics_report()?},
  "parity"=>{let raw=std::path::Path::new(arg(1)?);let slopes=std::path::Path::new(arg(2)?);let report=ffr_core::parity::parity(raw,slopes)?;if a.len()>=5 {json!({"regressions":report,"endToEnd":ffr_core::parity::end_to_end(raw,slopes,std::path::Path::new(arg(3)?),std::path::Path::new(arg(4)?))?})}else{json!(report)}},
  "import-legacy"=>json!(s.legacy_import(LegacyImportArgs{legacy_dir:arg(1)?.into(),raw_dir:Some(arg(2)?.into()),out_path:arg(3)?.into(),manual_path:std::env::var("FFR_CAPTURE_MANUAL").ok(),logger_path:std::env::var("FFR_CAPTURE_LOGGER").ok(),metno_pickle_path:std::env::var("FFR_METNO_PICKLE").ok(),preset:None},|p|{if p.done%500==0{eprintln!("{} {}/{}",p.task,p.done,p.total);}})?),
  "info"=>json!(s.project_open(arg(1)?)?),

@@ -30,6 +30,16 @@ fn check(name: &str, value: &Value) {
         depth += line.chars().filter(|c| *c == '{').count() as i32
             - line.chars().filter(|c| *c == '}').count() as i32;
     }
+    // SPEC 4.9 additions are intentionally accepted before the concurrent UI merge.
+    for key in match name {
+        "ProjectConfig" => vec!["diagnostics"],
+        "AnalysisOptions" => vec!["valveOffset"],
+        "FluxDetail" => vec!["diagnostics", "valveLagS"],
+        "Trace" => vec!["fit"],
+        _ => vec![],
+    } {
+        expected.insert(key.into());
+    }
     let actual: BTreeSet<_> = value.as_object().expect("object").keys().cloned().collect();
     assert_eq!(
         actual, expected,

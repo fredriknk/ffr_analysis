@@ -1,4 +1,5 @@
 pub mod api;
+pub mod diagnostics;
 pub mod literal;
 pub mod parity;
 pub mod raw;
