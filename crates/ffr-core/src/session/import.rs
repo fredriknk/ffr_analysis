@@ -166,7 +166,7 @@ bytes])?;
         let root = Path::new(dir);
         let cfg = root.join("config.yml");
         let config: Value = if cfg.exists() {
-            serde_yaml::from_str(&std::fs::read_to_string(cfg)?)
+            serde_yaml::from_str(&std::fs::read_to_string(&cfg).map_err(|e| Error::at(&cfg, e))?)
                 .map_err(|e| Error::Invalid(e.to_string()))?
         } else {
             json!({})
@@ -195,6 +195,39 @@ bytes])?;
     }
 
     pub fn legacy_import(
+        &mut self,
+        mut args: LegacyImportArgs,
+        progress: impl Fn(Progress),
+    ) -> Result<ProjectInfo> {
+        let target = std::path::PathBuf::from(&args.out_path);
+        if target.exists() {
+            return Err(Error::Invalid(format!(
+                "{}: destination exists",
+                target.display()
+            )));
+        }
+        let parent = target
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or(Path::new("."));
+        let temporary = tempfile::Builder::new()
+            .prefix(".ffr-import-")
+            .suffix(".ffr")
+            .tempfile_in(parent)
+            .map_err(|e| Error::at(parent, e))?
+            .into_temp_path();
+        std::fs::remove_file(&temporary).map_err(|e| Error::at(&temporary, e))?;
+        args.out_path = temporary.to_string_lossy().into_owned();
+        let mut imported = Session::default();
+        let result = imported.legacy_import_inner(args, progress);
+        imported.project_close();
+        result?;
+        temporary
+            .persist_noclobber(&target)
+            .map_err(|e| Error::at(&target, e.error))?;
+        self.project_open(&target.to_string_lossy())
+    }
+    fn legacy_import_inner(
         &mut self,
         args: LegacyImportArgs,
         progress: impl Fn(Progress),
@@ -225,13 +258,16 @@ bytes])?;
             .raw_dir
             .or_else(|| scan["rawDir"].as_str().map(str::to_owned))
             .ok_or_else(|| Error::Invalid("raw directory required".into()))?;
-        let mut paths: Vec<String> = std::fs::read_dir(&raw_dir)?
-            .filter_map(|e| e.ok())
+        let mut paths: Vec<String> = std::fs::read_dir(&raw_dir)
+            .map_err(|e| Error::at(&raw_dir, e))?
+            .collect::<std::io::Result<Vec<_>>>()
+            .map_err(|e| Error::at(&raw_dir, e))?
+            .into_iter()
             .filter(|e| e.file_name().to_string_lossy().starts_with('2'))
             .filter(|e| {
                 let name = e.file_name().to_string_lossy().to_string();
                 if preset.as_deref() == Some("capture") {
-                    raw::filename(&name, &cfg.time_zone).is_ok_and(|m| {
+                    raw::filename(&name, &cfg.time_zone).map_or(true, |m| {
                         name.as_str() >= "2021-08-19"
                             && m.x.is_some_and(|x| x > 599201. && x < 599246.)
                             && m.y.is_some_and(|y| y > 6615259. && y < 6615314.)
@@ -587,10 +623,7 @@ pub(super) fn parse_time(v: &Value, zone: &str) -> Option<i64> {
     None
 }
 
-pub(super) fn read_table(
-    path: &str,
-    sheet: Option<&str>,
-) -> Result<(Vec<String>, Vec<Vec<Value>>)> {
+fn read_table_inner(path: &str, sheet: Option<&str>) -> Result<(Vec<String>, Vec<Vec<Value>>)> {
     use calamine::{Data, Reader};
     if path.to_lowercase().ends_with(".csv") {
         let mut reader = csv::ReaderBuilder::new()
@@ -724,7 +757,7 @@ pub(super) fn unknown_layout(dir: &str) -> Result<StoredLayout> {
         if !path.exists() {
             continue;
         }
-        let text = std::fs::read_to_string(path)?;
+        let text = std::fs::read_to_string(&path).map_err(|e| Error::at(&path, e))?;
         if let Some(i) = text.find("treatment_legend") {
             if let Some(start) = text[i..].find('{') {
                 let text = &text[i + start..];
@@ -739,4 +772,11 @@ pub(super) fn unknown_layout(dir: &str) -> Result<StoredLayout> {
         }
     }
     Ok(StoredLayout::default())
+}
+
+pub(super) fn read_table(
+    path: &str,
+    sheet: Option<&str>,
+) -> Result<(Vec<String>, Vec<Vec<Value>>)> {
+    read_table_inner(path, sheet).map_err(|e| Error::Invalid(format!("{path}: {e}")))
 }

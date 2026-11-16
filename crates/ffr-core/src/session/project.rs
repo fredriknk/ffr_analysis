@@ -3,9 +3,9 @@ use super::*;
 impl Session {
     pub fn project_create(&mut self, path: &str, name: &str) -> Result<ProjectInfo> {
         if Path::new(path).exists() {
-            return Err(Error::Invalid("destination exists".into()));
+            return Err(Error::Invalid(format!("{path}: destination exists")));
         }
-        let db = Connection::open(path)?;
+        let db = Connection::open(path).map_err(|e| Error::Invalid(format!("{path}: {e}")))?;
         db.execute_batch("PRAGMA journal_mode=DELETE; PRAGMA application_id=1179013682; PRAGMA user_version=2; PRAGMA foreign_keys=ON;
 
  CREATE TABLE meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
@@ -46,7 +46,8 @@ original INTEGER);
     }
 
     pub fn project_open(&mut self, path: &str) -> Result<ProjectInfo> {
-        let db = Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE)?;
+        let db = Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE)
+            .map_err(|e| Error::Invalid(format!("{path}: {e}")))?;
         let app: i64 = db.query_row("PRAGMA application_id", [], |r| r.get(0))?;
         let version: u32 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
         if app != 1179013682 || !(1..=2).contains(&version) {

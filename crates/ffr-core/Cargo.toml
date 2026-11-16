@@ -20,6 +20,7 @@ thiserror = "2"
 calamine = { version = "0.26", features = ["dates"] }
 rust_xlsxwriter = "0.79"
 csv = "1"
+tempfile = "3"
 reqwest = { version = "0.12", features = ["blocking", "json"] }
 
 [dev-dependencies]

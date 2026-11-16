@@ -274,3 +274,31 @@ fn invalid_raw_stays_reviewable() {
         .iter()
         .any(|d| d.code == "error"));
 }
+#[test]
+fn failed_import_is_atomic_and_names_the_path() {
+    let dir = tempfile::tempdir().expect("temp");
+    let mut s = Session::default();
+    let target = dir.path().join("failed.ffr");
+    let missing = dir.path().join("missing-raw");
+    let error = s
+        .legacy_import(
+            ffr_core::LegacyImportArgs {
+                legacy_dir: dir.path().to_string_lossy().into_owned(),
+                raw_dir: Some(missing.to_string_lossy().into_owned()),
+                manual_path: None,
+                logger_path: None,
+                metno_pickle_path: None,
+                out_path: target.to_string_lossy().into_owned(),
+                preset: None,
+            },
+            |_| {},
+        )
+        .expect_err("missing raw");
+    assert!(error.to_string().contains("missing-raw"));
+    assert!(!target.exists());
+    assert!(std::fs::read_dir(dir.path()).expect("listing").all(|e| !e
+        .expect("entry")
+        .file_name()
+        .to_string_lossy()
+        .starts_with(".ffr-import-")));
+}

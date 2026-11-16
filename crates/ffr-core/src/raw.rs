@@ -62,7 +62,7 @@ pub fn filename(name: &str, zone: &str) -> Result<Metadata> {
     })
 }
 pub fn read_value(path: &Path) -> Result<Value> {
-    let bytes = std::fs::read(path)?;
+    let bytes = std::fs::read(path).map_err(|e| Error::at(path, e))?;
     if bytes.starts_with(&[0x1f, 0x8b]) {
         let mut s = String::new();
         flate2::read::GzDecoder::new(&bytes[..]).read_to_string(&mut s)?;
