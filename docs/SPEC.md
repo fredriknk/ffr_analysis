@@ -179,25 +179,34 @@ real Capture data so that each code flags a plausible share of fluxes and report
 
 `Diagnostic = { code, severity: 'info' | 'warn' | 'bad', gas?: string, value?: number, message: string }`
 
-| code | meaning (default rule) |
+**Noise floor** `floor_g` per gas = 3 × median flux standard error of the non-excluded robot
+fluxes. "Near zero" always means relative to this.
+
+**Robust refit and impact** (N2O, CO2): same window, the gas's estimated valve lag applied
+when |lag| ≥ 1 s, 3 s more cut at both ends of every valve segment, points with
+|residual| > 4 MAD dropped. `impact = |flux − robustFlux| / max(|flux|, |robustFlux|, floor)`.
+Findings about signal shape take their severity from impact (info < 0.10, warn < 0.30, bad
+above), so the queue is led by fluxes whose value is actually wrong.
+
+| code | meaning |
 |---|---|
 | `error` | the measurement failed validation (no fit) — bad |
-| `n2o_negative` | N2O slope < 0 and p < 0.01: chamber probably not sealed — bad |
-| `co2_not_rising` | CO2 slope ≤ 0: a sealed chamber over soil accumulates CO2 — bad |
-| `co2_low_r2` | CO2 r² < 0.95: leak, lifted chamber or wind — warn (bad below 0.8) |
-| `curvature` | a quadratic fit is significantly better than the line (F-test p < 0.001) and the slope of the first half differs from the second half by more than 40 % — warn; per gas |
-| `valve_timing` | the valve times do not match the signal. Estimate the lag δ (search −10…+10 s in 0.5 s steps) that minimises the summed SSE of the two chambers' CO2 line fits when the switch times are shifted by δ (use small cuts for this estimate). Flag when \|δ\| ≥ 2 s and the SSE drops by ≥ 30 %. `value` = δ. Stored per measurement as `valveLagS` even when not flagged |
-| `edge_transient` | the first/last used point of the valve segments sit systematically off the fit (mean \|standardised residual\| of edge points > 2.5 × interior): cuts too small or timing off — warn |
-| `valves_irregular` | number or length of valve segments deviates from the project's normal pattern (missing switch, one chamber never sampled, segment length off by > 50 %) — warn |
-| `spike` | a used point with \|residual\| > 6 robust SD (MAD) — warn; per gas |
-| `few_points` | fewer than 20 used points, or used window shorter than 60 s — warn |
-| `legacy_qc` | the ported legacy N2O quality check is not OK — info |
-| `neighbour_outlier` | the flux is far from comparable fluxes: robust z (median/MAD on asinh-scaled flux) > 5 against non-excluded fluxes of the same treatment within ±3 days (fall back to the same plot ±10 days when fewer than 6 neighbours) — warn; per gas (N2O, CO2). Second pass over the whole project |
-| `temp_fallback` | no air temperature, fallback used — info |
-| `no_plot` | chamber position is in no plot — info |
+| `chamber_leak` | CO2 flux below 25 % of the day's median while the day's median is well above the floor: chamber probably not sealed — warn; bad when the sibling chamber shows normal respiration |
+| `co2_not_rising` | CO2 flux significantly below −floor — bad. Flat at noise level (winter) is not a finding |
+| `n2o_negative` | N2O flux significantly below −floor — warn; bad when far below or together with `chamber_leak` |
+| `valve_timing` | valve times do not match the signal: lag δ (per gas; −10…+10 s) that minimises the two chambers' summed SSE; flagged when \|δ\| is large and the SSE drops ≥ 30 %. Severity by impact. Stored as `valveLagS` (CO2) and `N2O_lagS` |
+| `edge_transient` | first/last used points of the valve segments sit off the fit — severity by impact |
+| `spike` | used points far off the fit — severity by impact |
+| `noisy` | residual SD > 4 × the project median for that gas — warn (bad > 10 ×) |
+| `curvature` | first-half and second-half fluxes differ by > 40 % and > 2 × floor — warn |
+| `neighbour_outlier` | far from comparable fluxes (same treatment ±3 days, else same plot ±10 days), N2O and CO2 — warn |
+| `few_points` | fewer than 20 used points or window < 60 s — warn (info when the user set the window) |
+| `valves_irregular` | valve pattern deviates from the project's normal — warn |
+| `legacy_qc`, `temp_fallback`, `no_plot` | info; `legacy_qc` alone gives attention 0 |
 
 `attention` (0–100) is one score per flux for sorting: bad ≥ 70, warn 30–69, info < 30,
-increasing with the number and strength of findings. Reviewed fluxes keep their score; the UI
+increasing with impact and the number of findings. Target on a real project: bad ≤ ~5 %,
+bad + warn ≤ ~20 % of fluxes. Reviewed fluxes keep their score; the UI
 decides what to hide.
 
 **Valve offset.** `AnalysisOptions.valveOffset` (seconds, default 0 = legacy parity) shifts
@@ -232,7 +241,8 @@ owner may refine, but keep these concepts):
   "co2Guides": true,                    // auto mode
   "cutBeginnings": 4, "cutEnds": 3,
   "valveOffset": 0,                     // seconds added to every valve switch time (4.9)
-  "perGas": { "N2O": { "start": 20, "stop": 150 } }   // optional per-gas window
+  "perGas": { "N2O": { "start": 20, "stop": 150 } }   // optional per-gas start, stop,
+                                                      // cutBeginnings, cutEnds, valveOffset
 }
 ```
 
@@ -298,8 +308,9 @@ field lists may grow, but do not rename.
 
 Diagnostics in the existing shapes: `FluxTable` gains columns `attention` (number), `diag`
 (string: comma-separated codes, worst first), `valveLagS` (number), `<gas>_n`, and
-`<gas>_resid` (residual SD of the fit); `FluxDetail` gains `diagnostics: Diagnostic[]`,
-`valveLagS`, and each trace gains `fit: (number|null)[]` = fitted value at each used point;
+`<gas>_resid` (residual SD of the fit), `<gas>_robustFlux`, `<gas>_impact`, `N2O_lagS`;
+`FluxDetail` gains `diagnostics: Diagnostic[]`, `valveLagS`,
+`robust: {gas, slope, intercept, start, stop, n, flux}[]`, and each trace gains `fit: (number|null)[]` = fitted value at each used point;
 `ProjectConfig` gains `diagnostics` (thresholds) .
 - `undo() → UndoResult`, `redo() → UndoResult`, `history(limit) → Change[]`
 
