@@ -1,0 +1,55 @@
+import { create } from "zustand";
+export type Screen =
+  | "Start"
+  | "Review"
+  | "Treatments"
+  | "Data"
+  | "External data"
+  | "Project";
+interface State {
+  screen: Screen;
+  timeZone: string;
+  selected: number;
+  back: Screen | null;
+  theme: "light" | "dark";
+  search: string;
+  quick: string;
+  treatment: string;
+  plot: string;
+  from: string;
+  to: string;
+  gas: "N2O" | "CO2" | "CO" | "H2O" | "licor_H2O";
+  sources: ("robot" | "manual")[];
+  focus: number | null;
+  dataSearch: string;
+  subset: number[] | undefined;
+  nav: (s: Screen) => void;
+  openFlux: (id: number) => void;
+  goBack: () => void;
+  set: (v: Partial<State>) => void;
+}
+export const useStore = create<State>((set, get) => ({
+  screen: "Start",
+  timeZone: "Europe/Oslo",
+  selected: 1,
+  back: null,
+  theme:
+    (localStorage.getItem("ffr-theme") as "light" | "dark") ||
+    (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"),
+  search: "",
+  quick: "all",
+  treatment: "",
+  plot: "",
+  from: "",
+  to: "",
+  gas: "N2O",
+  sources: ["robot", "manual"],
+  focus: null,
+  dataSearch: "",
+  subset: undefined,
+  nav: (screen) => set({ screen, back: null }),
+  openFlux: (selected) =>
+    set({ selected, back: get().screen, screen: "Review" }),
+  goBack: () => set({ screen: get().back ?? "Review", back: null }),
+  set: (v) => set(v),
+}));
