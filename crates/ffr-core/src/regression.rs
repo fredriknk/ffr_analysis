@@ -11,6 +11,8 @@ pub const GASES: [&str; 5] = ["CO2", "N2O", "CO", "H2O", "licor_H2O"];
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Regression {
+    #[serde(skip)]
+    pub flux_factor: f64,
     pub gas: String,
     pub slope: f64,
     pub intercept: f64,
@@ -85,6 +87,7 @@ pub fn fit(x: &[f64], y: &[f64]) -> Result<Regression> {
         beta_reg((n - 2) as f64 / 2., 0.5, 1. - rsq)
     };
     Ok(Regression {
+        flux_factor: 0.,
         gas: String::new(),
         slope,
         intercept,
@@ -274,7 +277,21 @@ pub fn compute(
         let Some((t, y)) = raw.channels.get(gas) else {
             continue;
         };
-        let ranges = group_ranges(t, &switches, beg, end);
+        let gas_options = resolve(
+            if side == 1 { "left" } else { "right" },
+            gas,
+            specific,
+            defaults,
+        );
+        let gas_beg = gas_options["cutBeginnings"].as_f64().unwrap_or(beg);
+        let gas_end = gas_options["cutEnds"].as_f64().unwrap_or(end);
+        let gas_offset = gas_options["valveOffset"].as_f64().unwrap_or(offset);
+        let gas_switches = if gas_offset == offset {
+            switches.clone()
+        } else {
+            crate::diagnostics::shifted(raw, gas_offset)
+        };
+        let ranges = group_ranges(t, &gas_switches, gas_beg, gas_end);
         let (mut x, mut y): (Vec<_>, Vec<_>) = ranges
             .into_iter()
             .filter(|(_, _, s)| *s == side)
@@ -307,6 +324,7 @@ pub fn compute(
         let stop = o["stop"].as_f64();
         let mut r = if let Some(s) = o["slope"].as_f64() {
             Regression {
+                flux_factor: 0.,
                 gas: gas.into(),
                 slope: s,
                 intercept: y[0] - s * x[0],
@@ -345,6 +363,13 @@ pub fn compute(
         r.gas = gas.into();
         r.flux = r.slope
             * 1e-6
+            * (101000. * 0.5 / (8.314 * (temp + 273.15)))
+            * match gas {
+                "N2O" => 28e6 * 3600.,
+                "CO2" => 12e6 * 3600.,
+                _ => 1.,
+            };
+        r.flux_factor = 1e-6
             * (101000. * 0.5 / (8.314 * (temp + 273.15)))
             * match gas {
                 "N2O" => 28e6 * 3600.,

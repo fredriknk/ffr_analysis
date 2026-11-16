@@ -34,7 +34,8 @@ fn check(name: &str, value: &Value) {
     for key in match name {
         "ProjectConfig" => vec!["diagnostics"],
         "AnalysisOptions" => vec!["valveOffset"],
-        "FluxDetail" => vec!["diagnostics", "valveLagS"],
+        "FluxDetail" => vec!["diagnostics", "valveLagS", "robust", "N2O_lagS"],
+        "SeriesMeta" => vec!["key"],
         "Trace" => vec!["fit"],
         _ => vec![],
     } {

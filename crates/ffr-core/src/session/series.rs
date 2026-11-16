@@ -18,7 +18,7 @@ impl Session {
 
     pub(super) fn weather(&self, time: i64, key: &str) -> Result<Option<f64>> {
         for s in self.series_value()? {
-            if s["name"] == key {
+            if s["key"] == key {
                 let id = s["id"].as_i64().unwrap_or(0);
                 self.cached_values(id)?;
                 return Ok(self
@@ -42,6 +42,14 @@ impl Session {
             .map(|(id, s)| {
                 let mut v: Value = serde_json::from_str(&s)?;
                 v["id"] = json!(id);
+                if v.get("key").is_none() {
+                    v["key"] = v["name"].clone();
+                }
+                let (label, unit) = column_spec(v["key"].as_str().unwrap_or(""));
+                v["name"] = json!(label);
+                if v["unit"].as_str().unwrap_or("").is_empty() {
+                    v["unit"] = json!(unit);
+                }
                 Ok(v)
             })
             .collect()
@@ -103,7 +111,8 @@ impl Session {
         points.sort_by_key(|p| p["time"].as_i64());
         points.dedup_by_key(|p| p["time"].as_i64());
         let metadata = json!({
-        "name":name,
+        "key":name,
+        "name":column_spec(name).0,
         "unit":unit,
         "maxGap":max_gap,
         "count":points.len(),

@@ -17,7 +17,7 @@ impl Session {
                 )
                 .map_err(|e| Error::Invalid(e.to_string()))?;
         }
-        writer.flush()?;
+        writer.flush().map_err(|e| Error::at(&args.path, e))?;
         Ok(())
     }
 
@@ -132,7 +132,8 @@ impl Session {
                 }
             }
         }
-        book.save(&args.path).map_err(err)?;
+        book.save(&args.path)
+            .map_err(|e| Error::Invalid(format!("{}: {e}", args.path)))?;
         Ok(())
     }
 }

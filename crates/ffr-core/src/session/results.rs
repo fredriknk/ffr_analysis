@@ -55,11 +55,13 @@ impl Session {
         ),
     ) -> Result<()> {
         let (mut results, findings) = computation;
+        let scale_analysis = findings.is_some();
         row.insert("time".into(), json!(raw.metadata.time));
         let side = if row["side"] == "left" { 1 } else { 2 };
         let factor = cfg.pressure / 101000. * cfg.chamber_height / 0.5;
         for r in results.values_mut() {
             r.flux *= factor;
+            r.flux_factor *= factor;
             if r.gas == "N2O" {
                 r.qc = regression::qc_with(r, side, &cfg.qc);
             }
@@ -80,6 +82,7 @@ impl Session {
                 ("flux", r.flux),
                 ("n", r.n as f64),
                 ("resid", r.mse.sqrt()),
+                ("seFlux", r.se_slope * crate::diagnostics::conversion(r)),
             ] {
                 row.insert(format!("{gas}_{key}"), json!(v));
             }
@@ -88,7 +91,7 @@ impl Session {
             }
         }
         for s in self.series_value()? {
-            if let (Some(name), Some(sid)) = (s["name"].as_str(), s["id"].as_i64()) {
+            if let (Some(name), Some(sid)) = (s["key"].as_str(), s["id"].as_i64()) {
                 self.cached_values(sid)?;
                 let cache = self.values_cache.borrow();
                 let points = cache.get(&sid).map(Vec::as_slice).unwrap_or(&[]);
@@ -131,7 +134,16 @@ impl Session {
                 message: "Chamber position belongs to no plot.".into(),
             });
         }
+        if scale_analysis {
+            for robust in &mut findings.robust {
+                robust.flux *= factor;
+            }
+            for diff in findings.half_differences.values_mut() {
+                *diff *= factor;
+            }
+        }
         findings.valve_lag_s += opts.valve_offset;
+        self.db()?.execute("INSERT INTO diagnostics(flux_id,findings,analysis) VALUES(?1,'[]',?2) ON CONFLICT(flux_id) DO UPDATE SET analysis=excluded.analysis",params![id,serde_json::to_string(&findings)?])?;
         crate::diagnostics::decorate(&mut row, &mut findings.diagnostics, findings.valve_lag_s);
         row.insert("valveImprovement".into(), json!(findings.valve_improvement));
         self.save_findings(id, &findings.diagnostics)?;
@@ -263,6 +275,20 @@ serde_json::to_string(findings)?])?;
             .unwrap_or_default())
     }
 
+    pub(super) fn load_analysis(&self, id: i64) -> Result<crate::diagnostics::Findings> {
+        let text: Option<String> = self
+            .db()?
+            .query_row(
+                "SELECT analysis FROM diagnostics WHERE flux_id=?1",
+                [id],
+                |r| r.get(0),
+            )
+            .optional()?;
+        Ok(text
+            .map(|s| serde_json::from_str(&s))
+            .transpose()?
+            .unwrap_or_default())
+    }
     pub(super) fn cached_lag(
         &self,
         raw: &Raw,
@@ -284,10 +310,37 @@ serde_json::to_string(findings)?])?;
             .iter()
             .map(|r| self.load_findings(r["id"].as_i64().unwrap_or(0)))
             .collect::<Result<_>>()?;
-        for f in &mut findings {
-            f.retain(|d| d.code != "neighbour_outlier");
+        for (i, r) in rows.iter().enumerate() {
+            let analysis = self.load_analysis(r["id"].as_i64().unwrap_or(0))?;
+            if !analysis.diagnostics.is_empty() || !analysis.robust.is_empty() {
+                let contextual: Vec<_> = findings[i]
+                    .iter()
+                    .filter(|d| ["temp_fallback", "no_plot"].contains(&d.code.as_str()))
+                    .cloned()
+                    .collect();
+                findings[i] = analysis.diagnostics;
+                findings[i].extend(contextual);
+            }
         }
-        crate::diagnostics::neighbours(&mut rows, &mut findings, &self.get_config()?.diagnostics);
+        let baseline = crate::diagnostics::baselines(&rows);
+        self.db()?.execute("INSERT INTO meta(key,value) VALUES('diagnostic_baseline',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value",[serde_json::to_string(&baseline)?])?;
+        let analyses: Vec<_> = rows
+            .iter()
+            .map(|r| self.load_analysis(r["id"].as_i64().unwrap_or(0)))
+            .collect::<Result<_>>()?;
+        let cfg = self.get_config()?;
+        let zone: chrono_tz::Tz = cfg
+            .time_zone
+            .parse()
+            .map_err(|_| Error::Invalid("invalid timezone".into()))?;
+        crate::diagnostics::contextualise(
+            &mut rows,
+            &mut findings,
+            &analyses,
+            &baseline,
+            &cfg.diagnostics,
+            zone,
+        );
         for (row, mut f) in rows.iter_mut().zip(findings) {
             let id = row["id"].as_i64().unwrap_or(0);
             let lag = row.get("valveLagS").and_then(Value::as_f64).unwrap_or(0.);
@@ -440,7 +493,79 @@ serde_json::to_string(findings)?])?;
             })
             .collect();
 
+        let baseline: crate::diagnostics::Baseline = self.meta("diagnostic_baseline")?;
+        let mut severity_counts = BTreeMap::new();
+        for (code, _, _) in crate::diagnostics::RULES {
+            let mut counts = [0usize; 3];
+            for r in &robot {
+                let findings = self.load_findings(r["id"].as_i64().unwrap_or(0))?;
+                if let Some(worst) = findings
+                    .iter()
+                    .filter(|d| d.code == code)
+                    .map(|d| crate::diagnostics::rank(&d.severity))
+                    .max()
+                {
+                    counts[worst as usize - 1] += 1;
+                }
+            }
+            severity_counts.insert(
+                code,
+                json!({"info":counts[0],"warn":counts[1],"bad":counts[2]}),
+            );
+        }
+        let summary_row = |r: &FluxRow| {
+            let mut row = r.clone();
+            row.retain(|k, _| {
+                [
+                    "id",
+                    "time",
+                    "filename",
+                    "side",
+                    "attention",
+                    "diag",
+                    "excluded",
+                    "N2O_flux",
+                    "N2O_robustFlux",
+                    "N2O_impact",
+                    "CO2_flux",
+                    "CO2_robustFlux",
+                    "CO2_impact",
+                    "valveLagS",
+                    "N2O_lagS",
+                ]
+                .contains(&k.as_str())
+            });
+            row
+        };
+        let top40: Vec<_> = ranked.iter().take(40).map(|r| summary_row(r)).collect();
+        let legacy_ranks: Vec<_> = ranked
+            .iter()
+            .enumerate()
+            .filter(|(_, r)| r["excluded"] == true)
+            .map(|(rank, r)| json!({"rank":rank+1,"flux":summary_row(r)}))
+            .collect();
+        let mut impact_order = robot.clone();
+        impact_order.sort_by(|a, b| {
+            b.get("N2O_impact")
+                .and_then(Value::as_f64)
+                .unwrap_or(0.)
+                .total_cmp(&a.get("N2O_impact").and_then(Value::as_f64).unwrap_or(0.))
+        });
+        let impacts: Vec<_> = impact_order
+            .iter()
+            .take(30)
+            .map(|r| summary_row(r))
+            .collect();
+        let bad = robot
+            .iter()
+            .filter(|r| r["attention"].as_f64().unwrap_or(0.) >= 70.)
+            .count();
+        let warn = robot
+            .iter()
+            .filter(|r| (30. ..70.).contains(&r["attention"].as_f64().unwrap_or(0.)))
+            .count();
         Ok(json!({
+        "noiseFloors":baseline,"severityCounts":severity_counts,"queue":{"bad":bad,"warn":warn,"badFraction":bad as f64/robot.len().max(1) as f64,"badWarnFraction":(bad+warn) as f64/robot.len().max(1) as f64},"top40":top40,"legacyExcludedRanks":legacy_ranks,"top30N2OImpact":impacts,
         "robotFluxes":robot.len(),
         "excluded":excluded,
         "notExcluded":robot.len()-excluded,

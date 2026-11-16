@@ -1,8 +1,10 @@
+mod impact;
 use crate::{
     api::{AnalysisOptions, FluxRow},
     raw::{group_ranges, Raw},
     regression::{self, Regression},
 };
+pub use impact::*;
 use serde::{Deserialize, Serialize};
 use statrs::distribution::{ContinuousCDF, FisherSnedecor};
 use std::collections::{BTreeMap, BTreeSet};
@@ -10,6 +12,12 @@ use std::collections::{BTreeMap, BTreeSet};
 #[serde(default, rename_all = "camelCase")]
 pub struct DiagnosticsConfig {
     pub n2o_negative_p: f64,
+    pub extra_cut_s: f64,
+    pub robust_mad: f64,
+    pub lag_contrast_sd: f64,
+    pub noisy_warn: f64,
+    pub noisy_bad: f64,
+    pub neighbour_raw_z: f64,
     pub co2_min_r2: f64,
     pub co2_bad_r2: f64,
     pub curvature_p: f64,
@@ -36,6 +44,12 @@ impl Default for DiagnosticsConfig {
     fn default() -> Self {
         Self {
             n2o_negative_p: 0.01,
+            extra_cut_s: 3.,
+            robust_mad: 4.,
+            lag_contrast_sd: 4.,
+            noisy_warn: 4.,
+            noisy_bad: 10.,
+            neighbour_raw_z: 8.,
             co2_min_r2: 0.14,
             co2_bad_r2: 0.05,
             curvature_p: 1e-12,
@@ -43,17 +57,17 @@ impl Default for DiagnosticsConfig {
             curvature_slope_change: 0.4,
             valve_search_s: 10.,
             valve_step_s: 0.5,
-            valve_min_lag_s: 3.5,
+            valve_min_lag_s: 1.,
             valve_min_improvement: 0.3,
             valve_estimate_cut_s: 0.25,
-            edge_ratio: 4.5,
+            edge_ratio: 2.5,
             irregular_fraction: 0.5,
             normal_segment_s: 20.,
             normal_switches: 10,
             min_points: 20,
             min_window_s: 60.,
-            spike_mad: 15.,
-            neighbour_z: 5.,
+            spike_mad: 6.,
+            neighbour_z: 3.5,
             neighbour_days: 3.,
             neighbour_fallback_days: 10.,
             min_neighbours: 6,
@@ -80,8 +94,14 @@ pub struct DiagnosticSummary {
     pub unreviewed: usize,
 }
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(default, rename_all = "camelCase")]
 pub struct Findings {
+    #[serde(default)]
+    pub robust: Vec<RobustFit>,
+    #[serde(default)]
+    pub lags: BTreeMap<String, LagEstimate>,
+    #[serde(default)]
+    pub half_differences: BTreeMap<String, f64>,
     pub diagnostics: Vec<Diagnostic>,
     pub valve_lag_s: f64,
     pub valve_improvement: f64,
@@ -115,40 +135,31 @@ pub fn score(findings: &mut [Diagnostic]) -> f64 {
             .then(a.code.cmp(&b.code))
             .then(a.gas.cmp(&b.gas))
     });
-    let Some(first) = findings.first() else {
+    let active: Vec<_> = findings.iter().filter(|d| d.code != "legacy_qc").collect();
+    let Some(first) = active.first() else {
         return 0.;
     };
-    let base = match first.severity.as_str() {
-        "bad" => 70.,
-        "warn" => 30.,
-        _ => 5.,
-    };
-    let cap = match first.severity.as_str() {
-        "bad" => 100.,
-        "warn" => 69.,
-        _ => 29.,
-    };
-    let mut seen = BTreeSet::new();
-    let mut extra = 0.;
-    for d in findings.iter() {
-        if seen.insert(d.code.clone()) {
-            extra += match d.severity.as_str() {
-                "bad" => 4.,
-                "warn" => 3.,
-                _ => 1.,
-            };
-            if d.code == "neighbour_outlier" {
-                extra += d.value.unwrap_or(0.).ln_1p().min(6.);
-            }
-            if d.code == "co2_low_r2" {
-                extra += (1. - d.value.unwrap_or(1.)) * 4.;
-            }
-            if d.code == "legacy_qc" && d.message.contains("Outliers likely") {
-                extra += 4.;
-            }
+    let impact = active
+        .iter()
+        .filter(|d| ["spike", "edge_transient", "valve_timing"].contains(&d.code.as_str()))
+        .filter_map(|d| {
+            d.message
+                .split("impact=")
+                .nth(1)?
+                .trim_end_matches('%')
+                .parse::<f64>()
+                .ok()
+        })
+        .fold(0., f64::max)
+        / 100.;
+    let extra = (active.len().saturating_sub(1) as f64 * 2.).min(8.);
+    match first.severity.as_str() {
+        "bad" => {
+            (70. + 25. * impact + extra + if first.code == "error" { 20. } else { 0. }).min(100.)
         }
+        "warn" => (30. + 20. * impact + extra).min(69.),
+        _ => (1. + active.len() as f64).min(10.),
     }
-    (base + extra - 1.).min(cap)
 }
 pub fn decorate(row: &mut FluxRow, findings: &mut [Diagnostic], lag: f64) {
     let attention = score(findings);
@@ -175,6 +186,7 @@ pub fn used_indices(
     o: &AnalysisOptions,
     r: &Regression,
 ) -> Vec<usize> {
+    let o = o.for_gas(gas);
     let Some((t, y)) = raw.channels.get(gas) else {
         return vec![];
     };
@@ -214,7 +226,15 @@ pub fn mad(v: &[f64]) -> f64 {
     median(&v.iter().map(|v| (v - m).abs()).collect::<Vec<_>>()) * 1.4826
 }
 pub fn valve_lag(raw: &Raw, o: &AnalysisOptions, c: &DiagnosticsConfig) -> (f64, f64) {
-    let Some((t, y)) = raw.channels.get("CO2") else {
+    valve_lag_for(raw, "CO2", o, c)
+}
+pub fn valve_lag_for(
+    raw: &Raw,
+    gas: &str,
+    o: &AnalysisOptions,
+    c: &DiagnosticsConfig,
+) -> (f64, f64) {
+    let Some((t, y)) = raw.channels.get(gas) else {
         return (0., 0.);
     };
     if t.len() < 30 || raw.switches.len() < 4 || t.windows(2).any(|p| p[1] < p[0]) {
@@ -301,15 +321,6 @@ pub fn analyse(
         ));
     }
     if let Some(r) = results.get("N2O") {
-        if r.slope < 0. && r.pval < c.n2o_negative_p {
-            d.push(finding(
-                "n2o_negative",
-                "bad",
-                Some("N2O"),
-                r.slope,
-                "N2O decreases significantly; check chamber sealing.".into(),
-            ));
-        }
         if !r.qc.is_empty() {
             d.push(finding(
                 "legacy_qc",
@@ -319,39 +330,6 @@ pub fn analyse(
                 r.qc.clone(),
             ));
         }
-    }
-    if let Some(r) = results.get("CO2") {
-        if r.slope <= 0. {
-            d.push(finding(
-                "co2_not_rising",
-                "bad",
-                Some("CO2"),
-                r.slope,
-                "CO2 does not accumulate; check whether the chamber was sealed.".into(),
-            ));
-        }
-        if r.rsq < c.co2_min_r2 {
-            d.push(finding(
-                "co2_low_r2",
-                if r.rsq < c.co2_bad_r2 { "bad" } else { "warn" },
-                Some("CO2"),
-                r.rsq,
-                format!("CO2 r² {:.3} is below {:.3}.", r.rsq, c.co2_min_r2),
-            ));
-        }
-    }
-    if lag.0.abs() >= c.valve_min_lag_s && lag.1 >= c.valve_min_improvement {
-        d.push(finding(
-            "valve_timing",
-            "warn",
-            Some("CO2"),
-            lag.0,
-            format!(
-                "Shifting valves by {:.1} s reduces both chambers' CO2 SSE by {:.0}%.",
-                lag.0,
-                100. * lag.1
-            ),
-        ));
     }
     let times: Vec<f64> = raw.switches.iter().map(|s| s.0).collect();
     let durations: Vec<f64> = times.windows(2).map(|p| p[1] - p[0]).collect();
@@ -365,6 +343,7 @@ pub fn analyse(
     if irregular {
         d.push(finding("valves_irregular","warn",None,times.len() as f64,"Valve segments are missing, repeated, or differ from the normal duration by over the configured fraction.".into()));
     }
+    let mut half_differences = BTreeMap::new();
     for (gas, r) in results {
         if r.n == 0 {
             continue;
@@ -402,7 +381,7 @@ pub fn analyse(
             .iter()
             .map(|v| (v - center).abs())
             .fold(0., f64::max);
-        if noise > 1e-12 && peak / noise > c.spike_mad {
+        if ["N2O", "CO2"].contains(&gas.as_str()) && noise > 1e-12 && peak / noise > c.spike_mad {
             d.push(finding(
                 "spike",
                 "warn",
@@ -438,6 +417,7 @@ pub fn analyse(
             ) {
                 let change =
                     (a.slope - b.slope).abs() / a.slope.abs().max(b.slope.abs()).max(1e-20);
+                half_differences.insert(gas.clone(), (a.slope - b.slope).abs() * conversion(r));
                 if c.curvature_gases.contains(gas)
                     && p < c.curvature_p
                     && change > c.curvature_slope_change
@@ -455,7 +435,7 @@ pub fn analyse(
                 }
             }
         }
-        if gas == "CO2" {
+        if gas == "CO2" || gas == "N2O" {
             let ranges = group_ranges(
                 t,
                 &shifted(raw, o.valve_offset),
@@ -500,8 +480,23 @@ pub fn analyse(
             }
         }
     }
+    let (robust, lags) = robust_fits(raw, side, o, results, c);
+    for (gas, estimate) in &lags {
+        if estimate.improvement >= c.valve_min_improvement && estimate.lag_s.abs() >= 1. {
+            d.push(finding(
+                "valve_timing",
+                "info",
+                Some(gas),
+                estimate.lag_s,
+                "Gas-specific valve lag detected.".into(),
+            ));
+        }
+    }
     score(&mut d);
     Findings {
+        robust,
+        lags,
+        half_differences,
         diagnostics: d,
         valve_lag_s: lag.0,
         valve_improvement: lag.1,
@@ -584,7 +579,12 @@ pub fn neighbours(rows: &mut [FluxRow], findings: &mut [Vec<Diagnostic>], c: &Di
         }
     }
 }
-pub const RULES: [(&str, &str, &str); 14] = [
+pub const RULES: [(&str, &str, &str); 15] = [
+    (
+        "noisy",
+        "Noisy trace",
+        "Residual noise exceeds the project baseline.",
+    ),
     (
         "error",
         "Invalid measurement",
@@ -601,9 +601,9 @@ pub const RULES: [(&str, &str, &str); 14] = [
         "CO2 does not accumulate in the chamber.",
     ),
     (
-        "co2_low_r2",
-        "Poor CO2 line fit",
-        "CO2 r² is below the configured threshold.",
+        "chamber_leak",
+        "Possible chamber leak",
+        "CO2 is low relative to a strongly emitting day and its sibling chamber.",
     ),
     (
         "curvature",
@@ -752,7 +752,43 @@ mod tests {
         let results = regression::compute(raw, 1, &json!({}), &regression::legacy_options(o), 20.)
             .expect("fit");
         let c = DiagnosticsConfig::default();
-        analyse(raw, 1, o, &results, &c, valve_lag(raw, o, &c))
+        let mut f = analyse(raw, 1, o, &results, &c, valve_lag(raw, o, &c));
+        let mut row:FluxRow=serde_json::from_value(json!({"id":1,"time":0,"measurementId":1,"source":"robot","excluded":false,"overridden":false,"treatmentId":1,"plotId":1})).expect("row");
+        for (gas, r) in &results {
+            row.insert(format!("{gas}_flux"), json!(r.flux));
+            row.insert(format!("{gas}_pval"), json!(r.pval));
+            row.insert(format!("{gas}_resid"), json!(r.mse.sqrt()));
+        }
+        let b: Baseline = [
+            (
+                "N2O".into(),
+                GasBaseline {
+                    floor: 1.,
+                    median_residual_sd: 1.,
+                },
+            ),
+            (
+                "CO2".into(),
+                GasBaseline {
+                    floor: 1.,
+                    median_residual_sd: 1.,
+                },
+            ),
+        ]
+        .into_iter()
+        .collect();
+        let mut rows = vec![row];
+        let mut d = vec![f.diagnostics.clone()];
+        contextualise(
+            &mut rows,
+            &mut d,
+            std::slice::from_ref(&f),
+            &b,
+            &c,
+            chrono_tz::Europe::Oslo,
+        );
+        f.diagnostics = d.remove(0);
+        f
     }
     fn has(f: &Findings, code: &str) -> bool {
         f.diagnostics.iter().any(|d| d.code == code)
@@ -809,7 +845,7 @@ mod tests {
         let mut poor = trace(0., false, false, true);
         poor.channels.get_mut("CO2").expect("CO2").1[51] += 300.;
         let f = run(&poor, &AnalysisOptions::default());
-        assert!(has(&f, "co2_low_r2"));
+        assert!(has(&f, "noisy") || has(&f, "spike"));
     }
     #[test]
     fn edges() {

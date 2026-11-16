@@ -242,7 +242,7 @@ fn diagnostics_patch_and_v1_migration() {
     let info = s
         .project_open(project.to_str().expect("path"))
         .expect("migrate");
-    assert_eq!(info.schema_version, 2);
+    assert_eq!(info.schema_version, 3);
     assert!(!s.get_flux_detail(1).expect("detail").diagnostics.is_empty());
 }
 #[test]
@@ -301,4 +301,17 @@ fn failed_import_is_atomic_and_names_the_path() {
         .file_name()
         .to_string_lossy()
         .starts_with(".ffr-import-")));
+}
+#[test]
+fn per_gas_timing_inherits_and_does_not_modify_sibling_gases() {
+    let mut o = AnalysisOptions::default();
+    o.per_gas.insert(
+        "N2O".into(),
+        json!({"cutBeginnings":9.,"cutEnds":5.,"valveOffset":4.}),
+    );
+    let n = o.for_gas("N2O");
+    let c = o.for_gas("CO2");
+    assert_eq!((n.cut_beginnings, n.cut_ends, n.valve_offset), (9., 5., 4.));
+    assert_eq!((c.cut_beginnings, c.cut_ends, c.valve_offset), (4., 3., 0.));
+    assert_eq!(n.start, o.start);
 }

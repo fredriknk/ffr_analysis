@@ -36,7 +36,7 @@ impl Session {
         }
         for meta in self.series_value()? {
             let id = meta["id"].as_i64().unwrap_or(0);
-            let name = meta["name"].as_str().unwrap_or("");
+            let name = meta["key"].as_str().unwrap_or("");
             self.cached_values(id)?;
             let cache = self.values_cache.borrow();
             let points = cache.get(&id).map(Vec::as_slice).unwrap_or(&[]);
@@ -66,6 +66,7 @@ impl Session {
             ("attention", "number"),
             ("diag", "string"),
             ("valveLagS", "number"),
+            ("N2O_lagS", "number"),
             ("id", "number"),
             ("measurementId", "number"),
             ("source", "category"),
@@ -86,13 +87,18 @@ impl Session {
         ] {
             keys.insert(key.into(), kind.into());
         }
+        for gas in ["N2O", "CO2"] {
+            for suffix in ["robustFlux", "impact", "seFlux"] {
+                keys.insert(format!("{gas}_{suffix}"), "number".into());
+            }
+        }
         for gas in regression::GASES {
             for suffix in ["slope", "rsq", "pval", "flux", "n", "resid"] {
                 keys.insert(format!("{gas}_{suffix}"), "number".into());
             }
         }
         for series in self.series_value()? {
-            if let Some(name) = series["name"].as_str() {
+            if let Some(name) = series["key"].as_str() {
                 keys.insert(name.into(), "number".into());
             }
         }
@@ -112,12 +118,32 @@ impl Session {
                 });
             }
         }
+        let series_labels: BTreeMap<String, (String, String)> = self
+            .series_value()?
+            .into_iter()
+            .filter_map(|s| {
+                Some((
+                    s["key"].as_str()?.into(),
+                    (s["name"].as_str()?.into(), s["unit"].as_str()?.into()),
+                ))
+            })
+            .collect();
         let columns = keys
             .iter()
             .map(|(k, t)| ColumnMeta {
                 key: k.clone(),
-                label: k.clone(),
-                unit: None,
+                label: series_labels
+                    .get(k)
+                    .cloned()
+                    .unwrap_or_else(|| column_spec(k))
+                    .0,
+                unit: Some(
+                    series_labels
+                        .get(k)
+                        .cloned()
+                        .unwrap_or_else(|| column_spec(k))
+                        .1,
+                ),
                 r#type: t.clone(),
                 group: if k.contains('_') {
                     "analysis"
@@ -232,6 +258,7 @@ impl Session {
         let mut traces = vec![];
         for gas in regression::GASES {
             if let Some((t, y)) = raw.channels.get(gas) {
+                let options = options.for_gas(gas);
                 let sides = raw::group_indices(
                     t,
                     &crate::diagnostics::shifted(&raw, options.valve_offset),
@@ -280,16 +307,21 @@ impl Session {
             .transpose()?
             .unwrap_or(json!({}));
         let lag = self.cached_lag(&raw, &options, &cfg.diagnostics)?;
-        let mut diagnostics =
+        let analysis = if is_preview {
             crate::diagnostics::analyse(&raw, side, &options, &results, &cfg.diagnostics, lag)
-                .diagnostics;
-        for d in self.load_findings(id)? {
-            if ["temp_fallback", "no_plot"].contains(&d.code.as_str())
-                || (!is_preview && d.code == "neighbour_outlier")
-            {
-                diagnostics.push(d);
-            }
-        }
+        } else {
+            self.load_analysis(id)?
+        };
+        let diagnostics = if is_preview {
+            analysis.diagnostics.clone()
+        } else {
+            self.load_findings(id)?
+        };
+        let n2o_lag = analysis
+            .lags
+            .get("N2O")
+            .filter(|l| l.meaningful)
+            .map_or(0., |l| l.lag_s);
         for (gas, r) in &results {
             for (key, v) in [
                 ("slope", r.slope),
@@ -302,8 +334,27 @@ impl Session {
                 row.insert(format!("{gas}_{key}"), json!(v));
             }
         }
+        let mut diagnostics = diagnostics;
+        if is_preview {
+            let baseline: crate::diagnostics::Baseline = self.meta("diagnostic_baseline")?;
+            let mut rows = vec![row.clone()];
+            let mut f = vec![diagnostics];
+            crate::diagnostics::contextualise(
+                &mut rows,
+                &mut f,
+                std::slice::from_ref(&analysis),
+                &baseline,
+                &cfg.diagnostics,
+                cfg.time_zone
+                    .parse()
+                    .map_err(|_| Error::Invalid("time zone".into()))?,
+            );
+            row = rows.remove(0);
+            diagnostics = f.remove(0);
+        }
         crate::diagnostics::decorate(&mut row, &mut diagnostics, lag.0 + options.valve_offset);
         Ok(json!({
+        "robust":analysis.robust,"N2O_lagS":n2o_lag,
         "diagnostics":diagnostics,
         "valveLagS":lag.0+options.valve_offset,
         "flux":row,
@@ -369,7 +420,7 @@ impl Session {
             None,
         )?;
         tx.commit()?;
-        Ok(out)
+        ids.iter().map(|id| self.row(*id)).collect()
     }
 
     pub fn set_flux_flags(&self, ids: &[i64], flags: Value) -> Result<Vec<FluxRow>> {
@@ -400,7 +451,7 @@ impl Session {
             None,
         )?;
         tx.commit()?;
-        Ok(out)
+        ids.iter().map(|id| self.row(*id)).collect()
     }
 
     pub(super) fn write_row(&self, id: i64, row: &FluxRow) -> Result<()> {

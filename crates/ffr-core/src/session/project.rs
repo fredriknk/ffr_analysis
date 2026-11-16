@@ -6,7 +6,7 @@ impl Session {
             return Err(Error::Invalid(format!("{path}: destination exists")));
         }
         let db = Connection::open(path).map_err(|e| Error::Invalid(format!("{path}: {e}")))?;
-        db.execute_batch("PRAGMA journal_mode=DELETE; PRAGMA application_id=1179013682; PRAGMA user_version=2; PRAGMA foreign_keys=ON;
+        db.execute_batch("PRAGMA journal_mode=DELETE; PRAGMA application_id=1179013682; PRAGMA user_version=3; PRAGMA foreign_keys=ON;
 
  CREATE TABLE meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
 
@@ -16,7 +16,7 @@ impl Session {
 
  CREATE TABLE series(id INTEGER PRIMARY KEY,metadata TEXT NOT NULL,points TEXT NOT NULL);
 
- CREATE TABLE diagnostics(flux_id INTEGER PRIMARY KEY REFERENCES fluxes(id),findings TEXT NOT NULL);
+ CREATE TABLE diagnostics(flux_id INTEGER PRIMARY KEY REFERENCES fluxes(id),findings TEXT NOT NULL,analysis TEXT NOT NULL DEFAULT '{}');
  CREATE TABLE changes(id INTEGER PRIMARY KEY,
 time INTEGER NOT NULL,
 kind TEXT NOT NULL,
@@ -50,7 +50,7 @@ original INTEGER);
             .map_err(|e| Error::Invalid(format!("{path}: {e}")))?;
         let app: i64 = db.query_row("PRAGMA application_id", [], |r| r.get(0))?;
         let version: u32 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-        if app != 1179013682 || !(1..=2).contains(&version) {
+        if app != 1179013682 || !(1..=3).contains(&version) {
             return Err(Error::Invalid(
                 "unsupported project or schema version".into(),
             ));
@@ -61,11 +61,27 @@ original INTEGER);
         self.values_cache.borrow_mut().clear();
         self.db = Some(db);
         self.path = path.into();
-        if version == 1 {
+        if version < 3 {
             let tx = self.db()?.unchecked_transaction()?;
-            self.db()?.execute_batch("CREATE TABLE IF NOT EXISTS diagnostics(flux_id INTEGER PRIMARY KEY REFERENCES fluxes(id),findings TEXT NOT NULL);")?;
+            self.db()?.execute_batch("CREATE TABLE IF NOT EXISTS diagnostics(flux_id INTEGER PRIMARY KEY REFERENCES fluxes(id),findings TEXT NOT NULL,analysis TEXT NOT NULL DEFAULT '{}');")?;
+            let columns: Vec<String> = self
+                .db()?
+                .prepare("PRAGMA table_info(diagnostics)")?
+                .query_map([], |r| r.get(1))?
+                .collect::<std::result::Result<_, _>>()?;
+            if !columns.iter().any(|v| v == "analysis") {
+                self.db()?.execute_batch(
+                    "ALTER TABLE diagnostics ADD COLUMN analysis TEXT NOT NULL DEFAULT '{}';",
+                )?;
+            }
+            let mut cfg = self.get_config()?;
+            cfg.diagnostics = Default::default();
+            self.db()?.execute(
+                "UPDATE meta SET value=?1 WHERE key='config'",
+                [serde_json::to_string(&cfg)?],
+            )?;
             self.recompute_all(|_| {})?;
-            self.db()?.execute_batch("PRAGMA user_version=2;")?;
+            self.db()?.execute_batch("PRAGMA user_version=3;")?;
             tx.commit()?;
         }
         let info = self
@@ -96,7 +112,7 @@ original INTEGER);
             path: self.path.clone(),
             name: db.query_row("SELECT value FROM meta WHERE key='name'", [], |r| r.get(0))?,
             time_zone: self.get_config()?.time_zone,
-            schema_version: 2,
+            schema_version: 3,
             counts: Counts {
                 measurements: db
                     .query_row("SELECT count(*) FROM measurements", [], |r| r.get(0))?,

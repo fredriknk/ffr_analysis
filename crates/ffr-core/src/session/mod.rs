@@ -167,3 +167,6 @@ fn number(v: &Value) -> Option<f64> {
 
 use import::parse_time;
 pub(crate) use import::preset_layout;
+
+mod metadata;
+use metadata::column_spec;
