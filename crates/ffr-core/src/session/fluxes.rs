@@ -243,6 +243,7 @@ impl Session {
         let cfg = self.get_config()?;
         for r in results.values_mut() {
             r.flux *= cfg.pressure / 101000. * cfg.chamber_height / 0.5;
+            r.flux_factor *= cfg.pressure / 101000. * cfg.chamber_height / 0.5;
             if r.gas == "N2O" {
                 r.qc = regression::qc_with(r, side, &cfg.qc);
             }

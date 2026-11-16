@@ -930,6 +930,7 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "statrs",
+ "tempfile",
  "thiserror 2.0.21",
  "zip",
  "zstd",

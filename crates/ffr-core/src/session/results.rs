@@ -118,6 +118,7 @@ impl Session {
         };
         if row["temperatureFallback"] == true {
             findings.diagnostics.push(crate::diagnostics::Diagnostic {
+                impact: None,
                 code: "temp_fallback".into(),
                 severity: "info".into(),
                 gas: None,
@@ -127,6 +128,7 @@ impl Session {
         }
         if row["plotId"].is_null() || row["plotId"] == 0 {
             findings.diagnostics.push(crate::diagnostics::Diagnostic {
+                impact: None,
                 code: "no_plot".into(),
                 severity: "info".into(),
                 gas: None,
@@ -237,6 +239,7 @@ impl Session {
 
     pub(super) fn save_error_row(&self, id: i64, mut row: FluxRow, message: &str) -> Result<()> {
         let mut findings = vec![crate::diagnostics::Diagnostic {
+            impact: None,
             code: "error".into(),
             severity: "bad".into(),
             gas: None,

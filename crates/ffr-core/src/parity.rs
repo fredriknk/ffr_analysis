@@ -23,7 +23,8 @@ pub struct ParityReport {
 pub fn parity(raw_dir: &Path, golden_jsonl: &Path) -> Result<ParityReport> {
     let start = std::time::Instant::now();
 
-    let text = std::fs::read_to_string(golden_jsonl)?;
+    let text =
+        std::fs::read_to_string(golden_jsonl).map_err(|e| crate::Error::at(golden_jsonl, e))?;
 
     let lines: Vec<Value> = text
         .lines()
@@ -99,7 +100,7 @@ pub fn end_to_end(
 
     use std::collections::BTreeMap;
 
-    let text = std::fs::read_to_string(slopes)?;
+    let text = std::fs::read_to_string(slopes).map_err(|e| crate::Error::at(slopes, e))?;
 
     let mut options = BTreeMap::new();
 

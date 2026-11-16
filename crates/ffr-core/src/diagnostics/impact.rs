@@ -268,6 +268,7 @@ pub fn contextualise(
                     && ["valve_timing", "edge_transient", "spike"].contains(&d.code.as_str())
             }) {
                 if let (Some(change), Some(original), Some(robust)) = (change, original, robust) {
+                    d.impact = Some(change);
                     d.severity = if change >= 0.3 {
                         "bad"
                     } else if change >= 0.1 {

@@ -51,7 +51,7 @@ impl Session {
             match raw {
                 Err(e) => {
                     report.errors.push(ImportError {
-                        path: name.clone(),
+                        path: path.clone(),
                         message: e.to_string(),
                     });
                     let metadata = raw::filename(&name, &cfg.time_zone)
@@ -90,6 +90,7 @@ impl Session {
                         let id = db.last_insert_rowid();
                         row.insert("id".into(), json!(id));
                         let mut findings = vec![crate::diagnostics::Diagnostic {
+                            impact: None,
                             code: "error".into(),
                             severity: "bad".into(),
                             gas: None,
@@ -142,7 +143,7 @@ bytes])?;
                         if compute {
                             if let Err(e) = self.recompute_one(id) {
                                 report.errors.push(ImportError {
-                                    path: name.clone(),
+                                    path: path.clone(),
                                     message: format!("{side}: {e}"),
                                 });
                             }
@@ -157,6 +158,9 @@ bytes])?;
                 total: paths.len(),
                 message: Some(name),
             });
+        }
+        if compute {
+            self.neighbour_pass()?;
         }
         tx.commit()?;
         Ok(report)

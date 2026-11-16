@@ -18,8 +18,6 @@ pub struct DiagnosticsConfig {
     pub noisy_warn: f64,
     pub noisy_bad: f64,
     pub neighbour_raw_z: f64,
-    pub co2_min_r2: f64,
-    pub co2_bad_r2: f64,
     pub curvature_p: f64,
     pub curvature_gases: Vec<String>,
     pub curvature_slope_change: f64,
@@ -50,8 +48,6 @@ impl Default for DiagnosticsConfig {
             noisy_warn: 4.,
             noisy_bad: 10.,
             neighbour_raw_z: 8.,
-            co2_min_r2: 0.14,
-            co2_bad_r2: 0.05,
             curvature_p: 1e-12,
             curvature_gases: vec!["N2O".into(), "CO2".into()],
             curvature_slope_change: 0.4,
@@ -76,6 +72,8 @@ impl Default for DiagnosticsConfig {
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Diagnostic {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub impact: Option<f64>,
     pub code: String,
     pub severity: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -114,6 +112,7 @@ fn finding(
     message: String,
 ) -> Diagnostic {
     Diagnostic {
+        impact: None,
         code: code.into(),
         severity: severity.into(),
         gas: gas.map(str::to_owned),
@@ -139,25 +138,43 @@ pub fn score(findings: &mut [Diagnostic]) -> f64 {
     let Some(first) = active.first() else {
         return 0.;
     };
-    let impact = active
+    let impact = active.iter().filter_map(|d| d.impact).fold(0., f64::max);
+    let unique: BTreeSet<_> = active
         .iter()
-        .filter(|d| ["spike", "edge_transient", "valve_timing"].contains(&d.code.as_str()))
-        .filter_map(|d| {
-            d.message
-                .split("impact=")
-                .nth(1)?
-                .trim_end_matches('%')
-                .parse::<f64>()
-                .ok()
-        })
-        .fold(0., f64::max)
-        / 100.;
-    let extra = (active.len().saturating_sub(1) as f64 * 2.).min(8.);
+        .filter(|d| d.severity != "info")
+        .map(|d| d.code.as_str())
+        .collect();
+    let extra = (unique.len().saturating_sub(1) as f64 * 2.).min(6.);
+    let impact_weight = impact / (1. + impact);
+    let noise = active
+        .iter()
+        .filter(|d| d.code == "noisy")
+        .filter_map(|d| d.value)
+        .fold(0., f64::max);
+    let neighbour = active
+        .iter()
+        .filter(|d| d.code == "neighbour_outlier")
+        .filter_map(|d| d.value)
+        .fold(0., f64::max);
     match first.severity.as_str() {
-        "bad" => {
-            (70. + 25. * impact + extra + if first.code == "error" { 20. } else { 0. }).min(100.)
-        }
-        "warn" => (30. + 20. * impact + extra).min(69.),
+        "bad" => (70.
+            + 25. * impact_weight
+            + extra
+            + if first.code == "error" {
+                20.
+            } else {
+                (noise / 10.).max(1.).ln().min(3.) * 4.
+            })
+        .min(100.),
+        "warn" => (30.
+            + 20. * impact_weight
+            + extra
+            + if neighbour > 0. {
+                (neighbour - 3.5).clamp(0., 8.) * 2.
+            } else {
+                0.
+            })
+        .min(69.),
         _ => (1. + active.len() as f64).min(10.),
     }
 }
@@ -436,11 +453,12 @@ pub fn analyse(
             }
         }
         if gas == "CO2" || gas == "N2O" {
+            let effective = o.for_gas(gas);
             let ranges = group_ranges(
                 t,
-                &shifted(raw, o.valve_offset),
-                o.cut_beginnings,
-                o.cut_ends,
+                &shifted(raw, effective.valve_offset),
+                effective.cut_beginnings,
+                effective.cut_ends,
             );
             let set: BTreeSet<usize> = indices.iter().copied().collect();
             let mut edges = BTreeSet::new();
@@ -661,12 +679,15 @@ impl DiagnosticsConfig {
     pub fn validate(&self) -> crate::Result<()> {
         let probabilities = [
             self.n2o_negative_p,
-            self.co2_min_r2,
-            self.co2_bad_r2,
             self.curvature_p,
             self.valve_min_improvement,
         ];
         let positive = [
+            self.robust_mad,
+            self.lag_contrast_sd,
+            self.noisy_warn,
+            self.noisy_bad,
+            self.neighbour_raw_z,
             self.valve_search_s,
             self.valve_step_s,
             self.valve_min_lag_s,
@@ -678,14 +699,16 @@ impl DiagnosticsConfig {
             self.neighbour_fallback_days,
             self.min_window_s,
         ];
-        if probabilities
-            .iter()
-            .any(|v| !v.is_finite() || !(0. ..=1.).contains(v))
+        if !self.extra_cut_s.is_finite()
+            || self.extra_cut_s < 0.
+            || self.noisy_bad < self.noisy_warn
+            || probabilities
+                .iter()
+                .any(|v| !v.is_finite() || !(0. ..=1.).contains(v))
             || positive.iter().any(|v| !v.is_finite() || *v <= 0.)
             || self.valve_search_s > 60.
             || self.valve_step_s < 0.1
             || self.valve_min_lag_s > self.valve_search_s
-            || self.co2_bad_r2 > self.co2_min_r2
             || self.min_neighbours < 3
             || !self.curvature_slope_change.is_finite()
             || !(0. ..=2.).contains(&self.curvature_slope_change)

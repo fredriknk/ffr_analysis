@@ -77,7 +77,10 @@ pub fn read_value(path: &Path) -> Result<Value> {
     }
 }
 pub fn load(path: &Path, zone: &str) -> Result<Raw> {
-    from_value(filename(&path.to_string_lossy(), zone)?, read_value(path)?)
+    let metadata = filename(&path.to_string_lossy(), zone)
+        .map_err(|e| Error::Invalid(format!("{}: {e}", path.display())))?;
+    from_value(metadata, read_value(path)?)
+        .map_err(|e| Error::Invalid(format!("{}: {e}", path.display())))
 }
 pub fn from_value(metadata: Metadata, mut original: Value) -> Result<Raw> {
     if let Some(old) = original.as_array() {

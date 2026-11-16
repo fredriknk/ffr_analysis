@@ -194,7 +194,7 @@ Value::Null}
  "dump-json"=>{
 let args:Value=if let Some(text)=a.get(2){
 let text=if let Some(path)=text.strip_prefix('@'){
-std::fs::read_to_string(path)?}
+std::fs::read_to_string(path).map_err(|e|format!("{path}: {e}"))?}
 else{
 text.clone()}
 ;
