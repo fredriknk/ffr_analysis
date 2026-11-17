@@ -261,6 +261,10 @@ try {
   ).toBeVisible();
   await page.getByRole("button", { name: "← Back to Outliers" }).click();
   await nav("Treatments");
+  await expect(
+    page.getByRole("img", { name: "Daily means box plot", exact: true }),
+  ).toBeVisible();
+  await stamp(page, "treatments-top");
   await page.waitForTimeout(300);
   const brush = page.getByRole("img", {
     name: "Shared date-range brush",

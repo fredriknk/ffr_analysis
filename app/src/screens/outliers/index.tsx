@@ -2,9 +2,9 @@ import { useQuery } from "@tanstack/react-query";
 import { useCallback, useMemo, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { api } from "../../api";
+import { hasFinding } from "../../api/findingLevels";
 import type { FluxRow, Gas } from "../../api/types";
 import { Status, unit, useAction, useRows } from "../../shared/common";
-import { codes } from "../../shared/diagnostics";
 import { useDiagnostics } from "../../shared/hooks/useDiagnostics";
 import { useStore } from "../../store";
 import { ScatterPlot, type ScatterSpec } from "./ScatterPlot";
@@ -17,6 +17,7 @@ export function Outliers() {
     data = useRows(),
     action = useAction(),
     [selected, setSelected] = useState<number[]>([]),
+    [includeInfo, setIncludeInfo] = useState(false),
     [diagnostic, setDiagnostic] = useState<string | null>(null),
     [excluded, setExcluded] = useState(false),
     [gas, setGas] = useState<Gas>("N2O"),
@@ -52,13 +53,13 @@ export function Outliers() {
       .filter(
         (r) =>
           (excluded || !r.excluded) &&
-          (!diagnostic || codes(r.diag).includes(diagnostic)),
+          (!diagnostic || hasFinding(r, diagnostic, includeInfo)),
       )
       .map((r) => ({
         ...r,
         dayMedian: medians.get(formatter.format(r.time)) ?? null,
       }));
-  }, [data.data, excluded, diagnostic]);
+  }, [data.data, excluded, diagnostic, includeInfo, counts.data]);
   const specs = useMemo<ScatterSpec[]>(
     () => [
       {
@@ -234,6 +235,14 @@ export function Outliers() {
       <div className="outliers-layout">
         <aside className="panel diagnostic-bars">
           <h3>Findings</h3>
+          <label>
+            <input
+              type="checkbox"
+              checked={includeInfo}
+              onChange={(e) => setIncludeInfo(e.target.checked)}
+            />
+            Include info
+          </label>
           <Status loading={counts.isLoading} error={counts.error} />
           {counts.data
             ?.filter((c) => c.count)
@@ -248,7 +257,14 @@ export function Outliers() {
                 }}
               >
                 <span>{c.label}</span>
-                <strong>{c.count.toLocaleString()}</strong>
+                <strong>
+                  {c.warnBad ?? 0}
+                  {c.pending ? "…" : ""}
+                  <small className="muted">
+                    {" "}
+                    · {(c.info ?? 0).toLocaleString()} info
+                  </small>
+                </strong>
                 <i
                   style={{
                     width:

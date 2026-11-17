@@ -1926,3 +1926,36 @@ td {
 .finding-sentence {
   font-size: 11px;
 }
+.compact-findings {
+  flex: 0 0 auto;
+  min-height: 0 !important;
+}
+.compact-inspector {
+  justify-content: flex-start;
+}
+.diagnostic-picker > label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  padding: 3px 0;
+}
+.diagnostic-picker {
+  max-height: 230px;
+  overflow: auto;
+}
+.diagnostic-bars strong {
+  font-size: 11px;
+  white-space: nowrap;
+}
+.diagnostic-bars button {
+  flex-wrap: wrap;
+}
+.diagnostic-bars small {
+  font-weight: 400;
+}
+.startup-error {
+  padding: 12px;
+  background: #fbe9e5;
+  color: #963c30;
+}

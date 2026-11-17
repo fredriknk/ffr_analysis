@@ -1,6 +1,6 @@
-import { test, expect, type Page } from "@playwright/test";
-import { mkdirSync } from "node:fs";
+import { expect, test, type Page } from "@playwright/test";
 import type { ECharts } from "echarts/core";
+import { mkdirSync } from "node:fs";
 type ChartElement = HTMLElement & { __ffrChart: ECharts };
 async function chartPoint(page: Page, label: string) {
   const el = page.getByRole("img", { name: label, exact: true });

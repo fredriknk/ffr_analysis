@@ -3,6 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { seriesDisplay, unit } from "../shared/format";
 import type { FfrApi, Progress } from "./types";
 export const tauriApi: FfrApi = {
+  startupPath: () => invoke("startup_path"),
   projectCreate: (path, name) => invoke("project_create", { path, name }),
   projectOpen: (path) => invoke("project_open", { path }),
   projectClose: () => invoke("project_close"),

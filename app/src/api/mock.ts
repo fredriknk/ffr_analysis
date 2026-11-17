@@ -1,5 +1,6 @@
 import { diagnosticLabels, score } from "./diagnosticMeta";
 import { estimateLag, findings, median, thresholds } from "./diagnostics";
+import { findingLevels } from "./findingLevels";
 import {
   defaults,
   fluxConversion,
@@ -398,6 +399,7 @@ export function createMock(seed = 42): T.FfrApi {
       });
     r.overridden = opts.has(r.id);
     diagnosticMap.set(r.id, a.diagnostics);
+    r.diagSeverity = findingLevels(a.diagnostics);
     r.diag = [...new Set(a.diagnostics.map((d) => d.code))].join(",");
     r.attention = score(a.diagnostics);
   }
@@ -472,6 +474,7 @@ export function createMock(seed = 42): T.FfrApi {
           { bad: 0, warn: 1, info: 2 }[b.severity],
       );
       diagnosticMap.set(r.id, ds);
+      r.diagSeverity = findingLevels(ds);
       r.diag = [...new Set(ds.map((d) => d.code))].join(",");
       r.attention = score(ds);
     }
@@ -805,6 +808,7 @@ export function createMock(seed = 42): T.FfrApi {
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
   return {
+    startupPath: async () => null,
     projectCreate: async (p, name) => {
       path = p;
       config.name = name;

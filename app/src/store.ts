@@ -15,6 +15,8 @@ interface State {
   selected: number;
   reviewIds: number[] | undefined;
   diagnosticCodes: string[];
+  includeInfo: boolean;
+  reviewVisited: boolean;
   queueSort: "attention" | "time" | "plot";
   contactSheet: boolean;
   treatmentZoom: [number, number] | null;
@@ -46,6 +48,8 @@ export const useStore = create<State>((set, get) => ({
   selected: 1,
   reviewIds: undefined,
   diagnosticCodes: [],
+  includeInfo: false,
+  reviewVisited: false,
   queueSort: "attention",
   contactSheet: false,
   traceZoom: [0, 185],
@@ -70,10 +74,18 @@ export const useStore = create<State>((set, get) => ({
   focus: null,
   dataSearch: "",
   subset: undefined,
-  nav: (screen) => set({ screen, back: null }),
+  nav: (screen) =>
+    set({
+      screen,
+      back: null,
+      ...(screen === "Review" && !get().reviewVisited
+        ? { quick: "attention", queueSort: "attention", reviewVisited: true }
+        : {}),
+    }),
   openFlux: (selected) =>
     set({
       selected,
+      reviewVisited: true,
       back: get().screen,
       screen: "Review",
       quick: "all",
@@ -90,6 +102,7 @@ export const useStore = create<State>((set, get) => ({
     if (ids.length)
       set({
         reviewIds: ids,
+        reviewVisited: true,
         selected: ids[0],
         screen: "Review",
         back: get().screen,

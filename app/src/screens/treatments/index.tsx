@@ -43,6 +43,7 @@ export function Treatments() {
         }),
       ),
     ),
+    [fluxAsinh, setFluxAsinh] = useState(true),
     [boxScale, setBoxScale] = useState<AxisScale>("asinh"),
     [hidden, setHidden] = useState<number[]>([]),
     [showExcluded, setShowExcluded] = useState(false);
@@ -464,7 +465,16 @@ export function Treatments() {
           </Panel>
           <Panel
             title="Individual fluxes"
-            extra={<small>Click any point to open its trace →</small>}
+            extra={
+              <label>
+                <input
+                  type="checkbox"
+                  checked={fluxAsinh}
+                  onChange={(e) => setFluxAsinh(e.target.checked)}
+                />{" "}
+                Symmetric log (asinh)
+              </label>
+            }
           >
             <Chart
               label="Individual fluxes over time"
@@ -487,6 +497,14 @@ export function Treatments() {
               option={
                 {
                   ...seriesTime,
+                  yAxis: {
+                    type: "value",
+                    scale: true,
+                    axisLabel: {
+                      formatter: (v: number) =>
+                        fmt(fluxAsinh ? Math.sinh(v) : v, 1),
+                    },
+                  },
                   tooltip: {
                     trigger: "item",
                     formatter: (p: { value: number[]; seriesName: string }) =>
@@ -496,7 +514,7 @@ export function Treatments() {
                       "<br/>Flux #" +
                       p.value[2] +
                       ": " +
-                      fmt(p.value[1], 1),
+                      fmt(fluxAsinh ? Math.sinh(p.value[1]) : p.value[1], 1),
                   },
                   series: [
                     ...ps.map((p) => ({
@@ -507,17 +525,37 @@ export function Treatments() {
                         color: colour(p.treatmentId),
                         opacity: 0.65,
                       },
-                      data: p.points.map((v) => ({
-                        value: [v.time, v.value, v.fluxId],
-                        symbol:
-                          (fluxLookup.get(v.fluxId)?.attention ?? 0) >= 30
-                            ? "diamond"
-                            : "circle",
-                        symbolSize:
-                          (fluxLookup.get(v.fluxId)?.attention ?? 0) >= 30
-                            ? 7
-                            : 4,
-                      })),
+                      data: p.points
+                        .filter(
+                          (v) =>
+                            showExcluded || !fluxLookup.get(v.fluxId)?.excluded,
+                        )
+                        .map((v) => ({
+                          value: [
+                            v.time,
+                            fluxAsinh ? Math.asinh(v.value) : v.value,
+                            v.fluxId,
+                          ],
+                          itemStyle: {
+                            color: colour(p.treatmentId),
+                            borderWidth:
+                              (fluxLookup.get(v.fluxId)?.attention ?? 0) >= 30
+                                ? 2
+                                : 0,
+                            borderColor:
+                              (fluxLookup.get(v.fluxId)?.attention ?? 0) >= 70
+                                ? "#c94e48"
+                                : "#c58a2f",
+                          },
+                          symbol:
+                            (fluxLookup.get(v.fluxId)?.attention ?? 0) >= 30
+                              ? "circle"
+                              : "circle",
+                          symbolSize:
+                            (fluxLookup.get(v.fluxId)?.attention ?? 0) >= 30
+                              ? 7
+                              : 4,
+                        })),
                     })),
                     {
                       name: "Excluded",
@@ -535,7 +573,13 @@ export function Treatments() {
                               (!q.from || r.time >= q.from) &&
                               (!q.to || r.time <= q.to),
                           )
-                          .map((r) => [r.time, r[s.gas + "_flux"], r.id]) ?? [],
+                          .map((r) => [
+                            r.time,
+                            fluxAsinh
+                              ? Math.asinh(Number(r[s.gas + "_flux"]))
+                              : r[s.gas + "_flux"],
+                            r.id,
+                          ]) ?? [],
                     },
                   ],
                 } as EChartsCoreOption
