@@ -56,7 +56,7 @@ test("triage, stable selection, lazy contact sheet, linked charts and all screen
   test.setTimeout(240000);
   mkdirSync("screenshots", { recursive: true });
   const errors: string[] = [];
-  page.on("pageerror", (e) => errors.push(e.message));
+  page.on("pageerror", (e) => errors.push(e.stack ?? e.message));
   page.on("console", (e) => {
     if (e.type() === "error") errors.push(e.text());
   });

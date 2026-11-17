@@ -1959,3 +1959,14 @@ td {
   background: #fbe9e5;
   color: #963c30;
 }
+.diagnostic-bars button {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 2px;
+  padding: 6px 7px;
+}
+.diagnostic-bars button > * {
+  grid-column: 1;
+}
+.diagnostic-bars button > span {
+  white-space: normal;
+}

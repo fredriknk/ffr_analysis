@@ -21,4 +21,3 @@ describe("per-code severity", () => {
     ).toEqual({ spike: "warn" });
   });
 });
-

@@ -268,8 +268,11 @@ export function Outliers() {
                 <i
                   style={{
                     width:
-                      (c.count /
-                        Math.max(1, ...counts.data!.map((d) => d.count))) *
+                      ((c.warnBad ?? 0) /
+                        Math.max(
+                          1,
+                          ...counts.data!.map((d) => d.warnBad ?? 0),
+                        )) *
                         100 +
                       "%",
                   }}
