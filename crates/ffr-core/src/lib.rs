@@ -5,6 +5,7 @@ pub mod parity;
 pub mod raw;
 pub mod regression;
 pub mod session;
+pub mod waypoints;
 pub use api::*;
 pub use session::Session;
 

@@ -23,6 +23,7 @@ calamine = { version = "0.26", features = ["dates"] }
 rust_xlsxwriter = "0.79"
 csv = "1"
 tempfile = "3"
+same-file = "1"
 reqwest = { version = "0.12", features = ["blocking", "json"] }
 
 [dev-dependencies]
@@ -31,3 +32,4 @@ tempfile = "3"
 # calamine 0.26 uses the pre-2.5 ZipFile API; keep both workspaces reproducible.
 version = "=2.4.2"
 default-features = false
+

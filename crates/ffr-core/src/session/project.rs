@@ -205,6 +205,14 @@ original INTEGER);
     }
 
     pub fn set_config(&self, mut cfg: ProjectConfig, progress: impl Fn(Progress)) -> Result<()> {
+        if !regex::Regex::new(r"^EPSG:(326|327)(0[1-9]|[1-5][0-9]|60)$")
+            .expect("constant regex")
+            .is_match(&cfg.crs)
+        {
+            return Err(Error::Invalid(
+                "CRS must be EPSG:32601..32660 or EPSG:32701..32760".into(),
+            ));
+        }
         let _: chrono_tz::Tz = cfg
             .time_zone
             .parse()
@@ -252,9 +260,11 @@ original INTEGER);
         let mut stored = serde_json::to_value(&layout)?;
         if let Some(plots) = stored["plots"].as_array_mut() {
             for p in plots {
-                if let Some(existing) = old.plots.iter().find(|v| v["id"] == p["id"]) {
-                    if let Some(w) = existing.get("waypoints") {
-                        p["waypoints"] = w.clone();
+                if p.get("waypoints").is_none() {
+                    if let Some(existing) = old.plots.iter().find(|v| v["id"] == p["id"]) {
+                        if let Some(w) = existing.get("waypoints") {
+                            p["waypoints"] = w.clone();
+                        }
                     }
                 }
             }

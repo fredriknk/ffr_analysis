@@ -334,31 +334,66 @@ serde_json::to_string(findings)?])?;
         Ok(lag)
     }
 
-    pub(super) fn neighbour_pass(&self) -> Result<()> {
-        let mut rows = self.rows()?;
-        let mut findings: Vec<_> = rows
+    /// Re-scores the project-wide findings (baselines, neighbours, leaks) and
+    /// returns the ids of fluxes whose row or findings changed. Everything is
+    /// read in two bulk queries and only changed rows are written back, so a
+    /// single edit does not rewrite the whole project.
+    pub(super) fn neighbour_pass(&self) -> Result<BTreeSet<i64>> {
+        let db = self.db()?;
+        let mut texts = db.prepare_cached("SELECT id,row FROM fluxes ORDER BY id")?;
+        let texts = texts
+            .query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        let mut stored = db.prepare_cached("SELECT flux_id,findings,analysis FROM diagnostics")?;
+        let mut stored: BTreeMap<i64, (Option<String>, Option<String>)> = stored
+            .query_map([], |r| Ok((r.get(0)?, (r.get(1)?, r.get(2)?))))?
+            .collect::<std::result::Result<_, _>>()?;
+        let stored: Vec<_> = texts
             .iter()
-            .map(|r| self.load_findings(r["id"].as_i64().unwrap_or(0)))
-            .collect::<Result<_>>()?;
-        for (i, r) in rows.iter().enumerate() {
-            let analysis = self.load_analysis(r["id"].as_i64().unwrap_or(0))?;
-            if !analysis.diagnostics.is_empty() || !analysis.robust.is_empty() {
-                let contextual: Vec<_> = findings[i]
-                    .iter()
-                    .filter(|d| ["temp_fallback", "no_plot"].contains(&d.code.as_str()))
-                    .cloned()
-                    .collect();
-                findings[i] = analysis.diagnostics;
-                findings[i].extend(contextual);
-            }
+            .map(|(id, _)| stored.remove(id).unwrap_or_default())
+            .collect();
+        let parsed = texts
+            .par_iter()
+            .zip(&stored)
+            .map(|((_, text), (f, a))| {
+                let row = serde_json::from_str::<FluxRow>(text)?;
+                let mut list: Vec<crate::diagnostics::Diagnostic> = f
+                    .as_deref()
+                    .map(serde_json::from_str)
+                    .transpose()?
+                    .unwrap_or_default();
+                let analysis: crate::diagnostics::Findings = a
+                    .as_deref()
+                    .map(serde_json::from_str)
+                    .transpose()?
+                    .unwrap_or_default();
+                if !analysis.diagnostics.is_empty() || !analysis.robust.is_empty() {
+                    // The stored analysis already carries these for current
+                    // projects; only older ones need them carried over, and
+                    // never twice (duplicates would inflate `attention`).
+                    let contextual: Vec<_> = list
+                        .iter()
+                        .filter(|d| ["temp_fallback", "no_plot"].contains(&d.code.as_str()))
+                        .filter(|d| !analysis.diagnostics.iter().any(|a| a.code == d.code))
+                        .cloned()
+                        .collect();
+                    list = analysis.diagnostics.clone();
+                    list.extend(contextual);
+                }
+                Ok((row, list, analysis))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let mut rows = Vec::with_capacity(parsed.len());
+        let mut findings = Vec::with_capacity(parsed.len());
+        let mut analyses = Vec::with_capacity(parsed.len());
+        for (row, list, analysis) in parsed {
+            rows.push(row);
+            findings.push(list);
+            analyses.push(analysis);
         }
         let cfg = self.get_config()?;
         let baseline = crate::diagnostics::baselines(&rows, &cfg.diagnostics);
-        self.db()?.execute("INSERT INTO meta(key,value) VALUES('diagnostic_baseline',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value",[serde_json::to_string(&baseline)?])?;
-        let analyses: Vec<_> = rows
-            .iter()
-            .map(|r| self.load_analysis(r["id"].as_i64().unwrap_or(0)))
-            .collect::<Result<_>>()?;
+        db.execute("INSERT INTO meta(key,value) VALUES('diagnostic_baseline',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value",[serde_json::to_string(&baseline)?])?;
         let zone: chrono_tz::Tz = cfg
             .time_zone
             .parse()
@@ -371,25 +406,50 @@ serde_json::to_string(findings)?])?;
             &cfg.diagnostics,
             zone,
         );
-        for (row, mut f) in rows.iter_mut().zip(findings) {
-            let id = row["id"].as_i64().unwrap_or(0);
-            let lag = row.get("valveLagS").and_then(Value::as_f64).unwrap_or(0.);
-            crate::diagnostics::decorate(row, &mut f, lag);
-            self.write_row(id, row)?;
-            self.save_findings(id, &f)?;
+        let texts_out = rows
+            .par_iter_mut()
+            .zip(findings.into_par_iter())
+            .map(|(row, mut f)| {
+                let lag = row.get("valveLagS").and_then(Value::as_f64).unwrap_or(0.);
+                crate::diagnostics::decorate(row, &mut f, lag);
+                Ok((serde_json::to_string(row)?, serde_json::to_string(&f)?))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let mut changed = BTreeSet::new();
+        for (((id, old_row), (old_f, _)), (row_text, findings_text)) in
+            texts.iter().zip(&stored).zip(texts_out)
+        {
+            if &row_text != old_row {
+                db.prepare_cached("UPDATE fluxes SET row=?2 WHERE id=?1")?
+                    .execute(params![id, row_text])?;
+                changed.insert(*id);
+            }
+            if old_f.as_deref() != Some(findings_text.as_str()) {
+                db.prepare_cached("INSERT INTO diagnostics(flux_id,findings) VALUES(?1,?2) ON CONFLICT(flux_id) DO UPDATE SET findings=excluded.findings")?
+                    .execute(params![id, findings_text])?;
+                changed.insert(*id);
+            }
         }
-        Ok(())
+        Ok(changed)
     }
 
     pub fn diagnostics_summary(&self) -> Result<Vec<crate::diagnostics::DiagnosticSummary>> {
         let rows = self.rows()?;
+        let mut stored = self
+            .db()?
+            .prepare_cached("SELECT flux_id,findings FROM diagnostics")?;
+        let mut stored: BTreeMap<i64, String> = stored
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<std::result::Result<_, _>>()?;
         let findings = rows
             .iter()
             .map(|row| {
-                Ok((
-                    row["reviewed"] == true,
-                    self.load_findings(row["id"].as_i64().unwrap_or(0))?,
-                ))
+                let list: Vec<crate::diagnostics::Diagnostic> = stored
+                    .remove(&row["id"].as_i64().unwrap_or(0))
+                    .map(|s| serde_json::from_str(&s))
+                    .transpose()?
+                    .unwrap_or_default();
+                Ok((row["reviewed"] == true, list))
             })
             .collect::<Result<Vec<_>>>()?;
         let mut out = vec![];

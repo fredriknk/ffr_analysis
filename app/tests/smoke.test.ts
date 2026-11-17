@@ -289,7 +289,16 @@ test("triage, stable selection, lazy contact sheet, linked charts and all screen
   await nav("External data");
   await pair("external");
   await nav("Project");
+  const plots = page.locator(".map-plot");
+  await expect(plots.first()).toBeVisible();
+  await plots.nth(3).click();
+  await expect(page.getByLabel("Selected plot label")).toBeVisible();
   await pair("project");
+  await page.getByRole("button", { name: "Edit route" }).click();
+  await expect(page.locator(".waypoint-glyph").first()).toBeVisible();
+  await expect(page.locator(".proposal-plot").first()).toBeVisible();
+  await expect(page.locator(".plots-summary")).toContainText("36");
+  await pair("waypoints");
   expect(errors).toEqual([]);
 });
 test("empty project and API error states stay usable", async ({ page }) => {
@@ -327,4 +336,26 @@ test("empty project and API error states stay usable", async ({ page }) => {
       .getByRole("status")
       .filter({ hasText: "Synthetic connection failure" }),
   ).toBeVisible({ timeout: 10000 });
+});
+test("new project from a waypoint list", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.stack ?? e.message));
+  await page.goto("/");
+  await page
+    .getByRole("button", { name: "New project from waypoint list…" })
+    .click();
+  await expect(page.locator(".waypoint-glyph").first()).toBeVisible();
+  await expect(page.locator(".plots-summary")).toContainText(
+    "36 plots · 72 chamber measurements · 36 measured more than once",
+  );
+  await page
+    .getByRole("button", { name: "Create project from route…" })
+    .click();
+  await expect(page.locator(".map-plot")).toHaveCount(36);
+  await expect(page.locator(".plot-label", { hasText: /^P1$/ })).toHaveCount(1);
+  await page.getByRole("button", { name: "Edit route" }).click();
+  await expect(
+    page.getByRole("button", { name: "Use as project layout…" }),
+  ).toBeVisible();
+  expect(errors).toEqual([]);
 });

@@ -56,6 +56,15 @@ fn call(s: &mut Session, command: &str, a: Value) -> Result<Value> {
             )?;
             Value::Null
         }
+        "waypointsRead" => json!(s.waypoints_read(string(&a, "path")?)?),
+        "waypointPlots" => json!(s.waypoint_plots(
+            &serde_json::from_value::<Vec<ffr_core::waypoints::Waypoint>>(a["points"].clone())?,
+            &serde_json::from_value(a["opts"].clone())?
+        )?),
+        "applyWaypointLayout" => {
+            json!(s.apply_waypoint_layout(serde_json::from_value(a)?, |_| {})?)
+        }
+        "getRoute" => json!(s.get_route()?),
         "getLayout" => json!(s.get_layout()?),
         "setLayout" => {
             s.set_layout(serde_json::from_value(a["layout"].clone())?, |_| {})?;
@@ -127,6 +136,14 @@ fn run() -> Result<()> {
     let arg = |i: usize| a.get(i).map(String::as_str).ok_or("missing argument");
     let mut s = Session::default();
     let result = match arg(0)? {
+        "waypoint-plots" => {
+            let points = s.waypoints_read(arg(1)?)?;
+            let opts = ffr_core::waypoints::PlotGenOptions {
+                cluster_distance: a.get(2).map(|v| v.parse()).transpose()?.unwrap_or(1.),
+                ..Default::default()
+            };
+            json!(s.waypoint_plots(&points, &opts)?)
+        }
         "diagnostics" => {
             s.project_open(arg(1)?)?;
             s.diagnostics_report()?

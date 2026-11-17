@@ -405,7 +405,7 @@ strong {
 }
 .start-grid {
   display: grid;
-  grid-template-columns: 1.25fr 1fr;
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
   gap: 20px;
 }
 .recent {
@@ -420,6 +420,11 @@ strong {
 .recent small {
   display: block;
   margin-top: 6px;
+  overflow-wrap: anywhere;
+}
+.recent > span:nth-child(2) {
+  min-width: 0;
+  flex: 1;
 }
 .recent > span:last-child {
   margin-left: auto;
@@ -1076,15 +1081,54 @@ td {
   max-height: 265px;
   overflow: auto;
 }
+/* Grabs the (shifted) valve switch line itself: slate like the switch lines.
+   Purple stays reserved for the estimated timing. */
 .offset-handle {
-  border-color: #9876b5;
+  border-left: 2px solid #5f7383;
   top: 0;
 }
 .offset-handle span {
   bottom: auto;
   top: 0;
   background: var(--panel);
-  color: #9876b5;
+  color: #3f5463;
+  border: 1px solid #9fb0bc;
+  border-radius: 3px;
+  cursor: ew-resize;
+}
+.offset-handle:focus-visible span,
+.offset-handle:hover span {
+  background: var(--active);
+}
+[data-theme="dark"] .offset-handle {
+  border-color: #8fa3b1;
+}
+[data-theme="dark"] .offset-handle span {
+  color: #c9d6de;
+  border-color: #5a6b77;
+}
+.snap-lag {
+  margin-left: auto;
+  font-size: 9px;
+  font-weight: 400;
+  padding: 1px 6px;
+  color: #7f5aa3;
+  border-color: #c9b5dc;
+}
+.info-tip {
+  cursor: help;
+  font-weight: 400;
+  color: var(--muted, #7a8a96);
+}
+.lag-estimates {
+  display: flex;
+  flex-direction: column;
+  font-size: 10px;
+  gap: 2px;
+  color: var(--muted, #7a8a96);
+}
+.lag-estimates span {
+  color: var(--text, inherit);
 }
 .shortcut-strip[hidden] {
   display: none;
@@ -1282,14 +1326,33 @@ td {
 .diagnostic-filter select {
   max-width: 440px;
 }
+/* Floats over the workspace so it never pushes the screen down, and only
+   appears for operations that take noticeable time. */
 .operation-progress {
+  position: fixed;
+  top: 72px;
+  right: 24px;
+  z-index: 40;
   display: flex;
   align-items: center;
-  gap: 20px;
-  padding: 12px 25px;
-  background: var(--active);
+  gap: 14px;
+  padding: 8px 14px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12);
   font-size: 12px;
-  flex-wrap: wrap;
+  max-width: min(560px, calc(100vw - 48px));
+  pointer-events: none;
+  animation: progress-appear 0s linear 0.4s both;
+}
+@keyframes progress-appear {
+  from {
+    visibility: hidden;
+  }
+  to {
+    visibility: visible;
+  }
 }
 .operation-progress progress {
   accent-color: var(--accent);
@@ -1414,7 +1477,7 @@ td {
   width: 300px;
   left: 0;
   max-width: 320px;
-  max-height: 560px;
+  max-height: 620px;
   overflow: auto;
 }
 .queue-filter-popover label {
@@ -1969,4 +2032,454 @@ td {
 }
 .diagnostic-bars button > span {
   white-space: normal;
+}
+
+.active-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 0 8px 6px;
+}
+.filter-chip {
+  font-size: 10px;
+  padding: 1px 7px;
+  border-radius: 10px;
+  background: var(--active);
+  color: var(--accent);
+  border: 1px solid var(--border);
+}
+.filter-chip span {
+  margin-left: 2px;
+  opacity: 0.7;
+}
+
+/* Field map (shared by Waypoints and Project) */
+.field-map {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  background: #e9eef0;
+  border-radius: 5px;
+  user-select: none;
+  touch-action: none;
+}
+[data-theme="dark"] .field-map {
+  background: #172128;
+}
+.field-map > svg {
+  display: block;
+}
+.map-grid line {
+  stroke: rgba(80, 100, 112, 0.14);
+  stroke-width: 1;
+}
+[data-theme="dark"] .map-grid line {
+  stroke: rgba(170, 195, 210, 0.1);
+}
+.map-scale,
+.map-north {
+  position: absolute;
+  font-size: 10px;
+  padding: 3px 7px;
+  border-radius: 4px;
+  background: rgba(20, 30, 36, 0.72);
+  color: #eef4f6;
+  pointer-events: none;
+}
+.map-scale {
+  left: 10px;
+  bottom: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.map-scale span {
+  display: block;
+  height: 5px;
+  border: 1.5px solid #eef4f6;
+  border-top: 0;
+}
+.map-north {
+  left: 10px;
+  top: 10px;
+}
+.map-label {
+  font-size: 10px;
+  paint-order: stroke;
+  stroke: rgba(255, 255, 255, 0.85);
+  stroke-width: 3px;
+  fill: #1d2e38;
+  pointer-events: none;
+}
+[data-theme="dark"] .map-label {
+  stroke: rgba(10, 18, 22, 0.85);
+  fill: #e4eef3;
+}
+
+/* Waypoints workspace */
+.waypoints {
+  display: grid;
+  grid-template-columns: 290px minmax(0, 1fr) 310px;
+  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-areas: "bar bar bar" "left map right";
+  height: 100%;
+  gap: 10px;
+  padding: 10px;
+  box-sizing: border-box;
+}
+.wp-toolbar {
+  grid-area: bar;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+.wp-toolbar button {
+  padding: 5px 9px;
+  font-size: 11px;
+}
+.wp-title {
+  font-size: 13px;
+  margin-right: 8px;
+}
+.wp-toolbar .sep {
+  width: 1px;
+  height: 20px;
+  background: var(--border);
+  margin: 0 4px;
+}
+.segmented {
+  display: inline-flex;
+}
+.segmented button {
+  border-radius: 0;
+}
+.segmented button:first-child {
+  border-radius: 5px 0 0 5px;
+}
+.segmented button:last-child {
+  border-radius: 0 5px 5px 0;
+}
+.segmented button.on {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+.wp-menu {
+  position: relative;
+}
+.wp-menu > summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 5px 9px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  font-size: 11px;
+  background: var(--panel);
+}
+.wp-menu .filter-popover {
+  position: absolute;
+  z-index: 20;
+  min-width: 220px;
+}
+.wp-map-setup {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 280px;
+}
+.wp-side {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  overflow: auto;
+}
+.wp-left {
+  grid-area: left;
+}
+.wp-right {
+  grid-area: right;
+}
+.wp-map {
+  grid-area: map;
+  min-height: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.wp-section {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  font-size: 12px;
+}
+.wp-section h3 {
+  font-size: 12px;
+  margin: 0;
+}
+.wp-section button {
+  font-size: 11px;
+  padding: 5px 8px;
+}
+.small {
+  font-size: 11px;
+}
+.wp-stats {
+  font-size: 11px;
+  color: var(--accent);
+  line-height: 1.5;
+}
+.wp-list {
+  flex: 1;
+  min-height: 140px;
+  overflow: auto;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.wp-row {
+  display: grid;
+  grid-template-columns: 30px 1fr 88px 36px;
+  gap: 6px;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  border-radius: 0;
+  padding: 4px 8px;
+  font-size: 11px;
+  background: transparent;
+}
+.wp-row.on {
+  background: var(--active);
+}
+.wp-empty {
+  padding: 10px;
+}
+.wp-form {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+.wp-form.three {
+  grid-template-columns: 1fr 1fr 1fr;
+}
+.wp-form label {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 2px;
+  font-size: 10px;
+  color: var(--muted);
+}
+.wp-form input,
+.wp-form select {
+  font-size: 11px;
+  min-width: 0;
+}
+.wp-form input:not([type="checkbox"]),
+.wp-form select {
+  width: 100%;
+  box-sizing: border-box;
+}
+label.check {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  font-size: 11px;
+}
+.button-row {
+  display: flex;
+  gap: 6px;
+}
+button.danger {
+  color: #c0392b;
+}
+.warn-text {
+  color: #b5651d;
+}
+.inline-confirm {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  padding: 7px 9px;
+  border: 1px solid #e2b97a;
+  background: rgba(242, 165, 65, 0.1);
+  border-radius: 6px;
+  font-size: 11px;
+}
+.wp-pending {
+  margin-left: auto;
+}
+.plots-summary {
+  font-size: 11px;
+  margin: 0;
+}
+.map-banner {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(20, 30, 36, 0.8);
+  color: #fff;
+  padding: 5px 12px;
+  border-radius: 14px;
+  font-size: 11px;
+  pointer-events: none;
+}
+.route-line {
+  fill: none;
+  stroke: rgba(30, 45, 55, 0.55);
+  stroke-width: 1.5;
+}
+[data-theme="dark"] .route-line {
+  stroke: rgba(220, 235, 240, 0.5);
+}
+.waypoint-glyph,
+.waypoint-tag {
+  cursor: pointer;
+}
+.waypoint-tag rect {
+  fill: rgba(20, 32, 40, 0.82);
+  stroke: rgba(255, 255, 255, 0.25);
+}
+.waypoint-tag rect.on {
+  stroke: #fff;
+  stroke-width: 1.5;
+}
+.waypoint-tag text {
+  fill: #eef5f7;
+  font-size: 10.5px;
+}
+.waypoint-tag line {
+  stroke: rgba(20, 32, 40, 0.5);
+}
+.chamber {
+  stroke: #fff;
+  stroke-width: 1;
+}
+.chamber.left {
+  fill: #0072b2;
+}
+.chamber.right {
+  fill: #d55e00;
+}
+.proposal-plot polygon {
+  fill: rgba(63, 207, 152, 0.16);
+  stroke: rgba(30, 140, 100, 0.9);
+  stroke-width: 1;
+}
+.rotate-handle line {
+  stroke: #fff;
+  stroke-width: 2;
+  stroke-dasharray: 3 3;
+}
+.rotate-handle circle {
+  fill: #fff;
+  stroke: #33444f;
+  stroke-width: 1.5;
+  cursor: grab;
+}
+.selection-box {
+  fill: rgba(74, 163, 240, 0.12);
+  stroke: #4aa3f0;
+  stroke-dasharray: 4 3;
+}
+
+/* Project field map */
+.plot-map {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 270px;
+  gap: 14px;
+}
+.plot-map-main {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.plot-map-canvas {
+  height: 540px;
+  outline: none;
+}
+.plot-map-canvas:focus-visible {
+  box-shadow: 0 0 0 2px var(--accent, #3fcf98);
+  border-radius: 5px;
+}
+.plot-map-dirty {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  font-weight: 600;
+  color: #b7791f;
+}
+.plot-map-legend {
+  margin: 0;
+}
+.plot-map-side {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 620px;
+  overflow: auto;
+}
+.map-plot {
+  cursor: pointer;
+}
+.map-plot polygon {
+  fill-opacity: 0.45;
+  stroke-width: 1.5;
+  stroke-opacity: 0.95;
+}
+.map-plot:hover polygon {
+  fill-opacity: 0.62;
+}
+.map-plot.on polygon {
+  fill-opacity: 0.7;
+  stroke: #fff;
+  stroke-width: 3;
+}
+.map-plot text {
+  pointer-events: none;
+}
+.route-line.faint {
+  opacity: 0.45;
+  pointer-events: none;
+}
+.measured {
+  pointer-events: none;
+  fill: #1e2a32;
+  fill-opacity: 0.75;
+  stroke: #fff;
+  stroke-width: 0.8;
+}
+[data-theme="dark"] .measured {
+  fill: #e7eef2;
+  stroke: #172128;
+}
+.measured.lost {
+  pointer-events: auto;
+  fill: #e5484d;
+  fill-opacity: 1;
+}
+@media (max-width: 1100px) {
+  .plot-map {
+    grid-template-columns: 1fr;
+  }
+}
+.plot-label {
+  font-size: 11px;
+  font-weight: 650;
+}
+.wp-form .wide {
+  grid-column: 1 / -1;
 }

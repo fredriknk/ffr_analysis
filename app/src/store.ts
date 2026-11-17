@@ -6,6 +6,7 @@ export type Screen =
   | "Outliers"
   | "Data"
   | "External data"
+  | "Waypoints"
   | "Project";
 interface State {
   screen: Screen;
@@ -26,6 +27,8 @@ interface State {
   theme: "light" | "dark";
   search: string;
   quick: string;
+  /** Review queue source filter: robot traces by default; manual fluxes have no trace. */
+  reviewSource: "robot" | "manual" | "";
   treatment: string;
   plot: string;
   from: string;
@@ -35,6 +38,13 @@ interface State {
   focus: number | null;
   dataSearch: string;
   subset: number[] | undefined;
+  /** A route for the Waypoints screen to open (consumed there). */
+  routeRequest: {
+    points: import("./api/types").Waypoint[];
+    sourcePath: string | null;
+    /** Open the "plots from route" panel, e.g. for a new project. */
+    plots?: boolean;
+  } | null;
   nav: (s: Screen) => void;
   openFlux: (id: number) => void;
   goBack: () => void;
@@ -65,6 +75,7 @@ export const useStore = create<State>((set, get) => ({
       : "light"),
   search: "",
   quick: "attention",
+  reviewSource: "robot",
   treatment: "",
   plot: "",
   from: "",
@@ -74,6 +85,7 @@ export const useStore = create<State>((set, get) => ({
   focus: null,
   dataSearch: "",
   subset: undefined,
+  routeRequest: null,
   nav: (screen) =>
     set({
       screen,
@@ -102,6 +114,8 @@ export const useStore = create<State>((set, get) => ({
     if (ids.length)
       set({
         reviewIds: ids,
+        // A picked set is shown whole, manual fluxes included.
+        reviewSource: "",
         reviewVisited: true,
         selected: ids[0],
         screen: "Review",

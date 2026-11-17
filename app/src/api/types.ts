@@ -52,6 +52,8 @@ export interface ProjectConfig {
   qcThreshold: number;
   diagnostics: Record<string, number>;
   plotAssignment: "polygons" | "waypoint";
+  /** Projected CRS of robot/waypoint coordinates: "EPSG:326NN" (UTM north) or "EPSG:327NN". */
+  crs: string;
 }
 export interface Treatment {
   id: number;
@@ -66,6 +68,97 @@ export interface Plot {
   treatmentId: number;
   block: number;
   polygon: [number, number][] | null;
+  /** Route waypoints measuring this plot: trailing number of the waypoint name + chamber side. */
+  waypoints?: WaypointRef[] | null;
+}
+export interface WaypointRef {
+  waypoint: number;
+  side: "left" | "right";
+}
+export type WaypointKind = "Measure" | "DriveThrough" | "TurningPoint" | "Stop";
+export type WaypointSide = "both" | "left" | "right" | "none";
+/** One row of a robot route CSV (`X,Y,Z,Angle,Type,MeasureSide,Name`, no header). */
+export interface Waypoint {
+  x: number;
+  y: number;
+  z: number;
+  /** Heading in radians: 0 = grid east, counter-clockwise positive. */
+  angle: number;
+  kind: WaypointKind;
+  side: WaypointSide;
+  name: string;
+  /** Original text of x, y, z, angle; kept when the value is unchanged so saving preserves precision. */
+  original?: [string, string, string, string] | null;
+}
+export interface PlotGenOptions {
+  /** Chambers closer than this (complete link, metres) are the same plot, e.g. two-way trips. */
+  clusterDistance: number;
+  /** auto: square sized by the nearest other plot centre; square: `size`; rectangle: `width` × `height`. */
+  shape: "auto" | "square" | "rectangle";
+  size: number;
+  /** Along the field direction (`angle`). */
+  width: number;
+  /** Across the field direction. */
+  height: number;
+  /** Field direction in radians; null = minimum-area bounding rectangle of the plot centres. */
+  angle: number | null;
+  labelPrefix: string;
+}
+export interface WaypointVisit {
+  /** Index into the route. */
+  waypointIndex: number;
+  name: string;
+  /** Trailing number of the name (what raw file names are matched on), null if none. */
+  waypoint: number | null;
+  side: "left" | "right";
+  /** Chamber position. */
+  x: number;
+  y: number;
+}
+export interface ProposedPlot {
+  /** 1..n in order of the first visit along the route. */
+  key: number;
+  label: string;
+  /** Mean chamber position. */
+  x: number;
+  y: number;
+  polygon: [number, number][];
+  visits: WaypointVisit[];
+}
+export interface PlotProposal {
+  /** Field direction used for the polygons, radians. */
+  angle: number;
+  plots: ProposedPlot[];
+}
+export interface ApplyWaypointLayoutArgs {
+  points: Waypoint[];
+  sourcePath?: string | null;
+  plots: {
+    label: string;
+    polygon: [number, number][];
+    /** Missing/null: an "Unassigned" treatment (created when needed). */
+    treatmentId?: number | null;
+    block?: number;
+    waypoints: WaypointRef[];
+  }[];
+}
+export interface StoredRoute {
+  points: Waypoint[];
+  sourcePath: string | null;
+  savedAt: number;
+}
+/** Local XYZ imagery folder (`{dir}/{z}/{x}/{y}.jpg|png`), an app preference. */
+export interface MapTiles {
+  dir: string;
+  levels: number[];
+}
+/** `data` is a data URL. A coarser tile may fill in: the requested tile is
+ *  sub-tile (`dx`, `dy`) of a `factor` × `factor` split of `data`. */
+export interface MapTile {
+  data: string;
+  factor: number;
+  dx: number;
+  dy: number;
 }
 export interface Layout {
   treatments: Treatment[];
@@ -369,4 +462,21 @@ export interface FfrApi {
   ): Promise<void>;
   exportCsv(args: ExportArgs): Promise<void>;
   onProgress(cb: (event: Progress) => void): Promise<() => void>;
+  waypointsRead(path: string): Promise<Waypoint[]>;
+  /** Refuses to overwrite `sourcePath`; replaces `path` atomically. */
+  waypointsWrite(
+    path: string,
+    points: Waypoint[],
+    sourcePath?: string | null,
+  ): Promise<void>;
+  waypointPlots(
+    points: Waypoint[],
+    opts: PlotGenOptions,
+  ): Promise<PlotProposal>;
+  /** Replaces the project's plots (one undo step), stores the route, recomputes. */
+  applyWaypointLayout(args: ApplyWaypointLayoutArgs): Promise<Layout>;
+  getRoute(): Promise<StoredRoute | null>;
+  mapTilesGet(): Promise<MapTiles | null>;
+  mapTilesSet(dir: string | null): Promise<MapTiles | null>;
+  mapTile(z: number, x: number, y: number): Promise<MapTile | null>;
 }

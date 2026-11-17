@@ -12,6 +12,9 @@ fn check(name: &str, value: &Value) {
     let mut expected = BTreeSet::new();
     let mut allowed = BTreeSet::new();
     for line in body.lines() {
+        if line.trim_start().starts_with(['/', '*']) {
+            continue;
+        }
         if line.trim() == "}" && depth == 0 {
             break;
         }

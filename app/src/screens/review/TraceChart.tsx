@@ -4,6 +4,20 @@ import type { AnalysisOptions, FluxDetail, Gas } from "../../api/types";
 import { Chart } from "../../shared/charts/Chart";
 import { Empty, unit } from "../../shared/common";
 import { useStore } from "../../store";
+
+const chamberColour = ["#98a5af", "#0072b2", "#d55e00"],
+  chamberShade = ["", "rgba(0,114,178,.07)", "rgba(213,94,0,.07)"];
+type TooltipParam = {
+  seriesName?: string;
+  value?: unknown;
+  axisValue?: number | string;
+  marker?: string;
+};
+const short = (v: number) =>
+  Math.abs(v) >= 1000 ? v.toFixed(0) : String(Number(v.toPrecision(5)));
+const signed = (v: number) =>
+  (v > 0 ? "+" : v < 0 ? "−" : "") + Math.abs(v).toString();
+
 export function TraceChart({
   detail,
   gas,
@@ -24,7 +38,8 @@ export function TraceChart({
     robust = detail.robust?.find((r) => r.gas === gas),
     sib = detail.sibling.find((r) => r.gas === gas),
     o = { ...options, ...options.perGas?.[gas] },
-    drag = useRef(options);
+    drag = useRef(options),
+    anchor = useRef<number | null>(null);
   drag.current = options;
   if (!tr || !r)
     return (
@@ -35,7 +50,23 @@ export function TraceChart({
     );
   const max = Math.max(185, ...tr.t),
     min = Math.min(0, ...tr.t),
-    lag = gas === "N2O" ? Number(detail.flux.N2O_lagS) : detail.valveLagS;
+    side = detail.flux.side === "left" ? 1 : 2,
+    offset = o.valveOffset ?? 0,
+    lag = gas === "N2O" ? Number(detail.flux.N2O_lagS) : detail.valveLagS,
+    hasLag = Number.isFinite(lag) && Math.abs(lag - offset) >= 0.5,
+    switches = [...detail.switches].sort((a, b) => a.t - b.t);
+  // Segments of this chamber, after the valve timing shift: exactly where the
+  // points that can enter this flux's regression come from.
+  const segments = switches.flatMap((sw, i) =>
+    sw.side === detail.flux.side
+      ? [
+          [
+            { xAxis: sw.t + offset },
+            { xAxis: (switches[i + 1]?.t ?? max - offset) + offset },
+          ],
+        ]
+      : [],
+  );
   const line = (fit: typeof r | typeof robust) =>
     fit
       ? [
@@ -43,15 +74,15 @@ export function TraceChart({
           [fit.stop, fit.intercept + fit.slope * fit.stop],
         ]
       : [];
-  const series: object[] = [0, 1, 2].map((side) => ({
-    name: side === 0 ? "Cut" : side === 1 ? "Left" : "Right",
+  const series: object[] = [0, 1, 2].map((s) => ({
+    name: s === 0 ? "Cut" : s === 1 ? "Left" : "Right",
     type: "scatter",
-    symbolSize: side ? 4 : 2,
+    symbolSize: s ? 4 : 2,
     itemStyle: {
-      color: ["#98a5af", "#0072b2", "#d55e00"][side],
-      opacity: side === (detail.flux.side === "left" ? 1 : 2) ? 1 : 0.3,
+      color: chamberColour[s],
+      opacity: s === side ? 1 : 0.3,
     },
-    data: tr.t.flatMap((t, i) => (tr.side[i] === side ? [[t, tr.y[i]]] : [])),
+    data: tr.t.flatMap((t, i) => (tr.side[i] === s ? [[t, tr.y[i]]] : [])),
     xAxisIndex: 0,
     yAxisIndex: 0,
   }));
@@ -59,7 +90,7 @@ export function TraceChart({
     name: "Used",
     type: "scatter",
     symbolSize: 5,
-    itemStyle: { color: detail.flux.side === "left" ? "#0072b2" : "#d55e00" },
+    itemStyle: { color: chamberColour[side] },
     data: tr.t.flatMap((t, i) => (tr.used[i] ? [[t, tr.y[i]]] : [])),
   });
   series.push({
@@ -70,32 +101,33 @@ export function TraceChart({
     data: line(r),
     markArea: {
       silent: true,
-      itemStyle: { color: "rgba(80,140,150,.045)" },
-      data: detail.switches.map((sw) => [
-        { xAxis: sw.t + o.valveOffset },
-        { xAxis: sw.t + o.valveOffset + 20 },
-      ]),
+      itemStyle: { color: chamberShade[side] },
+      data: segments,
     },
     markLine: {
       silent: true,
       symbol: "none",
       label: { show: false },
       data: [
-        ...detail.switches.map((sw) => ({
-          xAxis: sw.t,
-          lineStyle: { color: "#8999a5", type: "solid", opacity: 0.4 },
+        // Valve switches as the analysis uses them (shifted by the offset).
+        ...switches.map((sw) => ({
+          xAxis: sw.t + offset,
+          lineStyle: { color: "#8999a5", type: "solid", opacity: 0.55 },
         })),
-        ...(Number.isFinite(lag) && Math.abs(lag) >= 0.5
-          ? detail.switches.map((sw, i) => ({
+        // Where the robot logged them, when a shift is applied.
+        ...(offset
+          ? switches.map((sw) => ({
+              xAxis: sw.t,
+              lineStyle: { color: "#8999a5", type: "dotted", opacity: 0.35 },
+            }))
+          : []),
+        ...(hasLag
+          ? switches.map((sw, i) => ({
               xAxis: sw.t + lag,
               lineStyle: { type: "dashed", color: "#a771be", opacity: 0.7 },
               label: {
                 show: i === 1,
-                formatter:
-                  gas.replace("2", "₂") +
-                  " lag " +
-                  String(lag).replace("-", "−") +
-                  " s",
+                formatter: "estimated " + signed(lag) + " s",
                 position: "insideEndTop",
                 fontSize: 9,
               },
@@ -152,10 +184,66 @@ export function TraceChart({
     drag.current = next;
     return next;
   }
+  const current = (key: "start" | "stop" | "valveOffset") =>
+    ({ ...drag.current, ...drag.current.perGas?.[gas] })[key] ?? 0;
+  const toPercent = (t: number) => ((t - zoom[0]) / (zoom[1] - zoom[0])) * 100;
+  const timeAt = (e: React.PointerEvent<HTMLElement>) => {
+    const box = e.currentTarget.parentElement!.getBoundingClientRect();
+    return zoom[0] + ((e.clientX - box.left) / box.width) * (zoom[1] - zoom[0]);
+  };
+  // The offset handle sits on a real valve switch line: the one nearest the
+  // middle of the view, kept fixed while dragging.
+  const centre = (zoom[0] + zoom[1]) / 2,
+    nearest = switches.reduce(
+      (best, sw, i) =>
+        Math.abs(sw.t + offset - centre) <
+        Math.abs((switches[best]?.t ?? Infinity) + offset - centre)
+          ? i
+          : best,
+      0,
+    ),
+    anchorIndex = anchor.current ?? nearest,
+    anchorSwitch = switches[anchorIndex];
+  function keyStep(
+    e: React.KeyboardEvent,
+    key: "start" | "stop" | "valveOffset",
+    step: number,
+    limit: [number, number],
+  ) {
+    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+    e.preventDefault();
+    const value = Math.max(
+      limit[0],
+      Math.min(
+        limit[1],
+        (o[key] ?? 0) + (e.key === "ArrowRight" ? step : -step),
+      ),
+    );
+    const next = update(key, value);
+    preview(next);
+    commit(next);
+  }
   return (
     <section className="trace-panel">
       <h3>
         {gas} <small>{unit(tr.unit)} · residual below</small>
+        {hasLag && (
+          <button
+            className="snap-lag"
+            title={
+              "Shift the valve switches to the estimated timing (" +
+              signed(lag) +
+              " s): the dashed purple lines"
+            }
+            onClick={() => {
+              const next = update("valveOffset", Math.round(lag * 2) / 2);
+              preview(next);
+              commit(next);
+            }}
+          >
+            Use estimated valve timing {signed(lag)} s
+          </button>
+        )}
       </h3>
       <div className="trace-fill">
         <Chart
@@ -186,7 +274,47 @@ export function TraceChart({
                 { left: 54, right: 12, top: 12, bottom: 72 },
                 { left: 54, right: 12, height: 30, bottom: 24 },
               ],
-              tooltip: { trigger: "axis" },
+              tooltip: {
+                trigger: "axis",
+                confine: true,
+                padding: [3, 6],
+                textStyle: { fontSize: 10, lineHeight: 13 },
+                extraCssText: "box-shadow:none;opacity:.92;",
+                // Beside the cursor along the top edge, not on the points.
+                position: (
+                  point: number[],
+                  _p: unknown,
+                  _d: unknown,
+                  _r: unknown,
+                  size: { contentSize: number[]; viewSize: number[] },
+                ) => [
+                  point[0] + 14 + size.contentSize[0] > size.viewSize[0]
+                    ? point[0] - size.contentSize[0] - 14
+                    : point[0] + 14,
+                  2,
+                ],
+                formatter: (raw: TooltipParam | TooltipParam[]) => {
+                  const ps = Array.isArray(raw) ? raw : [raw],
+                    t = Number(ps[0]?.axisValue);
+                  if (!Number.isFinite(t)) return "";
+                  const lines = [t.toFixed(1) + " s"];
+                  for (const p of ps)
+                    if (["Left", "Right", "Cut"].includes(p.seriesName ?? ""))
+                      lines.push(
+                        (p.marker ?? "") +
+                          p.seriesName +
+                          " " +
+                          short((p.value as number[])[1]),
+                      );
+                  if (t >= r.start && t <= r.stop)
+                    lines.push("Fit " + short(r.intercept + r.slope * t));
+                  if (robust && t >= robust.start && t <= robust.stop)
+                    lines.push(
+                      "Robust " + short(robust.intercept + robust.slope * t),
+                    );
+                  return lines.join("<br/>");
+                },
+              },
               axisPointer: { link: [{ xAxisIndex: "all" }] },
               xAxis: [
                 {
@@ -239,70 +367,84 @@ export function TraceChart({
           }
         />
         <div className="trace-handle-space">
-          {(["start", "stop", "valveOffset"] as const).map((key) => {
-            const value =
-                key === "valveOffset" ? 20 + (o.valveOffset ?? 0) : o[key],
-              position = ((value - zoom[0]) / (zoom[1] - zoom[0])) * 100;
-            return (
-              <div
-                key={key}
-                role="slider"
-                tabIndex={0}
-                aria-label={
-                  gas +
-                  " " +
-                  (key === "valveOffset" ? "valve offset" : key) +
-                  " handle"
-                }
-                aria-valuemin={key === "valveOffset" ? -10 : 0}
-                aria-valuemax={key === "valveOffset" ? 10 : max}
-                aria-valuenow={o[key] ?? 0}
-                className={
-                  "window-handle " +
-                  (key === "valveOffset" ? "offset-handle" : key)
-                }
-                style={{ left: position + "%" }}
-                onPointerDown={(e) =>
-                  e.currentTarget.setPointerCapture(e.pointerId)
-                }
-                onPointerMove={(e) => {
-                  if (!e.currentTarget.hasPointerCapture(e.pointerId)) return;
-                  const box =
-                      e.currentTarget.parentElement!.getBoundingClientRect(),
-                    t =
-                      zoom[0] +
-                      ((e.clientX - box.left) / box.width) *
-                        (zoom[1] - zoom[0]),
-                    value =
-                      key === "valveOffset"
-                        ? Math.max(
-                            -10,
-                            Math.min(10, Math.round((t - 20) * 2) / 2),
-                          )
-                        : Math.max(0, Math.min(max, Math.round(t)));
-                  preview(update(key, value));
-                }}
-                onPointerUp={(e) => {
-                  e.currentTarget.releasePointerCapture(e.pointerId);
-                  commit(drag.current);
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
-                    e.preventDefault();
-                    const value =
-                      (o[key] ?? 0) + (e.key === "ArrowRight" ? 1 : -1);
-                    const next = update(key, value);
-                    preview(next);
-                    commit(next);
-                  }
-                }}
-              >
-                <span>
-                  {key === "valveOffset" ? "Offset" : key} {o[key] ?? 0}s
-                </span>
-              </div>
-            );
-          })}
+          {(["start", "stop"] as const).map((key) => (
+            <div
+              key={key}
+              role="slider"
+              tabIndex={0}
+              aria-label={gas + " " + key + " handle"}
+              aria-valuemin={0}
+              aria-valuemax={max}
+              aria-valuenow={o[key]}
+              title={
+                "Regression " +
+                key +
+                ": drag, or focus and use ←/→. Saved when you let go."
+              }
+              className={"window-handle " + key}
+              style={{ left: toPercent(o[key]) + "%" }}
+              onPointerDown={(e) =>
+                e.currentTarget.setPointerCapture(e.pointerId)
+              }
+              onPointerMove={(e) => {
+                if (!e.currentTarget.hasPointerCapture(e.pointerId)) return;
+                const value = Math.max(0, Math.min(max, Math.round(timeAt(e))));
+                if (value !== current(key)) preview(update(key, value));
+              }}
+              onPointerUp={(e) => {
+                e.currentTarget.releasePointerCapture(e.pointerId);
+                commit(drag.current);
+              }}
+              onKeyDown={(e) => keyStep(e, key, 1, [0, max])}
+            >
+              <span>
+                {key === "start" ? "Start" : "Stop"} {o[key]} s
+              </span>
+            </div>
+          ))}
+          {anchorSwitch && (
+            <div
+              role="slider"
+              tabIndex={0}
+              aria-label={gas + " valve offset handle"}
+              aria-valuemin={-10}
+              aria-valuemax={10}
+              aria-valuenow={offset}
+              title={
+                "Valve timing: drag this switch line to move all valve switches together. " +
+                "Points are re-assigned to the left/right chamber live; the shaded bands " +
+                "are this chamber's segments. Dotted lines: switch times as logged."
+              }
+              className="window-handle offset-handle"
+              style={{ left: toPercent(anchorSwitch.t + offset) + "%" }}
+              onPointerDown={(e) => {
+                anchor.current = anchorIndex;
+                e.currentTarget.setPointerCapture(e.pointerId);
+              }}
+              onPointerMove={(e) => {
+                if (!e.currentTarget.hasPointerCapture(e.pointerId)) return;
+                const value = Math.max(
+                  -10,
+                  Math.min(
+                    10,
+                    Math.round((timeAt(e) - anchorSwitch.t) * 2) / 2,
+                  ),
+                );
+                if (value !== current("valveOffset"))
+                  preview(update("valveOffset", value));
+              }}
+              onPointerUp={(e) => {
+                e.currentTarget.releasePointerCapture(e.pointerId);
+                anchor.current = null;
+                commit(drag.current);
+              }}
+              onKeyDown={(e) => keyStep(e, "valveOffset", 0.5, [-10, 10])}
+            >
+              <span>
+                ⇆ Valve timing {offset ? signed(offset) + " s" : "as logged"}
+              </span>
+            </div>
+          )}
         </div>
       </div>
     </section>

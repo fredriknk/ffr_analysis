@@ -145,6 +145,21 @@ Chamber position from vehicle position, heading and side: `prog/sort_results.py`
 
 Plots belong to treatments.
 
+**Plots from a robot route.** A route CSV (no header, `X,Y,Z,Angle,Type,MeasureSide,Name`;
+angle in radians, 0 = grid east, counter-clockwise; types `Measure|DriveThrough|TurningPoint|Stop`;
+sides `both|left|right|none`) gives one chamber per measured side of every `Measure` row,
+placed as above (left = heading + 90°). Chambers are grouped in route order by complete
+link: a chamber joins the first group whose every member is within the grouping distance
+(default 1.5 m), so a two-way route that measures each plot twice yields one plot with two
+visits. The field direction is the edge of the minimum-area rectangle around the group
+centres (or given). Footprints are centred on each group: auto (square, half the distance
+to the nearest other centre), a fixed square, or a fixed rectangle (width along the field
+direction, length across). Each plot stores its polygon and its `(waypoint number, side)`
+visits, where the waypoint number is the last digit run in the waypoint name. A flux
+belongs to the first plot whose visits match its file's waypoint and side, or whose polygon
+contains its chamber position, so moving or resizing a plot later does not lose fluxes that
+the route already ties to it.
+
 ### 4.7 Treatment summary ("cumsum")
 
 Port the maths of `App.allplot` in `prog/ffr_gui.py` (`getN2Odata`, `run_all_plots`):
@@ -233,7 +248,7 @@ owner may refine, but keep these concepts):
 
 | table | content |
 |---|---|
-| `meta` | key/value: project name, time zone, created, app version |
+| `meta` | key/value: project name, time zone, created, app version, `route` (the last applied route: `{points, sourcePath, savedAt}` JSON) |
 | `config` | JSON document: defaults for analysis options, gases and units, chamber geometry, QC thresholds, plot-assignment mode, fallback temperature |
 | `treatments` | id, name, short name, colour, sort order |
 | `plots` | id, label, treatment_id, polygon (JSON, nullable), block/replicate |
@@ -287,6 +302,27 @@ field lists may grow, but do not rename.
 **Configuration**
 - `getConfig() → ProjectConfig`, `setConfig(cfg)` (recomputes what changed)
 - `getLayout() → { treatments: Treatment[], plots: Plot[] }`, `setLayout(layout)`
+- `ProjectConfig.crs` — coordinate system of positions and polygons, `EPSG:326zz`/`327zz`
+  (WGS 84 / UTM); default `EPSG:32632`. Used only to draw the field on a map.
+- `Plot = { id, label, treatmentId, block, polygon: [x, y][] | null, waypoints?: {waypoint, side}[] | null }`
+
+**Waypoints (robot routes)**
+- `waypointsRead(path) → Waypoint[]`, `waypointsWrite(path, points, sourcePath?)` — atomic;
+  refuses to overwrite `sourcePath` (edits are always saved as a new file).
+  `Waypoint = { x, y, z, angle, kind, side, name }`. Work without an open project.
+- `waypointPlots(points, opts: PlotGenOptions) → PlotProposal` — the plots of §4.6 without
+  saving: `{ angle, plots: { key, label, x, y, polygon, visits: { waypointIndex, name,
+  waypoint, side, x, y }[] }[] }`; `PlotGenOptions = { clusterDistance, shape:
+  'auto'|'square'|'rectangle', size, width, height, angle | null, labelPrefix }`.
+- `applyWaypointLayout({ points, sourcePath, plots: { label, polygon, treatmentId | null,
+  waypoints }[] }) → Layout` — replaces the plots (treatments kept; plots without a
+  treatment go to an "Unassigned" treatment), stores the route, re-assigns every flux; one
+  undo step.
+- `getRoute() → StoredRoute | null`
+- Map imagery is offline: `mapTilesGet() → { dir, levels } | null`, `mapTilesSet(dir | null)`
+  (an app preference, not part of the project), `mapTile(z, x, y) → { data, factor, dx, dy } | null`
+  from a local XYZ folder `{dir}/{z}/{x}/{y}.png|jpg` (Web Mercator); a coarser tile fills
+  in, `data` is a data URL. No online tile service is contacted.
 
 **Fluxes**
 - `listFluxes() → FluxTable` — every flux, columnar:
@@ -310,6 +346,10 @@ field lists may grow, but do not rename.
 - `previewFlux(fluxId, options) → FluxDetail` — compute without saving (live while dragging)
 - `setFluxOptions(fluxIds, options | null) → FluxRow[]` — `null` resets to defaults
 - `setFluxFlags(fluxIds, { excluded?, reviewed?, note?, plotOverride? }) → FluxRow[]`
+  — `reviewed`/`note` change nothing else and are not recomputed
+- Edit commands return the edited rows first, then every other row whose diagnostics the
+  edit re-scored (baselines, neighbours), so the UI patches its table instead of reloading
+  it. Setting values a flux already has is not an edit (no undo step).
 - `patchFluxOptions(fluxIds, partial: Partial<AnalysisOptions>) → FluxRow[]` — merge the
   given fields into each flux's effective options (e.g. `{ valveOffset: 3 }` for a whole day);
   one undo step
@@ -394,7 +434,21 @@ Screens:
    Excel/CSV (pick sheet, header row, time column, value columns, aggregate); met.no fetch;
    manual flux import.
 7. **Project** — name, time zone, default analysis options, gases/units, treatments and
-   plots (table editor, plus a field map of chamber positions coloured by plot), backup copy.
+   plots, backup copy. The **field map** draws plot polygons coloured by treatment with
+   labels, every measured chamber position (positions outside every plot in red) and the
+   stored route. Click/Shift-click selects plots, dragging moves them; the side panel sets
+   label, treatment and block, resizes plots around their centres (rectangle, square or
+   touching squares; keeps each plot's direction unless one is given) and renumbers them
+   (prefix, first number, row by row / column by column / list order). Edits stay a draft
+   until saved (one `setLayout`, one undo step). "Load waypoint list…" and "Edit route" open
+   the Waypoints screen.
+8. **Waypoints** — the route editor (port of `ffr_waypoint_analyzer`), usable with or
+   without an open project: open a route CSV, edit on a map (move, rotate headings or a
+   group, box-select, add/insert/delete waypoints, set fields, snap positions and chamber
+   pairs, autorotate headings from the path), undo/redo, and save as a new CSV. The **Plots
+   from route** panel previews §4.6 live (grouping distance, shape, size, direction, label
+   prefix; each plot shows how many times it is measured) and either creates a new project
+   from it or replaces the open project's layout.
 
 ## 8. Conventions
 

@@ -22,9 +22,20 @@ const Project = lazy(() =>
 const Review = lazy(() =>
   import("./screens/review").then((m) => ({ default: m.Review })),
 );
+const Waypoints = lazy(() =>
+  import("./screens/waypoints").then((m) => ({ default: m.Waypoints })),
+);
 const Treatments = lazy(() =>
   import("./screens/treatments").then((m) => ({ default: m.Treatments })),
 );
+/** "project_open" / "recomputeAll" → "Project open" / "Recompute all". */
+function taskLabel(task: string) {
+  const words = task
+    .replace(/_/g, " ")
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .toLowerCase();
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
 export default function App() {
   const s = useStore(
       useShallow(({ screen, theme, nav, set, timeZone }) => ({
@@ -116,9 +127,12 @@ export default function App() {
       "Outliers",
       "Data",
       "External data",
+      "Waypoints",
       "Project",
     ],
-    icons = ["⌂", "∿", "▥", "◇", "▦", "☁", "⚙"];
+    icons = ["⌂", "∿", "▥", "◇", "▦", "☁", "⌖", "⚙"],
+    // Screens that work without an open project.
+    standalone = new Set<Screen>(["Start", "Waypoints"]);
   return (
     <div className="app-shell">
       <nav className="rail">
@@ -133,7 +147,7 @@ export default function App() {
         {screens.map((screen, i) => (
           <button
             key={screen}
-            disabled={screen !== "Start" && !info.data}
+            disabled={!standalone.has(screen) && !info.data}
             className={s.screen === screen ? "active" : ""}
             onClick={() => s.nav(screen)}
           >
@@ -183,7 +197,7 @@ export default function App() {
         </header>
         {progress && (
           <div className="operation-progress" role="status">
-            <strong>{progress.task}</strong>
+            <strong>{taskLabel(progress.task)}</strong>
             <progress value={progress.done} max={progress.total} />
             <span>
               {progress.message ?? "Processing…"} · {progress.done}/
@@ -207,6 +221,8 @@ export default function App() {
                 {!visited.has(screen) && s.screen !== screen ? null : screen ===
                   "Start" ? (
                   <Start />
+                ) : screen === "Waypoints" ? (
+                  <Waypoints />
                 ) : info.data ? (
                   screen === "Review" ? (
                     <Review />
@@ -235,7 +251,7 @@ export default function App() {
           </span>
           <span>
             {progress
-              ? progress.task +
+              ? taskLabel(progress.task) +
                 " · " +
                 Math.round((progress.done / progress.total) * 100) +
                 "%"

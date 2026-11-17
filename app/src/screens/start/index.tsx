@@ -2,12 +2,20 @@ import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { api, mockMode } from "../../api";
-import { Field, Panel, Status, pick, useAction } from "../../shared/common";
+import {
+  Field,
+  Panel,
+  Status,
+  error,
+  pick,
+  pickRoute,
+  useAction,
+} from "../../shared/common";
 import { useStore } from "../../store";
 export function Start() {
   const visible = useStore((s) => s.screen === "Start");
   const action = useAction(),
-    s = useStore(useShallow(({ nav }) => ({ nav })));
+    s = useStore(useShallow(({ nav, set }) => ({ nav, set })));
   const [wizard, setWizard] = useState(false),
     [dir, setDir] = useState(""),
     [raw, setRaw] = useState(""),
@@ -61,6 +69,23 @@ export function Start() {
           }
         >
           New project…
+        </button>
+        <button
+          title="Create the project's plots from a robot route (waypoint CSV)"
+          onClick={() =>
+            void pickRoute()
+              .then(async (path) => {
+                if (!path) return;
+                const points = await api.waypointsRead(path);
+                s.set({
+                  routeRequest: { points, sourcePath: path, plots: true },
+                });
+                s.nav("Waypoints");
+              })
+              .catch(error)
+          }
+        >
+          New project from waypoint list…
         </button>
       </div>
       <div className="start-grid">

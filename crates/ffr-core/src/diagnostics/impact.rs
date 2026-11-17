@@ -262,7 +262,9 @@ pub fn contextualise(
     c: &DiagnosticsConfig,
     zone: chrono_tz::Tz,
 ) {
-    let mut day_values: BTreeMap<String, Vec<f64>> = BTreeMap::new();
+    use rayon::prelude::*;
+    let days: Vec<String> = rows.par_iter().map(|r| local_day(r, zone)).collect();
+    let mut day_values: BTreeMap<&str, Vec<f64>> = BTreeMap::new();
     let mut siblings = BTreeMap::<i64, Vec<usize>>::new();
     for (i, r) in rows
         .iter()
@@ -274,16 +276,26 @@ pub fn contextualise(
         }
         if r["excluded"] != true {
             if let Some(v) = r.get("CO2_flux").and_then(Value::as_f64) {
-                day_values.entry(local_day(r, zone)).or_default().push(v);
+                day_values.entry(&days[i]).or_default().push(v);
             }
         }
     }
-    let snapshot = rows.to_vec();
-    for (i, r) in rows.iter_mut().enumerate() {
+    // The loop below only reads the siblings' fluxes, which it never changes.
+    let sibling_fluxes: Vec<(f64, f64)> = rows
+        .iter()
+        .map(|r| {
+            let get = |key: &str| r.get(key).and_then(Value::as_f64).unwrap_or(0.);
+            (get("CO2_flux"), get("N2O_flux"))
+        })
+        .collect();
+    rows.par_iter_mut()
+        .zip(findings.par_iter_mut())
+        .enumerate()
+        .for_each(|(i, (r, findings))| {
         if r["source"] != "robot" {
-            continue;
+            return;
         }
-        findings[i].retain(|d| {
+        findings.retain(|d| {
             ![
                 "n2o_negative",
                 "co2_not_rising",
@@ -325,7 +337,7 @@ pub fn contextualise(
             let median_noise = baseline[gas].median_residual_sd;
             if median_noise > 0. && residual > c.noisy_warn * median_noise {
                 let ratio = residual / median_noise;
-                findings[i].push(finding(
+                findings.push(finding(
                     "noisy",
                     "info",
                     Some(gas),
@@ -361,29 +373,22 @@ pub fn contextualise(
                         "{gas} flux {flux:.1} is below the negative noise floor \
                          {negative_floor:.1} with p={p:.2e}."
                     );
-                    findings[i].push(finding(code, severity, Some(gas), flux, message));
+                    findings.push(finding(code, severity, Some(gas), flux, message));
                 }
             }
         }
         let co2_floor = baseline["CO2"].floor;
         let n2o_floor = baseline["N2O"].floor;
-        let values = day_values.get(&local_day(r, zone));
+        let values = day_values.get(days[i].as_str());
         let co2 = r.get("CO2_flux").and_then(Value::as_f64);
         let n2o = r.get("N2O_flux").and_then(Value::as_f64);
         let sibling = r["measurementId"]
             .as_i64()
             .and_then(|id| siblings.get(&id))
             .and_then(|v| v.iter().find(|j| **j != i))
-            .map(|j| &snapshot[*j]);
+            .map(|j| sibling_fluxes[*j]);
         if let Some(co2) = co2 {
-            let sibling_co2 = sibling
-                .and_then(|r| r.get("CO2_flux"))
-                .and_then(Value::as_f64)
-                .unwrap_or(0.);
-            let sibling_n2o = sibling
-                .and_then(|r| r.get("N2O_flux"))
-                .and_then(Value::as_f64)
-                .unwrap_or(0.);
+            let (sibling_co2, sibling_n2o) = sibling.unwrap_or((0., 0.));
             let low_n2o = sibling_n2o > c.leak_reference_floor * n2o_floor
                 && n2o.is_some_and(|v| v < c.leak_fraction * sibling_n2o);
             let day = values
@@ -406,7 +411,7 @@ pub fn contextualise(
                     100. * co2 / sibling_co2.abs().max(co2_floor),
                     100. * n2o.unwrap_or(0.) / sibling_n2o.abs().max(n2o_floor)
                 );
-                findings[i].push(finding(
+                findings.push(finding(
                     "chamber_leak",
                     if bad { "bad" } else { "warn" },
                     Some("CO2"),
@@ -415,9 +420,9 @@ pub fn contextualise(
                 ));
             }
         }
-        grade_shapes(r, &mut findings[i], f, baseline, c);
-        let leak = findings[i].iter().any(|d| d.code == "chamber_leak");
-        for d in &mut findings[i] {
+        grade_shapes(r, findings, f, baseline, c);
+        let leak = findings.iter().any(|d| d.code == "chamber_leak");
+        for d in findings.iter_mut() {
             if d.code == "n2o_negative" && leak {
                 d.severity = "bad".into();
             }
@@ -425,7 +430,7 @@ pub fn contextualise(
                 d.severity = "info".into();
             }
         }
-    }
+    });
     neighbours_scaled(rows, findings, baseline, c);
 }
 fn neighbours_scaled(

@@ -381,3 +381,276 @@ fn one_sided_files_do_not_create_unmeasured_chamber_errors() {
         .expect("migrate");
     assert_eq!(info.counts.fluxes, 1);
 }
+
+/// Fluxes from several two-chamber files, so the project-wide pass has
+/// baselines, siblings and same-day neighbours to work with.
+fn multi_file_project(dir: &std::path::Path) -> Session {
+    let mut files = vec![];
+    for k in 0..8 {
+        let name = format!(
+            "2022-09-0{}-1{}-07-15-x1_0-y2_0-z0_0-h0_0_both_Plot_1_",
+            1 + k / 4,
+            k % 4
+        );
+        let meta = ffr_core::raw::filename(&name, "Europe/Oslo").expect("meta");
+        let epoch = meta.time as f64 / 1000.;
+        let events: Vec<_> = (0..10)
+            .flat_map(|i| {
+                let side = if i % 2 == 0 { 1 } else { 2 };
+                [
+                    json!([epoch + i as f64 * 20., [side, 1]]),
+                    json!([epoch + i as f64 * 20. + 0.1, [3 - side, 0]]),
+                ]
+            })
+            .collect();
+        let ty: Vec<_> = (0..200)
+            .map(|i| {
+                let t = i as f64 + 0.25;
+                let left = (i / 20) % 2 == 0;
+                let slope = if left { 0.2 } else { 0.05 } * (1. + k as f64 * 0.3);
+                let noise = ((i * 7919 + k * 104729) % 997) as f64 / 997. - 0.5;
+                json!([t, [400. + slope * t + noise, 1., 1., 1.]])
+            })
+            .collect();
+        let path = dir.join(&name);
+        std::fs::write(
+            &path,
+            serde_pickle::to_vec(
+                &json!({"aux":events,"li-cor":{"ty":ty}}),
+                serde_pickle::SerOptions::new(),
+            )
+            .expect("pickle"),
+        )
+        .expect("write");
+        files.push(path.to_string_lossy().into_owned());
+    }
+    let mut s = Session::default();
+    s.project_create(dir.join("multi.ffr").to_str().expect("path"), "Multi")
+        .expect("create");
+    s.import_raw_files(&files, |_| {}).expect("import");
+    s
+}
+
+#[test]
+fn incremental_edits_match_a_full_recompute() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let s = multi_file_project(dir.path());
+    let ids: Vec<i64> = s.list_fluxes().expect("table").data["id"]
+        .iter()
+        .filter_map(|v| v.as_i64())
+        .collect();
+    assert_eq!(ids.len(), 16);
+
+    // Review and note change nothing else and need no recomputation.
+    let rows = s
+        .set_flux_flags(&[ids[0]], json!({"reviewed":true,"note":"ok"}))
+        .expect("review");
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["reviewed"], true);
+    let history = s.history(100).expect("history").len();
+    // Setting the same values again is not an edit.
+    s.set_flux_flags(&[ids[0]], json!({"reviewed":true}))
+        .expect("same flags");
+    let detail = s.get_flux_detail(ids[1]).expect("detail");
+    s.set_flux_options(&[ids[1]], Some(detail.options.clone()))
+        .expect("options");
+    let history_after_options = s.history(100).expect("history").len();
+    s.set_flux_options(&[ids[1]], Some(detail.options.clone()))
+        .expect("same options");
+    assert_eq!(
+        s.history(100).expect("history").len(),
+        history_after_options
+    );
+    assert_eq!(history_after_options, history + 1);
+
+    // Exclusion and an option change re-score the rest of the project.
+    let rows = s
+        .set_flux_flags(&[ids[2]], json!({"excluded":true}))
+        .expect("exclude");
+    assert_eq!(rows[0]["id"], ids[2]);
+    let mut changed = detail.options.clone();
+    changed.start = 30.;
+    changed.valve_offset = 2.;
+    s.set_flux_options(&[ids[3]], Some(changed))
+        .expect("window");
+
+    let incremental = s.list_fluxes().expect("table");
+    s.recompute_all(|_| {}).expect("recompute");
+    let full = s.list_fluxes().expect("table");
+    for key in [
+        "attention",
+        "diag",
+        "N2O_impact",
+        "CO2_impact",
+        "CO2_robustFlux",
+        "CO2_flux",
+        "excluded",
+        "reviewed",
+        "note",
+    ] {
+        assert_eq!(incremental.data.get(key), full.data.get(key), "{key}");
+    }
+    // Repeated passes must not pile up duplicate findings.
+    let before = s.get_flux_detail(ids[5]).expect("detail").diagnostics.len();
+    for _ in 0..3 {
+        s.set_flux_flags(&[ids[6]], json!({"excluded":true}))
+            .expect("exclude");
+        s.set_flux_flags(&[ids[6]], json!({"excluded":false}))
+            .expect("include");
+    }
+    let after = s.get_flux_detail(ids[5]).expect("detail").diagnostics.len();
+    assert_eq!(before, after);
+}
+
+#[test]
+fn used_points_follow_the_valve_offset() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let s = multi_file_project(dir.path());
+    let mut options = s.get_flux_detail(1).expect("detail").options;
+    for offset in [0., 3., -2.5] {
+        options.valve_offset = offset;
+        let d = s.preview_flux(1, options.clone()).expect("preview");
+        let trace = d.traces.iter().find(|t| t.gas == "CO2").expect("trace");
+        let fit = d.regressions.iter().find(|r| r.gas == "CO2").expect("fit");
+        let used = trace.used.iter().filter(|u| **u).count();
+        assert_eq!(used, fit.n, "offset {offset}");
+        for (i, u) in trace.used.iter().enumerate() {
+            if *u {
+                assert_eq!(trace.side[i], 1, "used point outside the left chamber");
+            }
+        }
+    }
+}
+
+#[test]
+fn waypoint_layout_assigns_raw_fluxes_and_roundtrips_history() {
+    use ffr_core::waypoints::*;
+    let dir = tempfile::tempdir().unwrap();
+    let project = dir.path().join("route.ffr");
+    let mut s = Session::default();
+    s.project_create(project.to_str().unwrap(), "Route")
+        .unwrap();
+    let old = s.get_layout().unwrap();
+    let name = "2022-09-01-13-07-15-x1_0-y2_0-z0_0-h0_0_both_Plot_3_";
+    let metadata = ffr_core::raw::filename(name, "Europe/Oslo").unwrap();
+    let epoch = metadata.time as f64 / 1000.;
+    let raw = json!({"aux":[[epoch,[1,1]],[epoch+0.1,[2,0]],[epoch+20.,[2,1]],[epoch+20.1,[1,0]]],"li-cor":{"t0":0,"dt":1,"ty":(0..45).map(|i|json!([i,[400.+i as f64,2.,101.,20.]])).collect::<Vec<_>>()}});
+    let path = dir.path().join(name);
+    std::fs::write(
+        &path,
+        serde_pickle::to_vec(&raw, serde_pickle::SerOptions::new()).unwrap(),
+    )
+    .unwrap();
+    s.import_raw_files(&[path.to_string_lossy().into()], |_| {})
+        .unwrap();
+    let points = parse("100,100,0,0,Measure,both,Plot_3").unwrap();
+    let args = ApplyWaypointLayoutArgs {
+        points: points.clone(),
+        source_path: Some("synthetic.csv".into()),
+        plots: vec![WaypointLayoutPlot {
+            label: "P1".into(),
+            polygon: vec![[98., 98.], [102., 98.], [102., 102.], [98., 102.]],
+            treatment_id: Some(999),
+            block: 0,
+            waypoints: vec![
+                WaypointRef {
+                    waypoint: 3,
+                    side: ChamberSide::Left,
+                },
+                WaypointRef {
+                    waypoint: 3,
+                    side: ChamberSide::Right,
+                },
+            ],
+        }],
+    };
+    let layout = s.apply_waypoint_layout(args, |_| {}).unwrap();
+    let rows = s.list_fluxes().unwrap();
+    assert_eq!(rows.rows, 2);
+    for i in 0..2 {
+        assert_eq!(rows.data["plotId"][i], 1);
+        assert_eq!(rows.data["plotLabel"][i], "P1");
+        assert_eq!(rows.data["treatmentName"][i], "Unassigned");
+    }
+    let route = s.get_route().unwrap().unwrap();
+    assert_eq!(route.points[0].name, "Plot_3");
+    assert_eq!(route.source_path.as_deref(), Some("synthetic.csv"));
+    assert!(route.saved_at > 0);
+    assert_eq!(
+        s.history(100)
+            .unwrap()
+            .iter()
+            .filter(|h| h.kind == "layout")
+            .count(),
+        1
+    );
+    s.undo().unwrap();
+    assert_eq!(
+        serde_json::to_value(s.get_layout().unwrap()).unwrap(),
+        serde_json::to_value(old).unwrap()
+    );
+    s.redo().unwrap();
+    assert_eq!(
+        s.get_layout().unwrap().plots[0]
+            .waypoints
+            .as_ref()
+            .unwrap()
+            .len(),
+        2
+    );
+    s.set_layout(layout.clone(), |_| {}).unwrap();
+    assert_eq!(
+        s.get_layout().unwrap().plots[0]
+            .waypoints
+            .as_ref()
+            .unwrap()
+            .len(),
+        2
+    );
+    let mut absent = layout.clone();
+    absent.plots[0].waypoints = None;
+    s.set_layout(absent, |_| {}).unwrap();
+    assert_eq!(
+        s.get_layout().unwrap().plots[0]
+            .waypoints
+            .as_ref()
+            .unwrap()
+            .len(),
+        2
+    );
+    let mut cleared = layout;
+    cleared.plots[0].waypoints = Some(vec![]);
+    s.set_layout(cleared, |_| {}).unwrap();
+    assert!(s.get_layout().unwrap().plots[0]
+        .waypoints
+        .as_ref()
+        .unwrap()
+        .is_empty());
+    s.project_close();
+    let db = rusqlite::Connection::open(&project).unwrap();
+    let config: String = db
+        .query_row("SELECT value FROM meta WHERE key='config'", [], |r| {
+            r.get(0)
+        })
+        .unwrap();
+    let mut config: serde_json::Value = serde_json::from_str(&config).unwrap();
+    config.as_object_mut().unwrap().remove("crs");
+    db.execute(
+        "UPDATE meta SET value=?1 WHERE key='config'",
+        [config.to_string()],
+    )
+    .unwrap();
+    drop(db);
+    s.project_open(project.to_str().unwrap()).unwrap();
+    assert_eq!(s.get_config().unwrap().crs, "EPSG:32632");
+    let mut cfg = s.get_config().unwrap();
+    cfg.crs = "EPSG:32600".into();
+    assert!(s.set_config(cfg, |_| {}).is_err());
+    assert!(s.get_route().unwrap().is_some());
+    let standalone = Session::default();
+    assert!(!standalone
+        .waypoint_plots(&points, &PlotGenOptions::default())
+        .unwrap()
+        .plots
+        .is_empty());
+}

@@ -9,7 +9,9 @@ import {
   regression,
   summarize,
 } from "./maths";
+import { demoPlotGeometry, demoRoute, plotCentre } from "./mockRoute";
 import type * as T from "./types";
+import { mockWaypointPlots } from "./mockWaypointPlots";
 const colours = [
   "#217a70",
   "#b46c28",
@@ -52,6 +54,7 @@ export function createMock(seed = 42): T.FfrApi {
     qcThreshold: 0.8,
     diagnostics: { ...thresholds },
     plotAssignment: "polygons",
+    crs: "EPSG:32632",
   };
   let layout: T.Layout = {
     treatments: names.map((name, i) => ({
@@ -61,19 +64,22 @@ export function createMock(seed = 42): T.FfrApi {
       colour: colours[i],
       sortOrder: i,
     })),
-    plots: Array.from({ length: 36 }, (_, i) => ({
-      id: i + 1,
-      label: "P" + String(i + 1).padStart(2, "0"),
-      treatmentId: Math.floor(i / 3) + 1,
-      block: (i % 3) + 1,
-      polygon: [
-        [i % 6, Math.floor(i / 6)],
-        [(i % 6) + 1, Math.floor(i / 6)],
-        [(i % 6) + 1, Math.floor(i / 6) + 1],
-        [i % 6, Math.floor(i / 6) + 1],
-      ],
-    })),
+    plots: demoPlotGeometry(
+      Array.from({ length: 36 }, (_, i) => ({
+        id: i + 1,
+        label: "P" + String(i + 1).padStart(2, "0"),
+        treatmentId: Math.floor(i / 3) + 1,
+        block: (i % 3) + 1,
+        polygon: null,
+      })),
+    ),
   };
+  const demoRouteStored = (): T.StoredRoute => ({
+    points: demoRoute(),
+    sourcePath: "demo_route.csv",
+    savedAt: start,
+  });
+  let route: T.StoredRoute | null = demoRouteStored();
   let open = false,
     path = "demo.ffr",
     clientId: string | null = null;
@@ -520,8 +526,9 @@ export function createMock(seed = 42): T.FfrApi {
       attention: 0,
       diag: "",
       valveLagS: 0,
-      x: (p.id % 6) * 5 + 2,
-      y: Math.floor((p.id - 1) / 6) * 5 + 2,
+      // Chamber position: the plot centre with a little GPS scatter.
+      x: plotCentre(p.id)[0] + Math.sin(i * 12.9898) * 0.6,
+      y: plotCentre(p.id)[1] + Math.cos(i * 78.233) * 0.6,
     };
   }
   for (let i = 1; i <= 7488; i++) {
@@ -814,6 +821,7 @@ export function createMock(seed = 42): T.FfrApi {
       config.name = name;
       rows.splice(0);
       layout = { treatments: [], plots: [] };
+      route = null;
       diagnosticMap.clear();
       opts.clear();
       series = [];
@@ -824,6 +832,7 @@ export function createMock(seed = 42): T.FfrApi {
     },
     projectOpen: async (p) => {
       restore(demo);
+      route = demoRouteStored();
       path = p;
       open = true;
       return info();
@@ -1232,5 +1241,104 @@ export function createMock(seed = 42): T.FfrApi {
         listeners.delete(cb);
       };
     },
+    waypointsRead: async () => demoRoute(),
+    waypointsWrite: async (target, points, sourcePath) => {
+      if (sourcePath && target === sourcePath)
+        throw {
+          code: "SOURCE",
+          message:
+            "Choose a new filename to keep the original waypoint file intact.",
+        };
+      const text = points
+        .map((p) => [p.x, p.y, p.z, p.angle, p.kind, p.side, p.name].join(","))
+        .join("\n");
+      const url = URL.createObjectURL(new Blob([text + "\n"]));
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = target.split(/[\\/]/).pop() || "route.csv";
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    },
+    waypointPlots: async (points, o) => mockWaypointPlots(points, o),
+    applyWaypointLayout: async (args) => {
+      if (!open) throw { code: "PROJECT", message: "no project open" };
+      await progress("Apply waypoint layout");
+      change("layout", [], () => {
+        let treatments = layout.treatments;
+        let unassigned = treatments.find((t) => t.name === "Unassigned")?.id;
+        if (
+          unassigned === undefined &&
+          args.plots.some(
+            (p) => !treatments.some((t) => t.id === p.treatmentId),
+          )
+        ) {
+          unassigned = Math.max(0, ...treatments.map((t) => t.id)) + 1;
+          treatments = [
+            ...treatments,
+            {
+              id: unassigned,
+              name: "Unassigned",
+              shortName: "",
+              colour: "#8a99a6",
+              sortOrder: treatments.length,
+            },
+          ];
+        }
+        layout = {
+          treatments,
+          plots: args.plots.map((p, i) => ({
+            id: i + 1,
+            label: p.label,
+            treatmentId: treatments.some((t) => t.id === p.treatmentId)
+              ? p.treatmentId!
+              : unassigned!,
+            block: p.block ?? 0,
+            polygon: p.polygon,
+            waypoints: p.waypoints,
+          })),
+        };
+        for (const r of rows) {
+          if (r.source !== "robot") continue;
+          const plot = layout.plots.find((p) =>
+            inside(p.polygon ?? [], Number(r.x), Number(r.y)),
+          );
+          const t = layout.treatments.find((t) => t.id === plot?.treatmentId);
+          Object.assign(r, {
+            plotId: plot?.id ?? 0,
+            plotLabel: plot?.label ?? "—",
+            treatmentId: t?.id ?? 0,
+            treatmentName: t?.name ?? "Unassigned",
+          });
+        }
+        route = {
+          points: structuredClone(args.points),
+          sourcePath: args.sourcePath ?? null,
+          savedAt: Date.now(),
+        };
+      });
+      return structuredClone(layout);
+    },
+    getRoute: async () => (open && route ? structuredClone(route) : null),
+    mapTilesGet: async () => null,
+    mapTilesSet: async (dir) => {
+      if (dir)
+        throw {
+          code: "TILES",
+          message:
+            "Local imagery folders are only available in the desktop app.",
+        };
+      return null;
+    },
+    mapTile: async () => null,
   };
+}
+function inside(poly: [number, number][], x: number, y: number) {
+  let hit = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const [xi, yi] = poly[i],
+      [xj, yj] = poly[j];
+    if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi)
+      hit = !hit;
+  }
+  return hit;
 }

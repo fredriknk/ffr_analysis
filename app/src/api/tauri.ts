@@ -58,6 +58,15 @@ export const tauriApi: FfrApi = {
   metnoFetch: (args) => invoke("metno_fetch", { args }),
   exportXlsx: (args) => invoke("export_xlsx", { args }),
   exportCsv: (args) => invoke("export_csv", { args }),
+  waypointsRead: (path) => invoke("waypoints_read", { path }),
+  waypointsWrite: (path, points, sourcePath = null) =>
+    invoke("waypoints_write", { path, points, sourcePath }),
+  waypointPlots: (points, opts) => invoke("waypoint_plots", { points, opts }),
+  applyWaypointLayout: (args) => invoke("apply_waypoint_layout", { args }),
+  getRoute: () => invoke("get_route"),
+  mapTilesGet: () => invoke("map_tiles_get"),
+  mapTilesSet: (dir) => invoke("map_tiles_set", { dir }),
+  mapTile: (z, x, y) => invoke("map_tile", { z, x, y }),
   onProgress: (cb) =>
     listen<Progress>("progress", (event) => cb(event.payload)),
 };

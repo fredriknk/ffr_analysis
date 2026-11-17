@@ -26,6 +26,7 @@ export function useQueue(rows: FluxRow[]) {
       .filter(
         (r) =>
           (!ids || ids.has(r.id)) &&
+          (!s.reviewSource || r.source === s.reviewSource) &&
           (!s.search ||
             [r.id, r.filename, r.plotLabel, r.treatmentName]
               .join(" ")
@@ -54,6 +55,7 @@ export function useQueue(rows: FluxRow[]) {
   }, [
     rows,
     s.reviewIds,
+    s.reviewSource,
     s.search,
     s.quick,
     s.treatment,
@@ -77,6 +79,7 @@ export function QueueFilters({ rows }: { rows: FluxRow[] }) {
     );
   const active =
     Number(s.quick !== "attention") +
+    Number(s.reviewSource !== "robot") +
     Number(!!s.treatment) +
     Number(!!s.plot) +
     Number(!!s.reviewFrom) +
@@ -107,6 +110,22 @@ export function QueueFilters({ rows }: { rows: FluxRow[] }) {
               <option value="flagged">Needs attention</option>
               <option value="overridden">Overridden</option>
               <option value="excluded">Excluded</option>
+            </select>
+          </label>
+          <label>
+            Source
+            <select
+              aria-label="Source filter"
+              value={s.reviewSource}
+              onChange={(e) =>
+                s.set({
+                  reviewSource: e.target.value as typeof s.reviewSource,
+                })
+              }
+            >
+              <option value="robot">Robot measurements</option>
+              <option value="manual">Manual measurements</option>
+              <option value="">Robot and manual</option>
             </select>
           </label>
           <label>
@@ -179,6 +198,7 @@ export function QueueFilters({ rows }: { rows: FluxRow[] }) {
             onClick={() =>
               s.set({
                 quick: "attention",
+                reviewSource: "robot",
                 treatment: "",
                 plot: "",
                 reviewFrom: "",
@@ -204,6 +224,68 @@ export function QueueFilters({ rows }: { rows: FluxRow[] }) {
         <option value="time">Time ↑</option>
         <option value="plot">Plot ↑</option>
       </select>
+    </div>
+  );
+}
+const quickLabels: Record<string, string> = {
+  all: "All measurements",
+  unreviewed: "Unreviewed",
+  flagged: "Needs attention",
+  overridden: "Overridden",
+  excluded: "Excluded",
+};
+/** Removable chips for every filter that differs from the default queue. */
+export function ActiveFilters({ rows }: { rows: FluxRow[] }) {
+  const s = useStore();
+  const name = (key: "treatmentId" | "plotId", value: string) => {
+    const r = rows.find((r) => String(r[key]) === value);
+    return r ? String(key === "plotId" ? r.plotLabel : r.treatmentName) : value;
+  };
+  const chips: [string, () => void][] = [];
+  if (s.reviewIds)
+    chips.push([
+      s.reviewIds.length.toLocaleString() + " picked fluxes",
+      () => s.set({ reviewIds: undefined }),
+    ]);
+  if (s.quick !== "attention")
+    chips.push([
+      quickLabels[s.quick] ?? s.quick,
+      () => s.set({ quick: "attention" }),
+    ]);
+  if (s.reviewSource !== "robot")
+    chips.push([
+      s.reviewSource === "manual" ? "Manual only" : "Robot + manual",
+      () => s.set({ reviewSource: "robot" }),
+    ]);
+  if (s.treatment)
+    chips.push([
+      name("treatmentId", s.treatment),
+      () => s.set({ treatment: "" }),
+    ]);
+  if (s.plot) chips.push([name("plotId", s.plot), () => s.set({ plot: "" })]);
+  if (s.reviewFrom)
+    chips.push(["From " + s.reviewFrom, () => s.set({ reviewFrom: "" })]);
+  if (s.reviewTo)
+    chips.push(["To " + s.reviewTo, () => s.set({ reviewTo: "" })]);
+  for (const code of s.diagnosticCodes)
+    chips.push([
+      code.replaceAll("_", " "),
+      () =>
+        s.set({ diagnosticCodes: s.diagnosticCodes.filter((c) => c !== code) }),
+    ]);
+  if (!chips.length) return null;
+  return (
+    <div className="active-filters" aria-label="Active queue filters">
+      {chips.map(([label, clear]) => (
+        <button
+          key={label}
+          className="filter-chip"
+          title={"Remove filter: " + label}
+          onClick={clear}
+        >
+          {label} <span aria-hidden="true">×</span>
+        </button>
+      ))}
     </div>
   );
 }

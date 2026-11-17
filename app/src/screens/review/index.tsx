@@ -17,7 +17,13 @@ import {
 import { diagnosticLabels } from "../../shared/diagnostics";
 import { useDiagnostics } from "../../shared/hooks/useDiagnostics";
 import { useStore } from "../../store";
-import { ContactSheet, QueueFilters, QueueList, useQueue } from "./Queue";
+import {
+  ActiveFilters,
+  ContactSheet,
+  QueueFilters,
+  QueueList,
+  useQueue,
+} from "./Queue";
 import { TraceChart } from "./TraceChart";
 import { nextQueueId } from "./navigation";
 const gasNames: Gas[] = ["N2O", "CO2", "CO", "H2O", "licor_H2O"];
@@ -57,7 +63,16 @@ export function Review() {
   const [preview, setPreview] = useState<FluxDetail | null>(null),
     [draft, setDraft] = useState<AnalysisOptions | null>(null),
     serial = useRef(0),
-    timer = useRef<ReturnType<typeof setTimeout>>();
+    // At most one preview in flight; while it runs only the newest request waits.
+    queued = useRef<{
+      id: number;
+      options: AnalysisOptions;
+      request: number;
+    } | null>(null),
+    previewing = useRef(false),
+    // Handle drags and arrow keys are saved once the user pauses, not per step.
+    unsaved = useRef<{ id: number; options: AnalysisOptions } | null>(null),
+    saveTimer = useRef<ReturnType<typeof setTimeout>>();
   useEffect(() => {
     if (data.isSuccess && !initialized.current) {
       initialized.current = true;
@@ -70,6 +85,8 @@ export function Review() {
       previousQueue.current = filtered.map((r) => r.id);
   }, [filtered, s.selected]);
   useEffect(() => {
+    // A background refresh must not throw away a change that is about to be saved.
+    if (unsaved.current && unsaved.current.id === detail.data?.flux.id) return;
     setPreview(null);
     setDraft(null);
     serial.current++;
@@ -129,7 +146,10 @@ export function Review() {
       const key = e.key.toLowerCase();
       if ((e.ctrlKey || e.metaKey) && ["z", "y"].includes(key)) {
         e.preventDefault();
-        void action(() => (key === "z" ? api.undo() : api.redo()));
+        // Undo applies to the adjustment just made, so save it first.
+        void save().then(() =>
+          action(() => (key === "z" ? api.undo() : api.redo())),
+        );
       } else if (key === "arrowright") {
         e.preventDefault();
         step(1);
@@ -154,28 +174,52 @@ export function Review() {
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   });
-  useEffect(() => () => clearTimeout(timer.current), []);
+  async function pumpPreviews() {
+    if (previewing.current) return;
+    previewing.current = true;
+    try {
+      while (queued.current) {
+        const job = queued.current;
+        queued.current = null;
+        try {
+          const v = await api.previewFlux(job.id, job.options);
+          if (job.request === serial.current) setPreview(v);
+        } catch (e) {
+          error(e);
+        }
+      }
+    } finally {
+      previewing.current = false;
+    }
+  }
   function changePreview(next: AnalysisOptions) {
     setDraft(next);
-    clearTimeout(timer.current);
-    const request = ++serial.current,
-      id = active;
-    timer.current = setTimeout(
-      () =>
-        void api
-          .previewFlux(id, next)
-          .then((v) => {
-            if (request === serial.current) setPreview(v);
-          })
-          .catch(error),
-      24,
-    );
+    // Still adjusting: postpone the save until the user pauses again.
+    clearTimeout(saveTimer.current);
+    if (unsaved.current) unsaved.current = { id: active, options: next };
+    queued.current = { id: active, options: next, request: ++serial.current };
+    void pumpPreviews();
   }
-  function commit(next: AnalysisOptions) {
-    clearTimeout(timer.current);
+  function save(): Promise<void> {
+    clearTimeout(saveTimer.current);
+    const job = unsaved.current;
+    unsaved.current = null;
+    if (!job) return Promise.resolve();
     serial.current++;
-    void action(() => api.setFluxOptions([active], next));
+    queued.current = null;
+    return action(() => api.setFluxOptions([job.id], job.options));
   }
+  /** Saves `next`; with `later`, waits for a pause so repeated drags cost one save. */
+  function commit(next: AnalysisOptions, later = false) {
+    unsaved.current = { id: active, options: next };
+    clearTimeout(saveTimer.current);
+    if (later) saveTimer.current = setTimeout(save, 600);
+    else void save();
+  }
+  const saveRef = useRef(save);
+  saveRef.current = save;
+  // Leaving a flux (or the screen) saves what was adjusted on it.
+  useEffect(() => () => void saveRef.current(), [active]);
   const findings = [...(d?.diagnostics ?? [])].sort(
     (a, b) =>
       ({ bad: 0, warn: 1, info: 2 })[a.severity] -
@@ -270,6 +314,7 @@ export function Review() {
         </div>
         <div className="toolbar">
           <QueueFilters rows={data.data?.rows ?? []} />
+          <ActiveFilters rows={data.data?.rows ?? []} />
           <button
             disabled={!multi.length}
             onClick={() =>
@@ -343,6 +388,7 @@ export function Review() {
           </button>
         </div>
         <QueueFilters rows={data.data?.rows ?? []} />
+        <ActiveFilters rows={data.data?.rows ?? []} />
         <Status loading={data.isLoading} error={data.error} />
         <QueueList rows={queueRows} />
         <div className="queue-footer">
@@ -474,7 +520,7 @@ export function Review() {
                     gas={g}
                     options={o}
                     preview={changePreview}
-                    commit={commit}
+                    commit={(next) => commit(next, true)}
                   />
                 ))
               ) : (
@@ -742,14 +788,23 @@ export function Review() {
               )}
             </section>
             <section className="compact-alignment">
-              <h3>Valve alignment</h3>
-              <div>
-                CO₂ lag <b>{significant(d.valveLagS, 3)} s</b> · N₂O lag{" "}
-                <b>{significant(flux.N2O_lagS, 3)} s</b>
-              </div>
+              <h3>
+                Valve timing{" "}
+                <span
+                  className="info-tip"
+                  title={
+                    "Shifts every valve switch, which decides which points belong to the " +
+                    "left or right chamber. Drag the ⇆ line on a trace or type a value; " +
+                    "positive means the switch happened later than the robot logged it. " +
+                    "The estimate is the shift that best separates the two chambers."
+                  }
+                >
+                  ⓘ
+                </span>
+              </h3>
               <div className="options-grid">
                 <label>
-                  Common offset · s
+                  Shift · s
                   <input
                     aria-label="Valve offset seconds"
                     type="number"
@@ -762,8 +817,18 @@ export function Review() {
                       })
                     }
                     onBlur={() => draft && commit(draft)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") commit(o);
+                    }}
                   />
                 </label>
+                <div className="lag-estimates">
+                  Estimated from the trace
+                  <span>
+                    CO₂ <b>{significant(d.valveLagS, 3)} s</b> · N₂O{" "}
+                    <b>{significant(flux.N2O_lagS, 3)} s</b>
+                  </span>
+                </div>
                 <select
                   aria-label="Offset gas"
                   value={offsetGas}
@@ -771,10 +836,10 @@ export function Review() {
                     setOffsetGas(e.target.value as typeof offsetGas)
                   }
                 >
-                  <option value="all">CO₂ lag → all gases</option>
-                  <option value="N2Oall">N₂O lag → all gases</option>
-                  <option value="CO2">CO₂ only</option>
-                  <option value="N2O">N₂O only</option>
+                  <option value="all">CO₂ estimate → all gases</option>
+                  <option value="N2Oall">N₂O estimate → all gases</option>
+                  <option value="CO2">CO₂ estimate → CO₂ only</option>
+                  <option value="N2O">N₂O estimate → N₂O only</option>
                 </select>
                 <select
                   aria-label="Offset scope"
@@ -782,11 +847,11 @@ export function Review() {
                   onChange={(e) => setScope(e.target.value as typeof scope)}
                 >
                   <option value="flux">This flux</option>
-                  <option value="file">This file</option>
-                  <option value="day">This day</option>
+                  <option value="file">Both chambers of this file</option>
+                  <option value="day">Every robot flux this day</option>
                 </select>
                 <button onClick={() => applyLag(offsetGas)}>
-                  Apply estimated offset
+                  Apply estimate
                 </button>
               </div>
             </section>

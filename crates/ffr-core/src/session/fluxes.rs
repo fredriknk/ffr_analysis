@@ -2,12 +2,14 @@ use super::*;
 
 impl Session {
     pub(super) fn rows(&self) -> Result<Vec<FluxRow>> {
-        let mut q = self.db()?.prepare("SELECT row FROM fluxes ORDER BY id")?;
+        let mut q = self
+            .db()?
+            .prepare_cached("SELECT row FROM fluxes ORDER BY id")?;
         let strings = q
             .query_map([], |r| r.get::<_, String>(0))?
             .collect::<std::result::Result<Vec<_>, _>>()?;
         strings
-            .iter()
+            .par_iter()
             .map(|s| Ok(serde_json::from_str(s)?))
             .collect()
     }
@@ -68,11 +70,13 @@ impl Session {
         let levels = statement
             .query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))?
             .collect::<std::result::Result<Vec<_>, _>>()?;
-        let mut maps = BTreeMap::new();
-        for (id, raw) in levels {
-            let findings: Vec<crate::diagnostics::Diagnostic> = serde_json::from_str(&raw)?;
-            maps.insert(id, crate::diagnostics::severity_map(&findings));
-        }
+        let mut maps = levels
+            .par_iter()
+            .map(|(id, raw)| {
+                let findings: Vec<crate::diagnostics::Diagnostic> = serde_json::from_str(raw)?;
+                Ok((*id, crate::diagnostics::severity_map(&findings)))
+            })
+            .collect::<Result<BTreeMap<_, _>>>()?;
         for row in &mut rows {
             let id = row["id"].as_i64().unwrap_or(0);
             row.insert(
@@ -286,24 +290,12 @@ impl Session {
                     options.cut_beginnings,
                     options.cut_ends,
                 );
-                let indices: Vec<usize> =
-                    raw::group_ranges(t, &raw.switches, options.cut_beginnings, options.cut_ends)
-                        .into_iter()
-                        .filter(|(_, _, s)| *s == side)
-                        .flat_map(|(a, b, _)| a..b)
-                        .filter(|i| y[*i] != 0.)
-                        .collect();
-                let x: Vec<f64> = indices.iter().map(|i| t[*i]).collect();
+                // Same shifted switches and cuts as the regression, so the
+                // emphasised points are exactly the fitted ones.
                 let mut used = vec![false; t.len()];
                 if let Some(r) = results.get(gas) {
-                    if !x.is_empty() && r.n > 0 {
-                        let a = regression::nearest(&x, r.start);
-                        let b = regression::nearest(&x, r.stop);
-                        if a < b {
-                            for i in &indices[a..b] {
-                                used[*i] = true;
-                            }
-                        }
+                    for i in crate::diagnostics::used_indices(&raw, gas, side, &options, r) {
+                        used[i] = true;
                     }
                 }
                 let fit: Vec<Option<f64>> = t
@@ -421,21 +413,31 @@ impl Session {
         let tx = self.db()?.unchecked_transaction()?;
         let mut before = vec![];
         let mut after = vec![];
-        let mut out = vec![];
+        let new_text = options.as_ref().map(serde_json::to_string).transpose()?;
+        let new_value = options.as_ref().map(serde_json::to_value).transpose()?;
         for id in ids {
             let old: Option<String> =
                 self.db()?
                     .query_row("SELECT options FROM fluxes WHERE id=?1", [id], |r| r.get(0))?;
-            before.push(json!({"id":id,"options":old.map(|s|serde_json::from_str::<Value>(&s)).transpose()?.unwrap_or(Value::Null)}));
+            let old_value = old
+                .as_deref()
+                .map(serde_json::from_str::<Value>)
+                .transpose()?;
+            if old_value == new_value {
+                continue;
+            }
+            before.push(json!({"id":id,"options":old_value.unwrap_or(Value::Null)}));
             after.push(json!({"id":id,"options":options}));
             self.db()?.execute(
                 "UPDATE fluxes SET options=?2 WHERE id=?1",
-                params![id, options.as_ref().map(serde_json::to_string).transpose()?],
+                params![id, new_text],
             )?;
             self.recompute_one(*id)?;
-            out.push(self.row(*id)?);
         }
-        self.neighbour_pass()?;
+        if before.is_empty() {
+            return self.edited_rows(ids, BTreeSet::new());
+        }
+        let changed = self.neighbour_pass()?;
         self.log(
             "optionsBatch",
             None,
@@ -445,16 +447,32 @@ impl Session {
             None,
         )?;
         tx.commit()?;
-        ids.iter().map(|id| self.row(*id)).collect()
+        self.edited_rows(ids, changed)
     }
 
     pub fn set_flux_flags(&self, ids: &[i64], flags: Value) -> Result<Vec<FluxRow>> {
         let tx = self.db()?.unchecked_transaction()?;
         let mut before = vec![];
         let mut after = vec![];
-        let mut out = vec![];
+        // `reviewed` and `note` never affect results or diagnostics; only
+        // `excluded` (cohorts) and `plotOverride` (plot, neighbours) do.
+        let mut rescore = false;
         for id in ids {
             let mut row = self.row(*id)?;
+            let mut differs = false;
+            let mut reassign = false;
+            for key in ["excluded", "reviewed", "note", "plotOverride"] {
+                if let Some(v) = flags.get(key) {
+                    if row.get(key).unwrap_or(&Value::Null) != v {
+                        differs = true;
+                        reassign |= key == "plotOverride";
+                        rescore |= matches!(key, "excluded" | "plotOverride");
+                    }
+                }
+            }
+            if !differs {
+                continue;
+            }
             before.push(serde_json::to_value(&row)?);
             for key in ["excluded", "reviewed", "note", "plotOverride"] {
                 if let Some(v) = flags.get(key) {
@@ -463,10 +481,18 @@ impl Session {
             }
             after.push(serde_json::to_value(&row)?);
             self.write_row(*id, &row)?;
-            self.recompute_one(*id)?;
-            out.push(self.row(*id)?);
+            if reassign {
+                self.recompute_one(*id)?;
+            }
         }
-        self.neighbour_pass()?;
+        if before.is_empty() {
+            return self.edited_rows(ids, BTreeSet::new());
+        }
+        let changed = if rescore {
+            self.neighbour_pass()?
+        } else {
+            BTreeSet::new()
+        };
         self.log(
             "flagsBatch",
             None,
@@ -476,7 +502,34 @@ impl Session {
             None,
         )?;
         tx.commit()?;
-        ids.iter().map(|id| self.row(*id)).collect()
+        self.edited_rows(ids, changed)
+    }
+
+    /// Rows for the edited ids, followed by any other rows whose scores the
+    /// project-wide pass changed, so the UI can patch its table in place.
+    pub(super) fn edited_rows(&self, ids: &[i64], changed: BTreeSet<i64>) -> Result<Vec<FluxRow>> {
+        let requested: BTreeSet<i64> = ids.iter().copied().collect();
+        let mut out = ids
+            .iter()
+            .map(|id| self.row(*id))
+            .collect::<Result<Vec<_>>>()?;
+        let others: Vec<i64> = changed
+            .into_iter()
+            .filter(|id| !requested.contains(id))
+            .collect();
+        if others.len() > 16 {
+            let wanted: BTreeSet<i64> = others.into_iter().collect();
+            out.extend(
+                self.rows()?
+                    .into_iter()
+                    .filter(|r| r["id"].as_i64().is_some_and(|id| wanted.contains(&id))),
+            );
+        } else {
+            for id in others {
+                out.push(self.row(id)?);
+            }
+        }
+        Ok(out)
     }
 
     pub(super) fn write_row(&self, id: i64, row: &FluxRow) -> Result<()> {
@@ -552,7 +605,7 @@ impl Session {
             )?;
             self.recompute_one(*id)?;
         }
-        self.neighbour_pass()?;
+        let changed = self.neighbour_pass()?;
         self.log(
             "optionsBatch",
             None,
@@ -561,9 +614,8 @@ impl Session {
             "edit",
             None,
         )?;
-        self.neighbour_pass()?;
         tx.commit()?;
-        ids.iter().map(|id| self.row(*id)).collect()
+        self.edited_rows(ids, changed)
     }
 
     pub fn get_flux_thumbs(

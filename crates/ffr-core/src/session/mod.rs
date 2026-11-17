@@ -11,7 +11,10 @@ use rusqlite::{params, Connection, OptionalExtension};
 
 use serde_json::{json, Value};
 
-use std::{collections::BTreeMap, path::Path};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    path::Path,
+};
 
 #[derive(Default)]
 
@@ -33,6 +36,7 @@ mod project;
 mod results;
 mod series;
 mod summary;
+mod waypoints;
 
 impl Session {
     pub(super) fn db(&self) -> Result<&Connection> {

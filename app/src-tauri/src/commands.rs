@@ -13,6 +13,8 @@ pub struct AppState {
 #[derive(Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Preferences {
+    #[serde(default)]
+    map_tiles_dir: Option<String>,
     recent: Vec<RecentProject>,
     client_id: Option<String>,
 }
@@ -79,6 +81,8 @@ fn progress(app: &AppHandle, p: Progress) {
     let _ = app.emit("progress", p);
 }
 
+/// For operations long enough to deserve the progress strip. Quick per-flux
+/// edits use `run`, so the Review screen does not flash a banner on every edit.
 async fn run_task<T: Send + 'static>(
     app: AppHandle,
     task: &'static str,
@@ -301,7 +305,7 @@ async fn set_flux_options(
     flux_ids: Vec<i64>,
     options: Option<AnalysisOptions>,
 ) -> Result<Vec<FluxRow>, ApiError> {
-    run_task(app, "set_flux_options", move |s, app| {
+    run(app, move |s, app| {
         let _ = &s;
         let _ = &app;
         Ok(s.set_flux_options(&flux_ids, options)?)
@@ -315,7 +319,7 @@ async fn set_flux_flags(
     flux_ids: Vec<i64>,
     flags: Value,
 ) -> Result<Vec<FluxRow>, ApiError> {
-    run_task(app, "set_flux_flags", move |s, app| {
+    run(app, move |s, app| {
         let _ = &s;
         let _ = &app;
         Ok(s.set_flux_flags(&flux_ids, flags)?)
@@ -335,7 +339,7 @@ async fn recompute_all(app: AppHandle) -> Result<(), ApiError> {
 
 #[tauri::command]
 async fn undo(app: AppHandle) -> Result<UndoResult, ApiError> {
-    run_task(app, "undo", move |s, app| {
+    run(app, move |s, app| {
         let _ = &s;
         let _ = &app;
         Ok(s.undo()?)
@@ -345,7 +349,7 @@ async fn undo(app: AppHandle) -> Result<UndoResult, ApiError> {
 
 #[tauri::command]
 async fn redo(app: AppHandle) -> Result<UndoResult, ApiError> {
-    run_task(app, "redo", move |s, app| {
+    run(app, move |s, app| {
         let _ = &s;
         let _ = &app;
         Ok(s.redo()?)
@@ -507,7 +511,7 @@ async fn patch_flux_options(
     flux_ids: Vec<i64>,
     partial: Value,
 ) -> Result<Vec<FluxRow>, ApiError> {
-    run_task(app, "patch_flux_options", move |s, _| {
+    run(app, move |s, _| {
         Ok(s.patch_flux_options(&flux_ids, partial)?)
     })
     .await
@@ -532,6 +536,14 @@ async fn diagnostics_summary(
 }
 pub fn handlers() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static {
     tauri::generate_handler![
+        waypoints_read,
+        waypoints_write,
+        waypoint_plots,
+        apply_waypoint_layout,
+        get_route,
+        map_tiles_get,
+        map_tiles_set,
+        map_tile,
         startup_path,
         patch_flux_options,
         get_flux_thumbs,
@@ -571,4 +583,170 @@ pub fn handlers() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static
         export_xlsx,
         export_csv
     ]
+}
+#[tauri::command]
+async fn waypoints_read(
+    app: AppHandle,
+    path: String,
+) -> Result<Vec<ffr_core::waypoints::Waypoint>, ApiError> {
+    run(app, move |s, _| Ok(s.waypoints_read(&path)?)).await
+}
+#[tauri::command]
+async fn waypoints_write(
+    app: AppHandle,
+    path: String,
+    points: Vec<ffr_core::waypoints::Waypoint>,
+    source_path: Option<String>,
+) -> Result<(), ApiError> {
+    run(app, move |s, _| {
+        Ok(s.waypoints_write(&path, &points, source_path.as_deref())?)
+    })
+    .await
+}
+#[tauri::command]
+async fn waypoint_plots(
+    app: AppHandle,
+    points: Vec<ffr_core::waypoints::Waypoint>,
+    opts: ffr_core::waypoints::PlotGenOptions,
+) -> Result<ffr_core::waypoints::PlotProposal, ApiError> {
+    run(app, move |s, _| Ok(s.waypoint_plots(&points, &opts)?)).await
+}
+#[tauri::command]
+async fn apply_waypoint_layout(
+    app: AppHandle,
+    args: ffr_core::waypoints::ApplyWaypointLayoutArgs,
+) -> Result<Layout, ApiError> {
+    run_task(app, "apply_waypoint_layout", move |s, app| {
+        Ok(s.apply_waypoint_layout(args, |p| progress(app, p))?)
+    })
+    .await
+}
+#[tauri::command]
+async fn get_route(app: AppHandle) -> Result<Option<ffr_core::waypoints::StoredRoute>, ApiError> {
+    run(app, move |s, _| Ok(s.get_route()?)).await
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct MapTiles {
+    dir: String,
+    levels: Vec<u32>,
+}
+#[derive(Debug, Serialize)]
+struct MapTile {
+    data: String,
+    factor: u32,
+    dx: u32,
+    dy: u32,
+}
+fn tile_set(dir: String) -> Result<MapTiles, ApiError> {
+    let mut levels = vec![];
+    if let Ok(entries) = std::fs::read_dir(&dir) {
+        for entry in entries {
+            let entry = entry.map_err(error)?;
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if entry.file_type().map_err(error)?.is_dir()
+                && !name.is_empty()
+                && name.bytes().all(|c| c.is_ascii_digit())
+            {
+                if let Ok(z) = name.parse::<u32>() {
+                    if z <= 24 {
+                        levels.push(z);
+                    }
+                }
+            }
+        }
+    }
+    levels.sort_unstable();
+    levels.dedup();
+    if levels.is_empty() {
+        return Err(error(
+            "No XYZ tiles found. Select the folder containing zoom folders (17, 18, …).",
+        ));
+    }
+    Ok(MapTiles { dir, levels })
+}
+fn find_tile(tiles: &MapTiles, z: u32, x: u32, y: u32) -> Result<Option<MapTile>, ApiError> {
+    use base64::Engine;
+    if z > 24 || x >= 1u32 << z || y >= 1u32 << z {
+        return Ok(None);
+    }
+    for level in tiles.levels.iter().rev().filter(|level| **level <= z) {
+        let factor = 1u32 << (z - level);
+        for ext in ["jpg", "png", "jpeg"] {
+            let path = std::path::Path::new(&tiles.dir)
+                .join(level.to_string())
+                .join((x / factor).to_string())
+                .join(format!("{}.{ext}", y / factor));
+            match std::fs::read(&path) {
+                Ok(bytes) => {
+                    return Ok(Some(MapTile {
+                        data: format!(
+                            "data:image/{};base64,{}",
+                            if ext == "png" { "png" } else { "jpeg" },
+                            base64::engine::general_purpose::STANDARD.encode(bytes)
+                        ),
+                        factor,
+                        dx: x % factor,
+                        dy: y % factor,
+                    }))
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => return Err(error(format!("{}: {e}", path.display()))),
+            }
+        }
+    }
+    Ok(None)
+}
+/// Map tiles are app preferences and files; they never touch the project, so
+/// they run without the session lock and cannot stall behind a recompute.
+async fn off_lock<T: Send + 'static>(
+    app: AppHandle,
+    f: impl FnOnce(&AppHandle) -> Result<T, ApiError> + Send + 'static,
+) -> Result<T, ApiError> {
+    tauri::async_runtime::spawn_blocking(move || f(&app))
+        .await
+        .map_err(error)?
+}
+#[tauri::command]
+async fn map_tiles_get(app: AppHandle) -> Result<Option<MapTiles>, ApiError> {
+    off_lock(app, |app| {
+        prefs(app)?.map_tiles_dir.map(tile_set).transpose()
+    })
+    .await
+}
+#[tauri::command]
+async fn map_tiles_set(app: AppHandle, dir: Option<String>) -> Result<Option<MapTiles>, ApiError> {
+    off_lock(app, move |app| {
+        let tiles = dir.clone().map(tile_set).transpose()?;
+        let mut p = prefs(app)?;
+        p.map_tiles_dir = dir;
+        save_prefs(app, &p)?;
+        Ok(tiles)
+    })
+    .await
+}
+#[tauri::command]
+async fn map_tile(app: AppHandle, z: u32, x: u32, y: u32) -> Result<Option<MapTile>, ApiError> {
+    off_lock(app, move |app| match prefs(app)?.map_tiles_dir {
+        Some(dir) => find_tile(&tile_set(dir)?, z, x, y),
+        None => Ok(None),
+    })
+    .await
+}
+#[cfg(test)]
+mod tile_tests {
+    use super::*;
+    #[test]
+    fn coarser_xyz_fallback_and_validation() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(tile_set(dir.path().to_string_lossy().into()).is_err());
+        let folder = dir.path().join("2/1");
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::write(folder.join("2.png"), [1, 2, 3]).unwrap();
+        let tiles = tile_set(dir.path().to_string_lossy().into()).unwrap();
+        let tile = find_tile(&tiles, 4, 7, 9).unwrap().unwrap();
+        assert_eq!((tile.factor, tile.dx, tile.dy), (4, 3, 1));
+        assert!(tile.data.starts_with("data:image/png;base64,"));
+        assert!(find_tile(&tiles, 4, 0, 0).unwrap().is_none());
+    }
 }

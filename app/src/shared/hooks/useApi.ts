@@ -9,18 +9,25 @@ export function useAction() {
   return async (fn: () => Promise<unknown>, message?: string) => {
     try {
       const result = await fn();
-      if (
+      // Edits return the edited rows plus every row the core re-scored, so
+      // the table is patched in place instead of reloading every flux.
+      const rows =
         Array.isArray(result) &&
         result.every((r) => r && typeof r.id === "number")
-      ) {
-        const updates = new Map((result as FluxRow[]).map((r) => [r.id, r]));
+          ? (result as FluxRow[])
+          : null;
+      if (rows) {
+        const updates = new Map(rows.map((r) => [r.id, r]));
         client.setQueryData<{ columns: ColumnMeta[]; rows: FluxRow[] }>(
           ["fluxes"],
           (old) =>
             old
               ? {
                   ...old,
-                  rows: old.rows.map((r) => ({ ...r, ...updates.get(r.id) })),
+                  rows: old.rows.map((r) => {
+                    const u = updates.get(r.id);
+                    return u ? { ...r, ...u } : r;
+                  }),
                 }
               : old,
         );
@@ -30,16 +37,22 @@ export function useAction() {
             : old,
         );
       }
-      // Refresh the visible trace before expensive table/summary requests queue at the native mutex.
+      // Only the visible trace is awaited: it is cheap and the next keypress needs it.
       await client.invalidateQueries({
         queryKey: ["detail"],
         refetchType: "active",
       });
-      await client.invalidateQueries({
-        predicate: (q) =>
-          !["detail", "diagnostics"].includes(String(q.queryKey[0])),
-      });
       if (message) toastFn(message);
+      // Summaries and other screens refresh in the background.
+      void client.invalidateQueries({
+        predicate: (q) => {
+          const key = String(q.queryKey[0]);
+          return (
+            !["detail", "diagnostics"].includes(key) &&
+            !(rows && key === "fluxes")
+          );
+        },
+      });
     } catch (e) {
       error(e);
     }
@@ -48,7 +61,9 @@ export function useAction() {
 export function useRows() {
   const screen = useStore((s) => s.screen);
   return useQuery({
-    enabled: ["Review", "Treatments", "Outliers", "Data"].includes(screen),
+    enabled: ["Review", "Treatments", "Outliers", "Data", "Project"].includes(
+      screen,
+    ),
     queryKey: ["fluxes"],
     queryFn: async () => {
       const t = await api.listFluxes();

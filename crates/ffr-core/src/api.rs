@@ -95,6 +95,7 @@ impl AnalysisOptions {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct ProjectConfig {
+    pub crs: String,
     pub diagnostics: crate::diagnostics::DiagnosticsConfig,
     pub name: String,
     pub gases: Vec<String>,
@@ -117,6 +118,7 @@ pub struct ProjectConfig {
 impl Default for ProjectConfig {
     fn default() -> Self {
         Self {
+            crs: "EPSG:32632".into(),
             diagnostics: crate::diagnostics::DiagnosticsConfig::default(),
             name: String::new(),
             gases: crate::regression::GASES
@@ -307,6 +309,8 @@ pub struct Treatment {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Plot {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub waypoints: Option<Vec<crate::waypoints::WaypointRef>>,
     pub id: i64,
     pub label: String,
     pub treatment_id: i64,

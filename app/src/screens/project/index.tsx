@@ -1,11 +1,17 @@
 import { useQuery } from "@tanstack/react-query";
-import type { EChartsCoreOption } from "echarts/core";
 import { useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { api } from "../../api";
 import type { ProjectConfig } from "../../api/types";
-import { Chart } from "../../shared/charts/Chart";
-import { Field, Panel, Status, pick, useAction } from "../../shared/common";
+import {
+  Field,
+  Panel,
+  Status,
+  pick,
+  useAction,
+  useRows,
+} from "../../shared/common";
+import { PlotMap } from "./PlotMap";
 import { useStore } from "../../store";
 export function Project() {
   const navigation = useStore(
@@ -33,8 +39,12 @@ export function Project() {
     > | null>(null);
   const cfg = draft ?? q.data,
     layout = edited ?? l.data;
-  const columns = Math.max(1, Math.ceil(Math.sqrt(layout?.plots.length ?? 0))),
-    mapRows = Math.ceil((layout?.plots.length ?? 0) / columns);
+  const rows = useRows();
+  const saveLayout = () =>
+    void action(async () => {
+      if (layout) await api.setLayout(layout);
+      setEdited(null);
+    }, "Field layout saved");
   return (
     <div className="page">
       <div className="page-heading">
@@ -85,9 +95,30 @@ export function Project() {
       <Status loading={h.isLoading} error={h.error} />
       {!l.isLoading && !layout?.plots.length && (
         <p className="muted">
-          No field layout yet. Import a project layout to assign plots and
-          treatments.
+          No field layout yet. Load the robot's waypoint list to make plots from
+          its chamber positions, or import a project layout.
         </p>
+      )}
+      {layout && (
+        <Panel
+          title="Field map"
+          extra={
+            <small>
+              {layout.plots.length} plots / {layout.treatments.length}{" "}
+              treatments
+            </small>
+          }
+        >
+          <PlotMap
+            layout={layout}
+            crs={cfg?.crs || "EPSG:32632"}
+            rows={rows.data?.rows}
+            onChange={setEdited}
+            dirty={edited !== null}
+            onSave={saveLayout}
+            onDiscard={() => setEdited(null)}
+          />
+        </Panel>
       )}
       {cfg && (
         <div className="two">
@@ -189,150 +220,82 @@ export function Project() {
               Save & recompute
             </button>
           </Panel>
-          <Panel
-            title="Field layout"
-            extra={
-              <small>
-                {layout?.plots.length ?? 0} plots /{" "}
-                {layout?.treatments.length ?? 0} treatments
-              </small>
-            }
-          >
-            <Chart
-              label="Field plot map"
-              height={330}
-              option={
-                {
-                  grid: { left: 35, right: 20, top: 20, bottom: 35 },
-                  tooltip: { trigger: "item" },
-                  xAxis: {
-                    type: "value",
-                    name: "East",
-                    nameLocation: "middle",
-                    nameGap: 25,
-                    min: -1,
-                    max: columns,
-                  },
-                  yAxis: {
-                    type: "value",
-                    name: "North",
-                    nameLocation: "middle",
-                    nameGap: 25,
-                    min: -1,
-                    max: Math.max(1, mapRows),
-                  },
-                  series: [
-                    {
-                      type: "scatter",
-                      symbol: "rect",
-                      symbolSize: 36,
-                      data: layout?.plots.map((p, i) => ({
-                        name: p.label,
-                        value: [
-                          i % columns,
-                          mapRows - 1 - Math.floor(i / columns),
-                        ],
-                        itemStyle: {
-                          color: layout.treatments.find(
-                            (t) => t.id === p.treatmentId,
-                          )?.colour,
-                        },
-                        label: {
-                          show: true,
-                          formatter: p.label,
-                          color: "#fff",
-                          fontSize: 10,
-                        },
-                      })),
-                    },
-                  ],
-                } as EChartsCoreOption
-              }
-            />
-          </Panel>
-        </div>
-      )}
-      {layout && (
-        <Panel
-          title="Treatments & plots"
-          extra={
-            <button
-              onClick={() =>
-                void action(async () => {
-                  await api.setLayout(layout);
-                  setEdited(null);
-                }, "Field layout saved")
+          {layout && (
+            <Panel
+              title="Treatments & plots"
+              extra={
+                <button disabled={edited === null} onClick={saveLayout}>
+                  Save field layout
+                </button>
               }
             >
-              Save field layout
-            </button>
-          }
-        >
-          <div className="layout-editor">
-            {layout.treatments.map((t, i) => (
-              <div key={t.id} className="treatment-edit">
-                <input
-                  aria-label={"Colour " + t.name}
-                  type="color"
-                  value={t.colour}
-                  onChange={(e) => {
-                    const next = structuredClone(layout);
-                    next.treatments[i].colour = e.target.value;
-                    setEdited(next);
-                  }}
-                />
-                <input
-                  aria-label={"Treatment " + t.id}
-                  value={t.name}
-                  onChange={(e) => {
-                    const next = structuredClone(layout);
-                    next.treatments[i].name = e.target.value;
-                    setEdited(next);
-                  }}
-                />
-                <small>
-                  {layout.plots
-                    .filter((p) => p.treatmentId === t.id)
-                    .map((p) => p.label)
-                    .join(" · ")}
-                </small>
+              <div className="layout-editor">
+                {layout.treatments.map((t, i) => (
+                  <div key={t.id} className="treatment-edit">
+                    <input
+                      aria-label={"Colour " + t.name}
+                      type="color"
+                      value={t.colour}
+                      onChange={(e) => {
+                        const next = structuredClone(layout);
+                        next.treatments[i].colour = e.target.value;
+                        setEdited(next);
+                      }}
+                    />
+                    <input
+                      aria-label={"Treatment " + t.id}
+                      value={t.name}
+                      onChange={(e) => {
+                        const next = structuredClone(layout);
+                        next.treatments[i].name = e.target.value;
+                        setEdited(next);
+                      }}
+                    />
+                    <small>
+                      {layout.plots
+                        .filter((p) => p.treatmentId === t.id)
+                        .map((p) => p.label)
+                        .join(" · ")}
+                    </small>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
-          <details style={{ marginTop: 20 }}>
-            <summary>Edit plot labels and treatment assignments</summary>
-            <div className="layout-editor" style={{ marginTop: 15 }}>
-              {layout.plots.map((p, i) => (
-                <div className="two" key={p.id}>
-                  <input
-                    aria-label={"Plot label " + p.id}
-                    value={p.label}
-                    onChange={(e) => {
-                      const next = structuredClone(layout);
-                      next.plots[i].label = e.target.value;
-                      setEdited(next);
-                    }}
-                  />
-                  <select
-                    aria-label={"Plot treatment " + p.id}
-                    value={p.treatmentId}
-                    onChange={(e) => {
-                      const next = structuredClone(layout);
-                      next.plots[i].treatmentId = Number(e.target.value);
-                      setEdited(next);
-                    }}
-                  >
-                    {layout.treatments.map((t) => (
-                      <option key={t.id} value={t.id}>
-                        {t.name}
-                      </option>
-                    ))}
-                  </select>
+              <details style={{ marginTop: 20 }}>
+                <summary>Edit plot labels and treatment assignments</summary>
+                <div className="layout-editor" style={{ marginTop: 15 }}>
+                  {layout.plots.map((p, i) => (
+                    <div className="two" key={p.id}>
+                      <input
+                        aria-label={"Plot label " + p.id}
+                        value={p.label}
+                        onChange={(e) => {
+                          const next = structuredClone(layout);
+                          next.plots[i].label = e.target.value;
+                          setEdited(next);
+                        }}
+                      />
+                      <select
+                        aria-label={"Plot treatment " + p.id}
+                        value={p.treatmentId}
+                        onChange={(e) => {
+                          const next = structuredClone(layout);
+                          next.plots[i].treatmentId = Number(e.target.value);
+                          setEdited(next);
+                        }}
+                      >
+                        {layout.treatments.map((t) => (
+                          <option key={t.id} value={t.id}>
+                            {t.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
-          </details>
-        </Panel>
+              </details>
+            </Panel>
+          )}
+        </div>
       )}
       <Panel title="Change history">
         {h.data?.length ? (
