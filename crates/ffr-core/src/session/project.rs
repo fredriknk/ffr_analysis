@@ -50,10 +50,30 @@ original INTEGER);
             .map_err(|e| Error::Invalid(format!("{path}: {e}")))?;
         let app: i64 = db.query_row("PRAGMA application_id", [], |r| r.get(0))?;
         let version: u32 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-        if app != 1179013682 || !(1..=3).contains(&version) {
-            return Err(Error::Invalid(
-                "unsupported project or schema version".into(),
-            ));
+        if app != 1179013682 {
+            return Err(Error::Invalid(format!(
+                "{path} is not an FFR Analyzer project"
+            )));
+        }
+        if version > 3 {
+            return Err(Error::Invalid(format!(
+                "{path} was saved by a newer version of FFR Analyzer (project format {version}; \
+                 this version reads up to 3). Install the latest version from the Releases page."
+            )));
+        }
+        if version < 1 {
+            return Err(Error::Invalid(format!(
+                "{path}: unsupported project format {version}"
+            )));
+        }
+        if version < 3 {
+            // The upgrade rewrites the file in place and older versions can no longer open
+            // it, so keep the original next to it once.
+            let original = std::path::Path::new(path);
+            let backup = original.with_extension(format!("format{version}-backup.ffr"));
+            if !backup.exists() {
+                std::fs::copy(original, &backup).map_err(|e| Error::at(&backup, e))?;
+            }
         }
         db.execute_batch("PRAGMA journal_mode=DELETE; PRAGMA foreign_keys=ON;")?;
         self.lag_cache.borrow_mut().clear();
