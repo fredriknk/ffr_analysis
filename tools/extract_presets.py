@@ -1,6 +1,11 @@
-"""Extract literal preset constants without executing legacy source."""
-import ast,json,pathlib
-root=pathlib.Path(__file__).resolve().parents[1]
+"""Extract literal preset constants without executing legacy source.
+
+The output is already embedded as crates/ffr-core/src/presets.json; rerun only if the legacy
+layouts change. Usage: python tools/extract_presets.py <checkout of the legacy-python branch>
+(for example: git worktree add ../ffr-legacy legacy-python).
+"""
+import ast,json,pathlib,sys
+root=pathlib.Path(sys.argv[1] if len(sys.argv)>1 else pathlib.Path(__file__).resolve().parents[1])
 result={}
 for name in ['Capture','Truesoil','Greenmove']:
     tree=ast.parse((root/'Users'/name/'field_experiment.py').read_text(encoding='utf-8-sig'))

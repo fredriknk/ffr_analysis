@@ -1,7 +1,8 @@
 # FFR Analyzer 2 — specification
 
 This is the contract for the rewrite of the Field Flux Robot (FFR) analysis program.
-The legacy Python/Tkinter program lives in `prog/` and `Users/` and is **reference only**:
+The legacy Python/Tkinter program lives on the `legacy-python` branch (`prog/`, `Users/`;
+file paths below refer to that branch) and is **reference only**:
 read it to understand behaviour, never import from it, never modify it.
 
 ## 1. What the program is for
@@ -221,7 +222,7 @@ findings remain visible as info chips and in diagnostic summaries.
 | `legacy_qc`, `temp_fallback`, `no_plot` | Legacy QC, missing temperature, or unassigned chamber: info. |
 
 `attention` grows with effective impact and number of findings: bad 70?100,
-warn 30?69, info 1?10. `legacy_qc` alone has attention 0. Reviewed fluxes keep
+warn 30–69, info 1–10. `legacy_qc` alone has attention 0. Reviewed fluxes keep
 their scores. Target on Capture: bad at most about 6%, bad plus warn at most 15%.
 The UI decides which reviewed or excluded fluxes to hide.
 
@@ -402,7 +403,7 @@ Screens:
 - TypeScript: strict, ESLint, no `any` in the API layer.
 - Commit small milestones with clear messages. Commit only files you own. Never commit
   `metno_client_id.txt`, anything under `Users/*/output`, `*.pickle`, or `*.ffr`.
-- Do not touch `prog/`, `Users/`, `example_data/`, or files outside your assignment.
+- Do not change the legacy program (branch `legacy-python`) or files outside your assignment.
 
 ## 9. Local data for verification (not in git)
 

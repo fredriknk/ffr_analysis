@@ -1,19 +1,20 @@
-﻿# FFR Analyzer desktop
+# FFR Analyzer desktop
 
 Run `npm ci`, `npm run dev`, then open http://127.0.0.1:1420.
 The browser uses the synthetic API automatically. `npm run dev -- --mode mock`
 and `VITE_FFR_MOCK=1` explicitly select it, including in Tauri.
-The desktop normally selects the invoke adapter. Domain command handlers are intentionally
-not registered in this shell; they will be supplied by the core integration.
+The desktop uses the invoke adapter; `src-tauri/src/commands.rs` wraps `ffr-core`.
 
 - `npm run build`: strict TypeScript + production bundle.
 - `npm run lint`, `npm test`: lint and scientific mock tests.
-- `npm run smoke`: starts Vite in mock mode and walks all six screens; captures light/dark PNGs in `screenshots/`.
+- `npm run smoke`: starts Vite in mock mode and walks every screen; captures light/dark PNGs in `screenshots/`.
 - `cargo check` inside `src-tauri/`.
 - `npm run tauri build -- --debug`: builds the executable and per-user NSIS installer.
+- `FFR_REAL_PROJECT=<copy of a .ffr> node scripts/real-smoke.mjs`: drives the built exe on a real project
+  (optional `FFR_CAPTURE_LEGACY`, `FFR_CAPTURE_RAW` for the legacy-import step); output in `local/`.
 - `node scripts/check-shell.mjs`: opens the built executable and checks the actual WebView2 Start screen over CDP, then closes it.
 
-The Cargo lockfile and resolver fallback keep this shell compatible with Rust 1.85.
+The Rust toolchain is pinned in `src-tauri/rust-toolchain.toml` (same as the repository root).
 The JS API/dialog package minor versions match the compatible Rust packages.
 The SVG icon source is `src-tauri/icons/source.svg`; regenerate with `npm run tauri icon src-tauri/icons/source.svg`.
 
