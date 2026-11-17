@@ -61,6 +61,20 @@ impl Session {
     pub fn list_fluxes(&self) -> Result<FluxTable> {
         let mut rows = self.rows()?;
         self.join_rows(&mut rows)?;
+        // One bulk read also decorates older projects without recomputing raw traces.
+        let mut statement=self.db()?.prepare("SELECT flux_id,findings FROM diagnostics")?;
+        let levels=statement.query_map([],|r|Ok((r.get::<_,i64>(0)?,r.get::<_,String>(1)?)))?
+            .collect::<std::result::Result<Vec<_>,_>>()?;
+        let mut maps=BTreeMap::new();
+        for (id,raw) in levels {
+            let findings:Vec<crate::diagnostics::Diagnostic>=serde_json::from_str(&raw)?;
+            maps.insert(id,crate::diagnostics::severity_map(&findings));
+        }
+        for row in &mut rows {
+            let id=row["id"].as_i64().unwrap_or(0);
+            row.insert("diagSeverity".into(),json!(maps.remove(&id).unwrap_or_default()));
+        }
+
         let mut keys: BTreeMap<String, String> = BTreeMap::new();
         for (key, kind) in [
             ("attention", "number"),
