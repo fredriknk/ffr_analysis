@@ -416,6 +416,7 @@ class Regressor(object):
 
     def __init__(self, slopes_file_name, options, save_options, specific_options_file_name=None, detailed_output_path=None):
         self.options = Options_manager(options, specific_options_file_name)
+        logging.debug('options: %s' % self.options)
         self.slopes_file_name = slopes_file_name
         self.save_options = save_options
         self.plot_fun = plot_regressions
@@ -464,8 +465,7 @@ class Regressor(object):
             for key in keys:
                 tbest_orig = tbest
                 regressions[side][key], tbest = \
-                    self._regress1(rawdict, side, key,
-                                   specific_options, tbest)
+                    self._regress1(rawdict, side, key, specific_options, tbest)
 
                 if(regressions[side][key] is not None and
                    self.options.options["correct_negatives"]):
