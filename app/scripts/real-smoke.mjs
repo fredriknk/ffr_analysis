@@ -214,10 +214,10 @@ try {
   await page.setViewportSize({ width: 1500, height: 950 });
   await nav("Outliers");
   await page.waitForTimeout(500);
-  started=performance.now();
-  const rules=await invoke("diagnostics_summary");
-  report.timings.diagnosticsSummaryMs=performance.now()-started;
-  report.diagnosticRules=rules.map(r=>({code:r.code,count:r.count}));
+  started = performance.now();
+  const rules = await invoke("diagnostics_summary");
+  report.timings.diagnosticsSummaryMs = performance.now() - started;
+  report.diagnosticRules = rules.map((r) => ({ code: r.code, count: r.count }));
   await stamp(page, "outliers");
   await page.evaluate(() => {
     window.__ffrBrushSamples = [];

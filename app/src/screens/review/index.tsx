@@ -368,7 +368,14 @@ export function Review() {
             {flux ? (
               <>
                 <h2>
-                  {/^(plot\b|P\d)/i.test(flux.plotLabel) ? flux.plotLabel : "Plot " + flux.plotLabel} · {flux.treatmentName} · {flux.source === "manual" ? "manual measurement" : flux.side + " chamber"} · {dateTime(flux.time)}
+                  {/^(plot\b|P\d)/i.test(flux.plotLabel)
+                    ? flux.plotLabel
+                    : "Plot " + flux.plotLabel}{" "}
+                  · {flux.treatmentName} ·{" "}
+                  {flux.source === "manual"
+                    ? "manual measurement"
+                    : flux.side + " chamber"}{" "}
+                  · {dateTime(flux.time)}
                 </h2>
                 <small className="filename" title={flux.filename}>
                   {flux.filename}

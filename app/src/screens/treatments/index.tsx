@@ -423,7 +423,11 @@ export function Treatments() {
                                 v.value < dist.box[0] || v.value > dist.box[4],
                             )
                             .map((v) => ({
-                              value: [i, transformed(v.value,boxScale), v.fluxId],
+                              value: [
+                                i,
+                                transformed(v.value, boxScale),
+                                v.fluxId,
+                              ],
                               itemStyle: { color: ts[i].colour, opacity: 0.6 },
                             })),
                         ),
