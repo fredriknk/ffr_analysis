@@ -383,28 +383,32 @@ serde_json::to_string(findings)?])?;
 
     pub fn diagnostics_summary(&self) -> Result<Vec<crate::diagnostics::DiagnosticSummary>> {
         let rows = self.rows()?;
+        let findings = rows
+            .iter()
+            .map(|row| {
+                Ok((
+                    row["reviewed"] == true,
+                    self.load_findings(row["id"].as_i64().unwrap_or(0))?,
+                ))
+            })
+            .collect::<Result<Vec<_>>>()?;
         let mut out = vec![];
         for (code, label, description) in crate::diagnostics::RULES {
             let mut count = 0;
             let mut unreviewed = 0;
             let mut severity = "info".to_string();
-            for row in &rows {
-                let matches: Vec<_> = self
-                    .load_findings(row["id"].as_i64().unwrap_or(0))?
-                    .into_iter()
-                    .filter(|d| d.code == code)
-                    .collect();
-                if !matches.is_empty() {
-                    count += 1;
-                    if row["reviewed"] != true {
-                        unreviewed += 1;
+            for (reviewed, list) in &findings {
+                let mut hit = false;
+                for d in list.iter().filter(|d| d.code == code) {
+                    hit = true;
+                    if crate::diagnostics::rank(&d.severity) > crate::diagnostics::rank(&severity) {
+                        severity = d.severity.clone();
                     }
-                    for d in matches {
-                        if crate::diagnostics::rank(&d.severity)
-                            > crate::diagnostics::rank(&severity)
-                        {
-                            severity = d.severity;
-                        }
+                }
+                if hit {
+                    count += 1;
+                    if !reviewed {
+                        unreviewed += 1;
                     }
                 }
             }
