@@ -77,6 +77,11 @@ export function Chart({
     ro.observe(ref.current);
     return () => {
       ro.disconnect();
+      // Supersede queued progressive paint frames before the canvas is disposed.
+      // zrender 5 otherwise lets a pending frame access the disposed layer list.
+      (
+        c.getZr().painter as { refresh: (paintAll?: boolean) => unknown }
+      ).refresh(true);
       c.dispose();
       instance.current = undefined;
     };

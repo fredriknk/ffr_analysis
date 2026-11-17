@@ -1,6 +1,6 @@
-import { test, expect, type Page } from "@playwright/test";
-import { mkdirSync } from "node:fs";
+import { expect, test, type Page } from "@playwright/test";
 import type { ECharts } from "echarts/core";
+import { mkdirSync } from "node:fs";
 type ChartElement = HTMLElement & { __ffrChart: ECharts };
 async function chartPoint(page: Page, label: string) {
   const el = page.getByRole("img", { name: label, exact: true });
@@ -56,7 +56,7 @@ test("triage, stable selection, lazy contact sheet, linked charts and all screen
   test.setTimeout(240000);
   mkdirSync("screenshots", { recursive: true });
   const errors: string[] = [];
-  page.on("pageerror", (e) => errors.push(e.message));
+  page.on("pageerror", (e) => errors.push(e.stack ?? e.message));
   page.on("console", (e) => {
     if (e.type() === "error") errors.push(e.text());
   });

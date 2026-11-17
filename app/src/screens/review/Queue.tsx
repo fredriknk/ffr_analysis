@@ -2,6 +2,7 @@ import { useQueries } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../../api";
+import { hasFinding } from "../../api/findingLevels";
 import type { FluxRow, Gas } from "../../api/types";
 import {
   attention,
@@ -11,7 +12,6 @@ import {
   Status,
 } from "../../shared/common";
 import {
-  codes,
   DiagnosticPicker,
   ReasonChips,
   severity,
@@ -32,10 +32,7 @@ export function useQueue(rows: FluxRow[]) {
               .toLowerCase()
               .includes(s.search.toLowerCase())) &&
           (s.quick === "all" ||
-            (s.quick === "attention" &&
-              r.attention >= 30 &&
-              !r.reviewed &&
-              !r.excluded) ||
+            (s.quick === "attention" && r.attention >= 30 && !r.reviewed) ||
             (s.quick === "unreviewed" && !r.reviewed) ||
             (s.quick === "flagged" && r.attention >= 30) ||
             (s.quick === "overridden" && r.overridden) ||
@@ -45,7 +42,7 @@ export function useQueue(rows: FluxRow[]) {
           (!s.reviewFrom || r.time >= Date.parse(s.reviewFrom)) &&
           (!s.reviewTo || r.time < Date.parse(s.reviewTo) + 86400000) &&
           (!s.diagnosticCodes.length ||
-            s.diagnosticCodes.some((c) => codes(r.diag).includes(c))),
+            s.diagnosticCodes.some((c) => hasFinding(r, c, s.includeInfo))),
       )
       .sort((a, b) =>
         s.queueSort === "attention"
@@ -65,6 +62,7 @@ export function useQueue(rows: FluxRow[]) {
     s.reviewTo,
     s.queueSort,
     s.diagnosticCodes,
+    s.includeInfo,
   ]);
 }
 export function QueueFilters({ rows }: { rows: FluxRow[] }) {
@@ -162,10 +160,20 @@ export function QueueFilters({ rows }: { rows: FluxRow[] }) {
             </label>
           </div>
           <Status loading={counts.isLoading} error={counts.error} />
+          <label>
+            <input
+              type="checkbox"
+              checked={s.includeInfo}
+              onChange={(e) => s.set({ includeInfo: e.target.checked })}
+            />
+            Include info findings
+          </label>
           <DiagnosticPicker
             counts={(counts.data ?? []).filter((c) => c.count)}
             value={s.diagnosticCodes}
-            onChange={(diagnosticCodes) => s.set({ diagnosticCodes })}
+            onChange={(diagnosticCodes) =>
+              s.set({ diagnosticCodes, quick: "all" })
+            }
           />
           <button
             onClick={() =>

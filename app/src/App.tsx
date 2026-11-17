@@ -1,17 +1,30 @@
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { api, mockMode } from "./api";
+import { openStartupProject } from "./api/startup";
 import type { Progress } from "./api/types";
-import { Data } from "./screens/data";
-import { External } from "./screens/external";
-import { Outliers } from "./screens/outliers";
-import { Project } from "./screens/project";
-import { Review } from "./screens/review";
 import { Start } from "./screens/start";
-import { Treatments } from "./screens/treatments";
 import { Empty, error, setToastHandler, useAction } from "./shared/common";
 import { useStore, type Screen } from "./store";
+const Data = lazy(() =>
+  import("./screens/data").then((m) => ({ default: m.Data })),
+);
+const External = lazy(() =>
+  import("./screens/external").then((m) => ({ default: m.External })),
+);
+const Outliers = lazy(() =>
+  import("./screens/outliers").then((m) => ({ default: m.Outliers })),
+);
+const Project = lazy(() =>
+  import("./screens/project").then((m) => ({ default: m.Project })),
+);
+const Review = lazy(() =>
+  import("./screens/review").then((m) => ({ default: m.Review })),
+);
+const Treatments = lazy(() =>
+  import("./screens/treatments").then((m) => ({ default: m.Treatments })),
+);
 export default function App() {
   const s = useStore(
       useShallow(({ screen, theme, nav, set, timeZone }) => ({
@@ -25,6 +38,34 @@ export default function App() {
     action = useAction(),
     [toast, setToast] = useState(""),
     [progress, setProgress] = useState<Progress | null>(null);
+  const [visited, setVisited] = useState(new Set(["Start"]));
+  const [startupError, setStartupError] = useState("");
+  useEffect(() => setVisited((v) => new Set([...v, s.screen])), [s.screen]);
+  const started = useRef(false);
+  useEffect(() => {
+    if (started.current) return;
+    started.current = true;
+    void action(async () => {
+      try {
+        await openStartupProject(api, () => s.nav("Review"));
+      } catch (e) {
+        s.nav("Start");
+        setStartupError(
+          "Could not open the startup project: " +
+            (typeof e === "object" && e && "message" in e
+              ? String(e.message)
+              : String(e)),
+        );
+        throw {
+          message:
+            "Could not open the startup project: " +
+            (typeof e === "object" && e && "message" in e
+              ? String(e.message)
+              : String(e)),
+        };
+      }
+    });
+  }, []);
   const info = useQuery({
     queryKey: ["project"],
     queryFn: () => api.projectInfo(),
@@ -150,35 +191,43 @@ export default function App() {
             </span>
           </div>
         )}
-        <div className="screen-body">
-          {screens.map((screen) => (
-            <div
-              key={screen}
-              hidden={s.screen !== screen}
-              className="screen-slot"
-            >
-              {screen === "Start" ? (
-                <Start />
-              ) : info.data ? (
-                screen === "Review" ? (
-                  <Review />
-                ) : screen === "Treatments" ? (
-                  <Treatments />
-                ) : screen === "Outliers" ? (
-                  <Outliers />
-                ) : screen === "Data" ? (
-                  <Data />
-                ) : screen === "External data" ? (
-                  <External />
+        {startupError && s.screen === "Start" && (
+          <div role="alert" className="startup-error">
+            {startupError}
+          </div>
+        )}
+        <Suspense fallback={<div role="status">Loading workspace…</div>}>
+          <div className="screen-body">
+            {screens.map((screen) => (
+              <div
+                key={screen}
+                hidden={s.screen !== screen}
+                className="screen-slot"
+              >
+                {!visited.has(screen) && s.screen !== screen ? null : screen ===
+                  "Start" ? (
+                  <Start />
+                ) : info.data ? (
+                  screen === "Review" ? (
+                    <Review />
+                  ) : screen === "Treatments" ? (
+                    <Treatments />
+                  ) : screen === "Outliers" ? (
+                    <Outliers />
+                  ) : screen === "Data" ? (
+                    <Data />
+                  ) : screen === "External data" ? (
+                    <External />
+                  ) : (
+                    <Project />
+                  )
                 ) : (
-                  <Project />
-                )
-              ) : (
-                <Empty>Open a project to begin.</Empty>
-              )}
-            </div>
-          ))}
-        </div>
+                  <Empty>Open a project to begin.</Empty>
+                )}
+              </div>
+            ))}
+          </div>
+        </Suspense>
         <footer className="statusbar">
           <span>
             ● {mockMode ? "Demo session" : "Ready"} ·{" "}

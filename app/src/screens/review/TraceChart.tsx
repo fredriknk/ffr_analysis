@@ -1,4 +1,4 @@
-﻿import type { EChartsCoreOption } from "echarts/core";
+import type { EChartsCoreOption } from "echarts/core";
 import { useRef } from "react";
 import type { AnalysisOptions, FluxDetail, Gas } from "../../api/types";
 import { Chart } from "../../shared/charts/Chart";
@@ -80,11 +80,28 @@ export function TraceChart({
       silent: true,
       symbol: "none",
       label: { show: false },
-      lineStyle: { type: "dashed", color: "#a771be", opacity: 0.65 },
-      data:
-        Number.isFinite(lag) && Math.abs(lag) >= 1
-          ? detail.switches.map((sw) => ({ xAxis: sw.t + lag }))
-          : [],
+      data: [
+        ...detail.switches.map((sw) => ({
+          xAxis: sw.t,
+          lineStyle: { color: "#8999a5", type: "solid", opacity: 0.4 },
+        })),
+        ...(Number.isFinite(lag) && Math.abs(lag) >= 0.5
+          ? detail.switches.map((sw, i) => ({
+              xAxis: sw.t + lag,
+              lineStyle: { type: "dashed", color: "#a771be", opacity: 0.7 },
+              label: {
+                show: i === 1,
+                formatter:
+                  gas.replace("2", "₂") +
+                  " lag " +
+                  String(lag).replace("-", "−") +
+                  " s",
+                position: "insideEndTop",
+                fontSize: 9,
+              },
+            }))
+          : []),
+      ],
     },
   });
   if (robust)
@@ -281,7 +298,7 @@ export function TraceChart({
                 }}
               >
                 <span>
-                  {key === "valveOffset" ? "δ" : key} {o[key] ?? 0}s
+                  {key === "valveOffset" ? "Offset" : key} {o[key] ?? 0}s
                 </span>
               </div>
             );

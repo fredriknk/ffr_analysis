@@ -1,6 +1,7 @@
 export type Gas = "N2O" | "CO2" | "CO" | "H2O" | "licor_H2O";
 export type Source = "robot" | "manual";
-export type Cell = number | string | boolean | null;
+export type DiagnosticLevels = Record<string, "info" | "warn" | "bad">;
+export type Cell = number | string | boolean | null | DiagnosticLevels;
 export interface ApiError {
   code: string;
   message: string;
@@ -101,6 +102,7 @@ export interface FluxRow {
   precip: number;
   attention: number;
   diag: string;
+  diagSeverity?: DiagnosticLevels;
   valveLagS: number;
   x: number;
   y: number;
@@ -143,6 +145,9 @@ export interface Diagnostic {
   message: string;
 }
 export interface DiagnosticCount {
+  warnBad?: number;
+  info?: number;
+  pending?: number;
   code: string;
   label: string;
   description: string;
@@ -304,6 +309,7 @@ export interface ExportArgs {
   columns: string[];
 }
 export interface FfrApi {
+  startupPath(): Promise<string | null>;
   projectCreate(path: string, name: string): Promise<ProjectInfo>;
   projectOpen(path: string): Promise<ProjectInfo>;
   projectClose(): Promise<void>;

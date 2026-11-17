@@ -92,6 +92,17 @@ try {
     page.locator("nav").getByRole("button", { name, exact: true }).click();
   const table = await invoke("list_fluxes"),
     layout = await invoke("get_layout");
+  report.severityCounts = {};
+  for (const levels of table.data.diagSeverity ?? []) {
+    for (const [code, level] of Object.entries(levels ?? {})) {
+      const count = report.severityCounts[code] ?? { warnBad: 0, info: 0 };
+      if (level === "info") count.info++;
+      else count.warnBad++;
+      report.severityCounts[code] = count;
+    }
+  }
+  if (!table.data.diagSeverity)
+    throw Error("Per-code severity missing from FluxTable");
   report.layout = {
     plots: layout.plots.length,
     treatments: layout.treatments.length,
@@ -261,6 +272,10 @@ try {
   ).toBeVisible();
   await page.getByRole("button", { name: "← Back to Outliers" }).click();
   await nav("Treatments");
+  await expect(
+    page.getByRole("img", { name: "Daily means box plot", exact: true }),
+  ).toBeVisible();
+  await stamp(page, "treatments-top");
   await page.waitForTimeout(300);
   const brush = page.getByRole("img", {
     name: "Shared date-range brush",

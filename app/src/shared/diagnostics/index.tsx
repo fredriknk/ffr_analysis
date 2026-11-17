@@ -48,26 +48,33 @@ export function DiagnosticPicker({
   label?: string;
 }) {
   return (
-    <label className="field">
-      <span>{label} · Ctrl / ⌘ to select several</span>
-      <select
-        multiple
-        aria-label={label}
-        value={value}
-        onChange={(e) =>
-          onChange(Array.from(e.target.selectedOptions, (o) => o.value))
-        }
-      >
-        {counts.map((c) => (
-          <option key={c.code} value={c.code}>
-            {c.label} ({c.count.toLocaleString()};{" "}
-            {c.unreviewed.toLocaleString()} unreviewed)
-          </option>
-        ))}
-      </select>
+    <div className="field diagnostic-picker" role="group" aria-label={label}>
+      <span>{label}</span>
+      {counts.map((c) => (
+        <label key={c.code}>
+          <input
+            type="checkbox"
+            checked={value.includes(c.code)}
+            onChange={(e) =>
+              onChange(
+                e.target.checked
+                  ? [...value, c.code]
+                  : value.filter((v) => v !== c.code),
+              )
+            }
+          />
+          <span>
+            {c.label} <b>{(c.warnBad ?? 0).toLocaleString()}</b>
+            <small className="muted">
+              {" "}
+              · {(c.info ?? 0).toLocaleString()} info
+            </small>
+          </span>
+        </label>
+      ))}
       {!!value.length && (
         <button onClick={() => onChange([])}>Clear diagnostic filter</button>
       )}
-    </label>
+    </div>
   );
 }
