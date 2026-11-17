@@ -27,8 +27,29 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis"],
-    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/icon.ico"],
-    "windows": { "nsis": { "installMode": "currentUser" } }
+    "targets": [
+      "nsis"
+    ],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/icon.ico"
+    ],
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    },
+    "fileAssociations": [
+      {
+        "ext": [
+          "ffr"
+        ],
+        "name": "FFR Analyzer project",
+        "description": "FFR Analyzer project",
+        "role": "Editor",
+        "mimeType": "application/x-ffr-project"
+      }
+    ]
   }
 }

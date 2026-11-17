@@ -168,6 +168,17 @@ async fn project_save_copy(app: AppHandle, path: String) -> Result<(), ApiError>
     .await
 }
 
+/// The `.ffr` file the app was launched with (double-click in Explorer or
+/// `ffr-analyzer.exe path\to\project.ffr`), if any.
+#[tauri::command]
+fn startup_path() -> Option<String> {
+    std::env::args_os()
+        .skip(1)
+        .map(std::path::PathBuf::from)
+        .find(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("ffr")) && p.is_file())
+        .map(|p| p.to_string_lossy().into_owned())
+}
+
 #[tauri::command]
 async fn recent_projects(app: AppHandle) -> Result<Vec<RecentProject>, ApiError> {
     run(app, move |s, app| {
@@ -521,6 +532,7 @@ async fn diagnostics_summary(
 }
 pub fn handlers() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static {
     tauri::generate_handler![
+        startup_path,
         patch_flux_options,
         get_flux_thumbs,
         diagnostics_summary,
