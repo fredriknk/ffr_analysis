@@ -409,12 +409,12 @@ try {
     throw Error("History is rendering a large payload");
   await nav("Start");
   await page.getByRole("button", { name: /Import legacy project/ }).click();
-  const legacyDir =
-    process.env.FFR_CAPTURE_LEGACY ||
-    String.raw`C:\Users\fnk\PycharmProjects\ffr_analysis_new_ai\Users\Capture`;
-  const rawDir =
-    process.env.FFR_CAPTURE_RAW ||
-    String.raw`C:\Users\fnk\OneDrive - Norwegian University of Life Sciences\1-Prosjekter\2022-FFR\Resultater\raw_data - Trygve Fredriksen's files`;
+  const legacyDir = process.env.FFR_CAPTURE_LEGACY;
+  const rawDir = process.env.FFR_CAPTURE_RAW;
+  if (!legacyDir || !rawDir)
+    throw Error(
+      "Set FFR_CAPTURE_LEGACY and FFR_CAPTURE_RAW to run the legacy import step.",
+    );
   await page.getByLabel("Legacy folder", { exact: true }).fill(legacyDir);
   await page.getByRole("button", { name: "Scan inputs" }).click();
   await expect(
