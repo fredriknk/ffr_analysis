@@ -331,7 +331,7 @@ checksum = "da7c62ceae207dd37ea5b845da6a0696c799f85e97da1ab5b7910be3c1c80223"
 
 [[package]]
 name = "ffr-cli"
-version = "0.1.0"
+version = "2.0.0-alpha.1"
 dependencies = [
  "ffr-core",
  "serde_json",
@@ -339,7 +339,7 @@ dependencies = [
 
 [[package]]
 name = "ffr-core"
-version = "0.1.0"
+version = "2.0.0-alpha.1"
 dependencies = [
  "calamine",
  "chrono",
