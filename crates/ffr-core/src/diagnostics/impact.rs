@@ -61,8 +61,8 @@ pub fn robust_fits(
                 let ranges = group_ranges(
                     t,
                     &shifted(raw, effective.valve_offset + estimated_delta),
-                    effective.cut_beginnings + 3.,
-                    effective.cut_ends + 3.,
+                    effective.cut_beginnings + c.extra_cut_s,
+                    effective.cut_ends + c.extra_cut_s,
                 );
                 let (x, v): (Vec<_>, Vec<_>) = ranges
                     .iter()
@@ -101,7 +101,7 @@ pub fn robust_fits(
             },
         );
         let offset = effective.valve_offset
-            + if delta.abs() >= 1. && improvement >= c.valve_min_improvement {
+            + if delta.abs() >= c.valve_min_lag_s && improvement >= c.valve_min_improvement {
                 delta
             } else {
                 0.
@@ -157,7 +157,7 @@ pub fn robust_fits(
     }
     (fits, lags)
 }
-pub fn baselines(rows: &[FluxRow]) -> Baseline {
+pub fn baselines(rows: &[FluxRow], c: &DiagnosticsConfig) -> Baseline {
     let mut out = Baseline::new();
     for gas in ["N2O", "CO2"] {
         let get = |suffix: &str| {
@@ -173,7 +173,11 @@ pub fn baselines(rows: &[FluxRow]) -> Baseline {
         out.insert(
             gas.into(),
             GasBaseline {
-                floor: if se.is_empty() { 0. } else { 3. * median(&se) },
+                floor: if se.is_empty() {
+                    0.
+                } else {
+                    c.noise_floor_multiplier * median(&se)
+                },
                 median_residual_sd: if noise.is_empty() { 0. } else { median(&noise) },
             },
         );
@@ -182,6 +186,68 @@ pub fn baselines(rows: &[FluxRow]) -> Baseline {
 }
 pub fn impact(original: f64, robust: f64, floor: f64) -> f64 {
     (original - robust).abs() / original.abs().max(robust.abs()).max(floor).max(1e-30)
+}
+fn grade_shapes(
+    row: &FluxRow,
+    findings: &mut [Diagnostic],
+    analysis: &Findings,
+    baseline: &Baseline,
+    c: &DiagnosticsConfig,
+) {
+    let mut robust_max: f64 = 0.;
+    let mut curvature_max: f64 = 0.;
+    for gas in ["N2O", "CO2"] {
+        let floor = baseline[gas].floor;
+        let Some(flux) = row.get(&format!("{gas}_flux")).and_then(Value::as_f64) else {
+            continue;
+        };
+        if let Some(robust) = analysis.robust.iter().find(|r| r.gas == gas) {
+            if (flux - robust.flux).abs() > c.shape_floor_multiplier * floor {
+                robust_max = robust_max.max(impact(flux, robust.flux, floor));
+                if let Some(diff) = analysis.half_differences.get(gas) {
+                    curvature_max = curvature_max.max(diff / flux.abs().max(floor).max(1e-30));
+                }
+            }
+        }
+    }
+    for d in findings.iter_mut().filter(|d| {
+        [
+            "valve_timing",
+            "edge_transient",
+            "spike",
+            "noisy",
+            "curvature",
+        ]
+        .contains(&d.code.as_str())
+    }) {
+        let effective = if d.code == "curvature" {
+            curvature_max
+        } else {
+            robust_max
+        };
+        d.impact = Some(effective);
+        d.severity = if effective >= c.shape_bad_impact {
+            "bad"
+        } else if effective >= c.shape_warn_impact {
+            "warn"
+        } else {
+            "info"
+        }
+        .into();
+        if let Some(gas) = d.gas.as_deref() {
+            if let (Some(flux), Some(robust)) = (
+                row.get(&format!("{gas}_flux")).and_then(Value::as_f64),
+                analysis.robust.iter().find(|r| r.gas == gas),
+            ) {
+                let unit = if gas == "N2O" {
+                    "ug N m^-2 h^-1"
+                } else {
+                    "ug C m^-2 h^-1"
+                };
+                d.message = format!("{}: robust fit gives {:.1} instead of {flux:.1} {unit}; effective impact={:.1}%", d.code, robust.flux, 100. * effective);
+            }
+        }
+    }
 }
 fn local_day(row: &FluxRow, zone: chrono_tz::Tz) -> String {
     chrono::DateTime::from_timestamp_millis(row["time"].as_i64().unwrap_or(0))
@@ -261,62 +327,36 @@ pub fn contextualise(
                 let ratio = residual / median_noise;
                 findings[i].push(finding(
                     "noisy",
-                    if ratio >= c.noisy_bad { "bad" } else { "warn" },
+                    "info",
                     Some(gas),
                     ratio,
                     format!("Residual SD is {ratio:.1} times the project median for {gas}."),
                 ));
             }
-            for d in findings[i].iter_mut().filter(|d| {
-                d.gas.as_deref() == Some(gas)
-                    && ["valve_timing", "edge_transient", "spike"].contains(&d.code.as_str())
-            }) {
-                if let (Some(change), Some(original), Some(robust)) = (change, original, robust) {
-                    d.impact = Some(change);
-                    d.severity = if change >= 0.3 {
-                        "bad"
-                    } else if change >= 0.1 {
-                        "warn"
-                    } else {
-                        "info"
-                    }
-                    .into();
-                    let units = if gas == "N2O" {
-                        "ug N m^-2 h^-1"
-                    } else {
-                        "ug C m^-2 h^-1"
-                    };
-                    d.message = format!(
-                        "{}: robust fit gives {:.1} instead of {:.1} {units}; impact={:.1}%",
-                        d.code,
-                        robust.flux,
-                        original,
-                        change * 100.
-                    );
-                }
-            }
-            findings[i].retain(|d| {
-                d.code != "curvature"
-                    || d.gas.as_deref() != Some(gas)
-                    || f.half_differences.get(gas).is_some_and(|v| *v > 2. * floor)
-            });
             if let Some(flux) = original {
                 let p = r
                     .get(&format!("{gas}_pval"))
                     .and_then(Value::as_f64)
                     .unwrap_or(1.);
-                if flux < -floor && p < c.n2o_negative_p {
+                let candidate_floor = if gas == "CO2" {
+                    c.co2_negative_floor
+                } else {
+                    c.negative_info_floor
+                } * floor;
+                if flux < -candidate_floor && p < c.n2o_negative_p {
                     let code = if gas == "CO2" {
                         "co2_not_rising"
                     } else {
                         "n2o_negative"
                     };
-                    let severity = if gas == "CO2" || flux < -5. * floor {
+                    let severity = if gas == "CO2" || flux < -c.negative_bad_floor * floor {
                         "bad"
-                    } else {
+                    } else if flux < -c.negative_warn_floor * floor {
                         "warn"
+                    } else {
+                        "info"
                     };
-                    let negative_floor = -floor;
+                    let negative_floor = -candidate_floor;
                     let message = format!(
                         "{gas} flux {flux:.1} is below the negative noise floor \
                          {negative_floor:.1} with p={p:.2e}."
@@ -335,36 +375,47 @@ pub fn contextualise(
             .and_then(|id| siblings.get(&id))
             .and_then(|v| v.iter().find(|j| **j != i))
             .map(|j| &snapshot[*j]);
-        if let (Some(values), Some(co2)) = (values, co2) {
-            let m = median(values);
-            if values.len() >= 6 && m > 5. * co2_floor && co2 < 0.25 * m {
-                let sibling_co2 = sibling
-                    .and_then(|r| r.get("CO2_flux"))
-                    .and_then(Value::as_f64)
-                    .unwrap_or(0.);
-                let sibling_n2o = sibling
-                    .and_then(|r| r.get("N2O_flux"))
-                    .and_then(Value::as_f64)
-                    .unwrap_or(0.);
-                let bad = sibling_co2 > 0.5 * m
-                    || (sibling_n2o > 5. * n2o_floor
-                        && n2o.is_some_and(|v| v < 0.25 * sibling_n2o));
+        if let Some(co2) = co2 {
+            let sibling_co2 = sibling
+                .and_then(|r| r.get("CO2_flux"))
+                .and_then(Value::as_f64)
+                .unwrap_or(0.);
+            let sibling_n2o = sibling
+                .and_then(|r| r.get("N2O_flux"))
+                .and_then(Value::as_f64)
+                .unwrap_or(0.);
+            let low_n2o = sibling_n2o > c.leak_reference_floor * n2o_floor
+                && n2o.is_some_and(|v| v < c.leak_fraction * sibling_n2o);
+            let day = values
+                .filter(|v| v.len() >= c.leak_min_day_points)
+                .map(|v| median(v));
+            let day_leak = day.is_some_and(|m| {
+                m > c.leak_reference_floor * co2_floor && co2 < c.leak_fraction * m
+            });
+            let sibling_leak = sibling_co2 > c.leak_reference_floor * co2_floor
+                && co2 < c.leak_fraction * sibling_co2;
+            if day_leak || sibling_leak {
+                let bad = low_n2o
+                    || (day_leak
+                        && day.is_some_and(|m| sibling_co2 > c.leak_day_sibling_fraction * m));
+                let day_percent = day
+                    .map(|m| format!("{:.0}%", 100. * co2 / m))
+                    .unwrap_or_else(|| "unavailable".into());
                 let message = format!(
-                    "CO2 is {:.0}% of the day's median ({m:.1}); \
-                     sibling CO2 is {:.0}% of that median; N2O is {:.0}% of its sibling.",
-                    100. * co2 / m,
-                    100. * sibling_co2 / m,
+                    "CO2 is {day_percent} of the day median and {:.0}% of sibling CO2; N2O is {:.0}% of sibling N2O.",
+                    100. * co2 / sibling_co2.abs().max(co2_floor),
                     100. * n2o.unwrap_or(0.) / sibling_n2o.abs().max(n2o_floor)
                 );
                 findings[i].push(finding(
                     "chamber_leak",
                     if bad { "bad" } else { "warn" },
                     Some("CO2"),
-                    co2 / m,
+                    co2,
                     message,
                 ));
             }
         }
+        grade_shapes(r, &mut findings[i], f, baseline, c);
         let leak = findings[i].iter().any(|d| d.code == "chamber_leak");
         for d in &mut findings[i] {
             if d.code == "n2o_negative" && leak {
@@ -445,15 +496,25 @@ fn neighbours_scaled(
             let scale = mad(&values).max(floor);
             let raw_z = (v - centre).abs() / scale;
             let transformed: Vec<_> = values.iter().map(|v| (v / scale).asinh()).collect();
-            let z =
-                ((v / scale).asinh() - median(&transformed)).abs() / mad(&transformed).max(0.15);
+            let z = ((v / scale).asinh() - median(&transformed)).abs()
+                / mad(&transformed).max(c.neighbour_asinh_mad_min);
             if z > c.neighbour_z && raw_z > c.neighbour_raw_z {
                 let message = format!(
                     "Flux {v:.1} versus neighbour median {centre:.1}: \
                      raw z={raw_z:.1}, scaled-asinh z={z:.1}; {} non-excluded neighbours.",
                     values.len()
                 );
-                findings[i].push(finding("neighbour_outlier", "warn", Some(gas), z, message));
+                let absolute: Vec<_> = values.iter().map(|v| v.abs()).collect();
+                let bad = z > c.neighbour_bad_z
+                    || (v > c.neighbour_bad_ratio * median(&absolute)
+                        && v > c.neighbour_bad_floor * floor);
+                findings[i].push(finding(
+                    "neighbour_outlier",
+                    if bad { "bad" } else { "warn" },
+                    Some(gas),
+                    z,
+                    message,
+                ));
             }
         }
     }
@@ -557,7 +618,110 @@ mod tests {
             .last()
             .expect("outlier")
             .iter()
-            .any(|d| d.code == "neighbour_outlier" && d.gas.as_deref() == Some("CO2")));
+            .any(|d| d.code == "neighbour_outlier"
+                && d.gas.as_deref() == Some("CO2")
+                && d.severity == "bad"));
+    }
+    #[test]
+    fn sibling_reference_detects_leak_without_strong_day() {
+        let mut rows = vec![row(1, 0., 0.), row(2, 100000., 100.)];
+        let mut f = vec![vec![]; 2];
+        contextualise(
+            &mut rows,
+            &mut f,
+            &vec![Findings::default(); 2],
+            &baseline(),
+            &DiagnosticsConfig::default(),
+            chrono_tz::Europe::Oslo,
+        );
+        assert!(f[0]
+            .iter()
+            .any(|d| d.code == "chamber_leak" && d.severity == "bad"));
+        rows[0].insert("N2O_flux".into(), json!(100.));
+        contextualise(
+            &mut rows,
+            &mut f,
+            &vec![Findings::default(); 2],
+            &baseline(),
+            &DiagnosticsConfig::default(),
+            chrono_tz::Europe::Oslo,
+        );
+        assert!(f[0]
+            .iter()
+            .any(|d| d.code == "chamber_leak" && d.severity == "warn"));
+    }
+    #[test]
+    fn negative_n2o_severity_bands_and_significance() {
+        for (multiple, p, expected) in [
+            (2., 0.001, Some("info")),
+            (4., 0.001, Some("warn")),
+            (6., 0.001, Some("bad")),
+            (6., 0.1, None),
+        ] {
+            let mut rows = vec![row(1, 200000., -multiple * baseline()["N2O"].floor)];
+            rows[0].insert("N2O_pval".into(), json!(p));
+            let mut f = vec![vec![]];
+            contextualise(
+                &mut rows,
+                &mut f,
+                &[Findings::default()],
+                &baseline(),
+                &DiagnosticsConfig::default(),
+                chrono_tz::Europe::Oslo,
+            );
+            assert_eq!(
+                f[0].iter()
+                    .find(|d| d.code == "n2o_negative")
+                    .map(|d| d.severity.as_str()),
+                expected
+            );
+        }
+    }
+    #[test]
+    fn shape_severity_uses_floor_gate_cross_gas_max_and_half_windows() {
+        let mut b = baseline();
+        for v in b.values_mut() {
+            v.floor = 10.;
+        }
+        let r = row(1, 100., 100.);
+        let c = DiagnosticsConfig::default();
+        for (robust_flux, expected) in [(90., "info"), (85., "warn"), (65., "bad")] {
+            let analysis = Findings {
+                robust: vec![RobustFit {
+                    gas: "CO2".into(),
+                    slope: 1.,
+                    intercept: 1.,
+                    start: 0.,
+                    stop: 180.,
+                    n: 60,
+                    flux: robust_flux,
+                }],
+                ..Default::default()
+            };
+            let mut f: Vec<_> = ["valve_timing", "edge_transient", "spike", "noisy"]
+                .into_iter()
+                .map(|code| finding(code, "bad", Some("N2O"), 1., "test".into()))
+                .collect();
+            grade_shapes(&r, &mut f, &analysis, &b, &c);
+            assert!(f.iter().all(|d| d.severity == expected), "{f:?}");
+        }
+        let analysis = Findings {
+            robust: vec![RobustFit {
+                gas: "CO2".into(),
+                slope: 1.,
+                intercept: 1.,
+                start: 0.,
+                stop: 180.,
+                n: 60,
+                flux: 60.,
+            }],
+            half_differences: [("CO2".into(), 50.)].into_iter().collect(),
+            ..Default::default()
+        };
+        let mut f = vec![finding("curvature", "info", Some("CO2"), 1., "test".into())];
+        grade_shapes(&r, &mut f, &analysis, &b, &c);
+        assert_eq!(f[0].severity, "bad");
+        assert_eq!(f[0].impact, Some(0.5));
     }
     #[test]
     fn legacy_only_scores_zero() {
@@ -578,7 +742,7 @@ mod tests {
         let mut b = a.clone();
         b.insert("excluded".into(), json!(true));
         b.insert("CO2_seFlux".into(), json!(1000.));
-        let floors = baselines(&[a, b]);
+        let floors = baselines(&[a, b], &DiagnosticsConfig::default());
         assert_eq!(floors["CO2"].floor, 6.);
         assert!((impact(58., 41., 1.) - 17. / 58.).abs() < 1e-14);
     }
