@@ -90,8 +90,7 @@ pub(crate) fn assign(
                     && w["waypoint"].as_i64()
                         == m.waypoint
                             .split(|c: char| !c.is_ascii_digit())
-                            .filter(|s| !s.is_empty())
-                            .next_back()
+                            .rfind(|s| !s.is_empty())
                             .and_then(|s| s.parse::<i64>().ok())
             })
         }) || p["polygon"]

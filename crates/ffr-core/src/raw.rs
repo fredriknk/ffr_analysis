@@ -146,14 +146,14 @@ pub fn from_value(metadata: Metadata, mut original: Value) -> Result<Raw> {
             .map(|v| v - epoch)
             .filter(|v| *v >= 0.)
             .collect();
-        if times.len() % 2 != 0 {
+        if !times.len().is_multiple_of(2) {
             return Err(Error::Invalid("unpaired old valve events".into()));
         }
         for (i, p) in times.chunks(2).enumerate() {
-            switches.push(((p[0] + p[1]) / 2., if i % 2 == 0 { 2 } else { 1 }));
+            switches.push(((p[0] + p[1]) / 2., if i.is_multiple_of(2) { 2 } else { 1 }));
         }
     } else {
-        if events.len() < 2 || events.len() % 2 != 0 {
+        if events.len() < 2 || !events.len().is_multiple_of(2) {
             return Err(Error::Invalid("unpaired valve events".into()));
         }
         for (i, e) in events.iter().enumerate() {

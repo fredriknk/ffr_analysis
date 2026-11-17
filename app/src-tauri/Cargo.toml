@@ -3,7 +3,7 @@ name = "ffr-analyzer"
 version = "0.1.0"
 description = "Field Flux Robot analysis workspace"
 edition = "2021"
-rust-version = "1.85"
+rust-version = "1.100"
 
 [workspace]
 

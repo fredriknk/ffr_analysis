@@ -1,4 +1,4 @@
-﻿mod impact;
+mod impact;
 use crate::{
     api::{AnalysisOptions, FluxRow},
     raw::{group_ranges, Raw},
@@ -208,11 +208,15 @@ pub fn score(findings: &mut [Diagnostic]) -> f64 {
         _ => (1. + active.len() as f64).min(10.),
     }
 }
-pub fn severity_map(findings: &[Diagnostic]) -> BTreeMap<String,String> {
-    let mut out: BTreeMap<String,String> = BTreeMap::new();
+pub fn severity_map(findings: &[Diagnostic]) -> BTreeMap<String, String> {
+    let mut out: BTreeMap<String, String> = BTreeMap::new();
     for d in findings {
-        let current=out.entry(d.code.clone()).or_insert_with(||d.severity.clone());
-        if rank(&d.severity)>rank(current) {*current=d.severity.clone();}
+        let current = out
+            .entry(d.code.clone())
+            .or_insert_with(|| d.severity.clone());
+        if rank(&d.severity) > rank(current) {
+            *current = d.severity.clone();
+        }
     }
     out
 }
@@ -226,7 +230,10 @@ pub fn decorate(row: &mut FluxRow, findings: &mut [Diagnostic], lag: f64) {
         .collect();
     row.insert("attention".into(), serde_json::json!(attention));
     row.insert("diag".into(), serde_json::json!(codes.join(",")));
-    row.insert("diagSeverity".into(), serde_json::json!(severity_map(findings)));
+    row.insert(
+        "diagSeverity".into(),
+        serde_json::json!(severity_map(findings)),
+    );
     row.insert("valveLagS".into(), serde_json::json!(lag));
 }
 pub fn shifted(raw: &Raw, offset: f64) -> Vec<(f64, u8)> {
@@ -989,14 +996,16 @@ mod tests {
 mod severity_map_tests {
     #[test]
     fn severity_map_keeps_each_codes_own_worst_severity() {
-        let ds: Vec<super::Diagnostic>=serde_json::from_value(serde_json::json!([
+        let ds: Vec<super::Diagnostic> = serde_json::from_value(serde_json::json!([
             {"code":"valve_timing","severity":"info","message":""},
             {"code":"chamber_leak","severity":"bad","message":""},
             {"code":"spike","severity":"info","message":""},
             {"code":"spike","severity":"warn","message":""}
-        ])).unwrap();
-        let map=super::severity_map(&ds);
-        assert_eq!(map["valve_timing"],"info");assert_eq!(map["chamber_leak"],"bad");assert_eq!(map["spike"],"warn");
+        ]))
+        .unwrap();
+        let map = super::severity_map(&ds);
+        assert_eq!(map["valve_timing"], "info");
+        assert_eq!(map["chamber_leak"], "bad");
+        assert_eq!(map["spike"], "warn");
     }
 }
-

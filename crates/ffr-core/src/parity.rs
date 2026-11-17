@@ -41,8 +41,10 @@ pub fn parity(raw_dir: &Path, golden_jsonl: &Path) -> Result<ParityReport> {
             let options = crate::literal::parse(f[2])?;
 
             let values: serde_json::Map<String, Value> = f[3..]
-                .chunks_exact(2)
-                .map(|p| (p[0].into(), Value::String(p[1].into())))
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|[k, v]| ((*k).into(), Value::String((*v).into())))
                 .collect();
 
             Ok(serde_json::json!({"filename":f[0],"side":f[1],"options":options,"values":values}))

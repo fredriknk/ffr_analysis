@@ -1,0 +1,6 @@
+# Same compiler and lints locally and in CI/release builds.
+# To upgrade: change the version here and in .github/workflows/*.yml.
+[toolchain]
+channel = "1.100.0"
+components = ["rustfmt", "clippy"]
+profile = "minimal"
