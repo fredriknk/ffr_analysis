@@ -145,7 +145,7 @@ export default function App() {
             <strong>{progress.task}</strong>
             <progress value={progress.done} max={progress.total} />
             <span>
-              {progress.message ?? "Processing?"} ? {progress.done}/
+              {progress.message ?? "Processing…"} · {progress.done}/
               {progress.total}
             </span>
           </div>

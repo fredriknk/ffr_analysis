@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { seriesDisplay, unit } from "../shared/format";
 import type { FfrApi, Progress } from "./types";
 export const tauriApi: FfrApi = {
   projectCreate: (path, name) => invoke("project_create", { path, name }),
@@ -30,9 +31,21 @@ export const tauriApi: FfrApi = {
   recomputeAll: () => invoke("recompute_all"),
   undo: () => invoke("undo"),
   redo: () => invoke("redo"),
-  history: (limit) => invoke("history", { limit }),
-  treatmentSummary: (q) => invoke("treatment_summary", { q }),
-  listSeries: () => invoke("list_series"),
+  history: async (limit) =>
+    (await invoke<import("./types").Change[]>("history", { limit })).map(
+      (c) => ({ id: c.id, time: c.time, kind: c.kind, fluxIds: c.fluxIds }),
+    ),
+  treatmentSummary: async (q) => {
+    const d = await invoke<import("./types").TreatmentSummary>(
+      "treatment_summary",
+      { q },
+    );
+    return { ...d, unit: unit(d.unit), cumulativeUnit: unit(d.cumulativeUnit) };
+  },
+  listSeries: async () =>
+    (await invoke<import("./types").SeriesMeta[]>("list_series")).map(
+      seriesDisplay,
+    ),
   getSeries: (ids, from, to, maxPoints) =>
     invoke("get_series", { ids, from, to, maxPoints }),
   previewTable: (path, opts) => invoke("preview_table", { path, opts }),

@@ -1,15 +1,22 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQueries } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../../api";
 import type { FluxRow, Gas } from "../../api/types";
-import { date, Empty, fmt, Status } from "../../shared/common";
+import {
+  attention,
+  dateTime,
+  Empty,
+  significant,
+  Status,
+} from "../../shared/common";
 import {
   codes,
   DiagnosticPicker,
   ReasonChips,
   severity,
 } from "../../shared/diagnostics";
+import { useDiagnostics } from "../../shared/hooks/useDiagnostics";
 import { useStore } from "../../store";
 export function useQueue(rows: FluxRow[]) {
   const s = useStore();
@@ -62,10 +69,7 @@ export function useQueue(rows: FluxRow[]) {
 }
 export function QueueFilters({ rows }: { rows: FluxRow[] }) {
   const s = useStore(),
-    counts = useQuery({
-      queryKey: ["diagnostics"],
-      queryFn: () => api.diagnosticsSummary(),
-    });
+    counts = useDiagnostics(s.screen === "Review");
   const unique = (
     key: "treatmentId" | "plotId",
     name: "treatmentName" | "plotLabel",
@@ -73,88 +77,125 @@ export function QueueFilters({ rows }: { rows: FluxRow[] }) {
     [...new Map(rows.map((r) => [r[key], String(r[name])])).entries()].sort(
       (a, b) => a[1].localeCompare(b[1]),
     );
+  const active =
+    Number(s.quick !== "attention") +
+    Number(!!s.treatment) +
+    Number(!!s.plot) +
+    Number(!!s.reviewFrom) +
+    Number(!!s.reviewTo) +
+    s.diagnosticCodes.length +
+    Number(!!s.reviewIds);
   return (
-    <div className="queue-filters">
+    <div className="queue-toolbar">
       <input
         aria-label="Search fluxes"
-        placeholder="Search plot, treatment, file…"
+        placeholder="Search fluxes…"
         value={s.search}
         onChange={(e) => s.set({ search: e.target.value })}
       />
-      <select
-        aria-label="Quick filter"
-        value={s.quick}
-        onChange={(e) => s.set({ quick: e.target.value })}
-      >
-        <option value="attention">Needs attention, unreviewed</option>
-        <option value="all">All measurements</option>
-        <option value="unreviewed">Unreviewed</option>
-        <option value="flagged">Needs attention</option>
-        <option value="overridden">Overridden</option>
-        <option value="excluded">Excluded</option>
-      </select>
+      <details className="filter-menu">
+        <summary>Filters {active > 0 && <b>{active}</b>}</summary>
+        <div className="filter-popover queue-filter-popover">
+          <label>
+            Queue
+            <select
+              aria-label="Quick filter"
+              value={s.quick}
+              onChange={(e) => s.set({ quick: e.target.value })}
+            >
+              <option value="attention">Needs attention, unreviewed</option>
+              <option value="all">All measurements</option>
+              <option value="unreviewed">Unreviewed</option>
+              <option value="flagged">Needs attention</option>
+              <option value="overridden">Overridden</option>
+              <option value="excluded">Excluded</option>
+            </select>
+          </label>
+          <label>
+            Treatment
+            <select
+              aria-label="Treatment filter"
+              value={s.treatment}
+              onChange={(e) => s.set({ treatment: e.target.value })}
+            >
+              <option value="">All treatments</option>
+              {unique("treatmentId", "treatmentName").map(([id, name]) => (
+                <option key={id} value={id}>
+                  {name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Plot
+            <select
+              aria-label="Plot filter"
+              value={s.plot}
+              onChange={(e) => s.set({ plot: e.target.value })}
+            >
+              <option value="">All plots</option>
+              {unique("plotId", "plotLabel").map(([id, name]) => (
+                <option key={id} value={id}>
+                  {name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="two">
+            <label>
+              From
+              <input
+                aria-label="Review from"
+                type="date"
+                value={s.reviewFrom}
+                onChange={(e) => s.set({ reviewFrom: e.target.value })}
+              />
+            </label>
+            <label>
+              To
+              <input
+                aria-label="Review to"
+                type="date"
+                value={s.reviewTo}
+                onChange={(e) => s.set({ reviewTo: e.target.value })}
+              />
+            </label>
+          </div>
+          <Status loading={counts.isLoading} error={counts.error} />
+          <DiagnosticPicker
+            counts={(counts.data ?? []).filter((c) => c.count)}
+            value={s.diagnosticCodes}
+            onChange={(diagnosticCodes) => s.set({ diagnosticCodes })}
+          />
+          <button
+            onClick={() =>
+              s.set({
+                quick: "attention",
+                treatment: "",
+                plot: "",
+                reviewFrom: "",
+                reviewTo: "",
+                diagnosticCodes: [],
+                reviewIds: undefined,
+              })
+            }
+          >
+            Reset filters
+          </button>
+        </div>
+      </details>
       <select
         aria-label="Queue sort"
+        title="Queue sort"
         value={s.queueSort}
         onChange={(e) =>
           s.set({ queueSort: e.target.value as typeof s.queueSort })
         }
       >
-        <option value="attention">Highest attention first</option>
-        <option value="time">Measurement time</option>
-        <option value="plot">Plot, then time</option>
+        <option value="attention">Score ↓</option>
+        <option value="time">Time ↑</option>
+        <option value="plot">Plot ↑</option>
       </select>
-      <div className="two">
-        <select
-          aria-label="Treatment filter"
-          value={s.treatment}
-          onChange={(e) => s.set({ treatment: e.target.value })}
-        >
-          <option value="">All treatments</option>
-          {unique("treatmentId", "treatmentName").map(([id, label]) => (
-            <option key={id} value={id}>
-              {label}
-            </option>
-          ))}
-        </select>
-        <select
-          aria-label="Plot filter"
-          value={s.plot}
-          onChange={(e) => s.set({ plot: e.target.value })}
-        >
-          <option value="">All plots</option>
-          {unique("plotId", "plotLabel").map(([id, label]) => (
-            <option key={id} value={id}>
-              {label}
-            </option>
-          ))}
-        </select>
-      </div>
-      <div className="two">
-        <input
-          aria-label="Review from"
-          type="date"
-          value={s.reviewFrom}
-          onChange={(e) => s.set({ reviewFrom: e.target.value })}
-        />
-        <input
-          aria-label="Review to"
-          type="date"
-          value={s.reviewTo}
-          onChange={(e) => s.set({ reviewTo: e.target.value })}
-        />
-      </div>
-      <Status loading={counts.isLoading} error={counts.error} />
-      <DiagnosticPicker
-        counts={(counts.data ?? []).filter((c) => c.count)}
-        value={s.diagnosticCodes}
-        onChange={(diagnosticCodes) => s.set({ diagnosticCodes })}
-      />
-      {s.reviewIds && (
-        <button onClick={() => s.set({ reviewIds: undefined })}>
-          Clear custom queue ({s.reviewIds.length})
-        </button>
-      )}
     </div>
   );
 }
@@ -164,22 +205,23 @@ export function QueueList({ rows }: { rows: FluxRow[] }) {
     v = useVirtualizer({
       count: rows.length,
       getScrollElement: () => ref.current,
-      estimateSize: () => 90,
-      overscan: 8,
-    });
+      estimateSize: () => 30,
+      overscan: 4,
+    }),
+    counts = useDiagnostics(s.screen === "Review");
   useEffect(() => {
     const i = rows.findIndex((r) => r.id === s.selected);
     if (i >= 0 && s.screen === "Review") v.scrollToIndex(i, { align: "auto" });
   }, [s.selected, s.screen, rows, v]);
   return (
-    <div ref={ref} className="virtual-list">
+    <div className="virtual-list dense-queue" ref={ref}>
       <div style={{ height: v.getTotalSize(), position: "relative" }}>
         {v.getVirtualItems().map((item) => {
           const r = rows[item.index];
           return (
             <button
               key={r.id}
-              onClick={() => s.set({ selected: r.id })}
+              data-flux-id={r.id}
               className={
                 "flux-item triage-row " +
                 (r.id === s.selected ? "selected " : "") +
@@ -191,20 +233,18 @@ export function QueueList({ rows }: { rows: FluxRow[] }) {
                 height: item.size,
                 width: "100%",
               }}
+              title={
+                "#" + r.id + " · " + dateTime(r.time) + " · " + r.treatmentName
+              }
+              onClick={() => s.set({ selected: r.id })}
             >
-              <div className="triage-row-title">
-                <span className={"severity-dot " + severity(r.attention)} />
-                <strong>
-                  #{r.id} · {r.plotLabel}
-                </strong>
-                <span className="badge">{r.attention}</span>
-                <span>{fmt(r.N2O_flux, 1)}</span>
-              </div>
-              <small>
-                {date(r.time)} · {r.side} ·{" "}
-                {r.reviewed ? "Reviewed" : "Unreviewed"}
-              </small>
-              <ReasonChips diag={r.diag} />
+              <span className={"severity-dot " + severity(r.attention)} />
+              <time>{dateTime(r.time, true)}</time>
+              <strong>{r.plotLabel}</strong>
+              <span>{r.side === "left" ? "L" : "R"}</span>
+              <b className="queue-value">{significant(r.N2O_flux, 3)}</b>
+              <ReasonChips diag={r.diag} definitions={counts.data} limit={2} />
+              <span className="score">{attention(r.attention)}</span>
             </button>
           );
         })}
@@ -227,6 +267,7 @@ export function ContactSheet({
     anchor = useRef(0),
     [width, setWidth] = useState(900),
     [gas, setGas] = useState<Gas>("N2O");
+  const counts = useDiagnostics(s.screen === "Review");
   useEffect(() => {
     if (!ref.current) return;
     const ro = new ResizeObserver((es) => setWidth(es[0].contentRect.width));
@@ -238,20 +279,34 @@ export function ContactSheet({
       count: Math.ceil(rows.length / columns),
       getScrollElement: () => ref.current,
       estimateSize: () => 192,
-      overscan: 2,
+      overscan: 1,
     });
+  useEffect(() => {
+    const i = rows.findIndex((r) => r.id === s.selected);
+    if (i >= 0 && s.screen === "Review")
+      v.scrollToIndex(Math.floor(i / columns), { align: "auto" });
+  }, [s.selected, s.screen, columns, rows, v]);
   const indices = v
-      .getVirtualItems()
-      .flatMap((v) =>
-        Array.from({ length: columns }, (_, i) => v.index * columns + i),
-      )
-      .filter((i) => i < rows.length),
-    ids = indices.map((i) => rows[i].id);
-  const thumbs = useQuery({
-    queryKey: ["thumbs", ids, gas],
-    queryFn: () => api.getFluxThumbs(ids, gas, 60),
-    enabled: !!ids.length,
+    .getVirtualItems()
+    .flatMap((item) =>
+      Array.from({ length: columns }, (_, i) => item.index * columns + i),
+    )
+    .filter((i) => i < rows.length);
+  const batchIndices = [...new Set(indices.map((i) => Math.floor(i / 8)))],
+    batches = batchIndices.map((batch) =>
+      rows.slice(batch * 8, batch * 8 + 8).map((r) => r.id),
+    );
+  const queries = useQueries({
+    queries: batches.map((ids) => ({
+      queryKey: ["thumbBatch", gas, ids],
+      enabled: s.screen === "Review" && s.contactSheet,
+      queryFn: () => api.getFluxThumbs(ids, gas, 60),
+      staleTime: 60000,
+    })),
   });
+  const thumbs = new Map(
+    queries.flatMap((q) => q.data ?? []).map((t) => [t.fluxId, t]),
+  );
   return (
     <>
       <div className="toolbar">
@@ -273,7 +328,12 @@ export function ContactSheet({
           Click to inspect · Ctrl/Cmd toggles · Shift selects a range
         </small>
       </div>
-      <Status loading={thumbs.isLoading} error={thumbs.error} />
+      {queries.some((q) => q.error) && (
+        <Status
+          loading={false}
+          error={queries.find((q) => q.error)?.error ?? null}
+        />
+      )}
       <div className="contact-scroll" ref={ref}>
         <div style={{ height: v.getTotalSize(), position: "relative" }}>
           {v.getVirtualItems().map((item) => (
@@ -291,9 +351,14 @@ export function ContactSheet({
                 const i = item.index * columns + j,
                   r = rows[i];
                 if (!r) return null;
-                const thumb = thumbs.data?.find((t) => t.fluxId === r.id);
-                const min = thumb?.y.length ? Math.min(...thumb.y) : 0,
+                const thumb = thumbs.get(r.id),
+                  query = queries[batchIndices.indexOf(Math.floor(i / 8))],
+                  pending = !thumb && !query?.isSuccess && !query?.isError,
+                  min = thumb?.y.length ? Math.min(...thumb.y) : 0,
                   max = thumb?.y.length ? Math.max(...thumb.y) : 1,
+                  minT = Math.min(0, ...(thumb?.t ?? [])),
+                  maxT = Math.max(1, ...(thumb?.t ?? [])),
+                  px = (t: number) => 8 + ((t - minT) / (maxT - minT)) * 204,
                   py = (y: number) => 94 - ((y - min) / (max - min || 1)) * 78;
                 return (
                   <button
@@ -309,15 +374,19 @@ export function ContactSheet({
                     }
                     onClick={(e) => {
                       s.set({ selected: r.id });
-                      if (e.shiftKey) {
-                        const range = rows
-                          .slice(
-                            Math.min(anchor.current, i),
-                            Math.max(anchor.current, i) + 1,
-                          )
-                          .map((r) => r.id);
-                        onSelect([...new Set([...selected, ...range])]);
-                      } else if (e.ctrlKey || e.metaKey) {
+                      if (e.shiftKey)
+                        onSelect([
+                          ...new Set([
+                            ...selected,
+                            ...rows
+                              .slice(
+                                Math.min(anchor.current, i),
+                                Math.max(anchor.current, i) + 1,
+                              )
+                              .map((r) => r.id),
+                          ]),
+                        ]);
+                      else if (e.ctrlKey || e.metaKey) {
                         anchor.current = i;
                         onSelect(
                           selected.includes(r.id)
@@ -337,31 +406,56 @@ export function ContactSheet({
                       <strong>
                         #{r.id} · {r.plotLabel}
                       </strong>
-                      <span className="badge">{r.attention}</span>
+                      <span className="badge">{attention(r.attention)}</span>
                     </div>
-                    <svg
-                      viewBox="0 0 220 100"
-                      role="img"
-                      aria-label={gas + " thumbnail"}
-                    >
-                      {thumb?.t.map((t, k) => (
-                        <circle
-                          key={k}
-                          cx={8 + (t / 185) * 204}
-                          cy={py(thumb.y[k])}
-                          r={thumb.used[k] ? 1.9 : 1.2}
-                          fill={thumb.used[k] ? "var(--accent)" : "#91a0aa"}
-                        />
-                      ))}
-                      {!thumb?.t.length && (
-                        <text x="12" y="55" fill="currentColor" fontSize="11">
-                          No trace / validation failed
-                        </text>
-                      )}
-                    </svg>
-                    <ReasonChips diag={r.diag} />
+                    {pending ? (
+                      <div
+                        className="trace-skeleton"
+                        role="status"
+                        aria-label="Loading trace"
+                      />
+                    ) : (
+                      <svg
+                        viewBox="0 0 220 100"
+                        role="img"
+                        aria-label={gas + " thumbnail"}
+                      >
+                        {thumb?.t.map((t, k) => (
+                          <circle
+                            key={k}
+                            cx={px(t)}
+                            cy={py(thumb.y[k])}
+                            r={thumb.used[k] ? 1.9 : 1.2}
+                            fill={thumb.used[k] ? "var(--accent)" : "#91a0aa"}
+                          />
+                        ))}
+                        {!!thumb?.t.length && (
+                          <line
+                            x1={px(thumb.t[0])}
+                            x2={px(thumb.t.at(-1)!)}
+                            y1={py(thumb.intercept + thumb.slope * thumb.t[0])}
+                            y2={py(
+                              thumb.intercept + thumb.slope * thumb.t.at(-1)!,
+                            )}
+                            stroke="var(--accent)"
+                            strokeWidth="1.5"
+                          />
+                        )}
+                        {!thumb?.t.length && (
+                          <text x="12" y="55" fill="currentColor" fontSize="11">
+                            {query?.isError
+                              ? "Could not load trace"
+                              : r.source === "manual"
+                                ? "Manual measurement / no raw trace"
+                                : "No trace returned / validation failed"}
+                          </text>
+                        )}
+                      </svg>
+                    )}
+                    <ReasonChips diag={r.diag} definitions={counts.data} />
                     <small>
-                      {date(r.time)} · {r.side} · {fmt(r[gas + "_flux"], 1)}
+                      {dateTime(r.time)} · {r.side} ·{" "}
+                      {significant(r[gas + "_flux"])}
                     </small>
                   </button>
                 );

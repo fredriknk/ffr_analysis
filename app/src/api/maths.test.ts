@@ -117,6 +117,10 @@ describe("scientific calculations", () => {
     expect(lagged.diagnostics.some((d) => d.code === "valve_timing")).toBe(
       true,
     );
+    expect(lagged.robust?.map((r) => r.gas)).toEqual(["N2O", "CO2"]);
+    expect(lagged.flux.N2O_robustFlux).toBeTypeOf("number");
+    expect(lagged.flux.N2O_impact).toBeGreaterThanOrEqual(0);
+    expect(lagged.flux.N2O_lagS).toBeGreaterThan(lagged.valveLagS);
     const original = (await api.getFluxDetail(1010)).options;
     await api.setFluxOptions([1009], {
       ...lagged.options,
@@ -177,6 +181,8 @@ describe("scientific calculations", () => {
       "error",
       "n2o_negative",
       "co2_not_rising",
+      "chamber_leak",
+      "noisy",
     ])
       expect(counts.find((d) => d.code === code)?.count, code).toBeGreaterThan(
         0,

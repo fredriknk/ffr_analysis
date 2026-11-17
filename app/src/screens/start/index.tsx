@@ -5,15 +5,20 @@ import { api, mockMode } from "../../api";
 import { Field, Panel, Status, pick, useAction } from "../../shared/common";
 import { useStore } from "../../store";
 export function Start() {
+  const visible = useStore((s) => s.screen === "Start");
   const action = useAction(),
     s = useStore(useShallow(({ nav }) => ({ nav })));
   const [wizard, setWizard] = useState(false),
     [dir, setDir] = useState(""),
     [raw, setRaw] = useState(""),
+    [manual, setManual] = useState(""),
+    [logger, setLogger] = useState(""),
+    [weather, setWeather] = useState(""),
     [out, setOut] = useState("trial.ffr"),
     [scan, setScan] = useState<Awaited<ReturnType<typeof api.legacyScan>>>();
   const recent = useQuery({
     queryKey: ["recent"],
+    enabled: visible,
     queryFn: () => api.recentProjects(),
   });
   const openProject = (path: string) =>
@@ -104,10 +109,53 @@ export function Start() {
             <Field label="Output project">
               <input value={out} onChange={(e) => setOut(e.target.value)} />
             </Field>
+            <Field label="Manual flux file (optional)">
+              <input
+                value={manual}
+                onChange={(e) => setManual(e.target.value)}
+              />
+            </Field>
+            <Field label="Logger file (optional)">
+              <input
+                value={logger}
+                onChange={(e) => setLogger(e.target.value)}
+              />
+            </Field>
+            <Field label="Weather pickle (optional)">
+              <input
+                value={weather}
+                onChange={(e) => setWeather(e.target.value)}
+              />
+            </Field>
           </div>
           <button
             onClick={() =>
-              action(async () => setScan(await api.legacyScan(dir)))
+              action(async () => {
+                const found = await api.legacyScan(dir);
+                setScan(found);
+                setRaw(
+                  found.rawDir ??
+                    found.configPaths.find((p) =>
+                      /raw[_ -]|raw_data/i.test(p),
+                    ) ??
+                    raw,
+                );
+                setManual(
+                  found.manualPath ??
+                    found.configPaths.find((p) => /manual/i.test(p)) ??
+                    "",
+                );
+                setLogger(
+                  found.loggerPath ??
+                    found.configPaths.find((p) => /logger/i.test(p)) ??
+                    "",
+                );
+                setWeather(
+                  found.metnoPicklePath ??
+                    found.configPaths.find((p) => /metno.*pickle/i.test(p)) ??
+                    "",
+                );
+              })
             }
           >
             Scan inputs
@@ -116,9 +164,9 @@ export function Start() {
             <>
               <p>
                 {scan.rawFiles.toLocaleString()} robot files · Manual{" "}
-                {scan.manualExists ? "?" : "—"} · Logger{" "}
-                {scan.loggerExists ? "?" : "—"} · Weather{" "}
-                {scan.weatherExists ? "?" : "—"}
+                {scan.manualExists ? "Yes" : "—"} · Logger{" "}
+                {scan.loggerExists ? "Yes" : "—"} · Weather{" "}
+                {scan.weatherExists ? "Yes" : "—"}
               </p>
               <p>{scan.warnings.join(" ")}</p>
               <button
@@ -128,6 +176,9 @@ export function Start() {
                     await api.legacyImport({
                       legacyDir: dir,
                       rawDir: raw,
+                      manualPath: manual || undefined,
+                      loggerPath: logger || undefined,
+                      metnoPicklePath: weather || undefined,
                       outPath: out,
                     });
                     s.nav("Review");

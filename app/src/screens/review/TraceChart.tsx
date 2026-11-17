@@ -1,8 +1,9 @@
-import type { EChartsCoreOption } from "echarts/core";
+﻿import type { EChartsCoreOption } from "echarts/core";
 import { useRef } from "react";
 import type { AnalysisOptions, FluxDetail, Gas } from "../../api/types";
 import { Chart } from "../../shared/charts/Chart";
-import { Empty, Panel, plotBase } from "../../shared/common";
+import { Empty, unit } from "../../shared/common";
+import { useStore } from "../../store";
 export function TraceChart({
   detail,
   gas,
@@ -16,260 +17,277 @@ export function TraceChart({
   preview: (o: AnalysisOptions) => void;
   commit: (o: AnalysisOptions) => void;
 }) {
-  const tr = detail.traces.find((t) => t.gas === gas)!,
-    r = detail.regressions.find((r) => r.gas === gas)!,
+  const zoom = useStore((s) => s.traceZoom),
+    set = useStore((s) => s.set),
+    tr = detail.traces.find((t) => t.gas === gas),
+    r = detail.regressions.find((r) => r.gas === gas),
+    robust = detail.robust?.find((r) => r.gas === gas),
     sib = detail.sibling.find((r) => r.gas === gas),
+    o = { ...options, ...options.perGas?.[gas] },
     drag = useRef(options);
   drag.current = options;
-  if (!r)
+  if (!tr || !r)
     return (
-      <Panel title={gas + " concentration"}>
-        <Empty>
-          No fit: measurement failed validation. Inspect the finding before
-          including this flux.
-        </Empty>
-      </Panel>
+      <section className="trace-panel">
+        <h3>{gas}</h3>
+        <Empty>No fit available for this measurement.</Empty>
+      </section>
     );
+  const max = Math.max(185, ...tr.t),
+    min = Math.min(0, ...tr.t),
+    lag = gas === "N2O" ? Number(detail.flux.N2O_lagS) : detail.valveLagS;
+  const line = (fit: typeof r | typeof robust) =>
+    fit
+      ? [
+          [fit.start, fit.intercept + fit.slope * fit.start],
+          [fit.stop, fit.intercept + fit.slope * fit.stop],
+        ]
+      : [];
   const series: object[] = [0, 1, 2].map((side) => ({
-    name: side === 0 ? "Discarded" : side === 1 ? "Left" : "Right",
+    name: side === 0 ? "Cut" : side === 1 ? "Left" : "Right",
     type: "scatter",
-    symbolSize: side === 0 ? 3 : 5,
+    symbolSize: side ? 4 : 2,
     itemStyle: {
-      color: ["#9aa7b3", "#0072b2", "#d55e00"][side],
-      opacity: detail.flux.excluded
-        ? 0.25
-        : side === (detail.flux.side === "left" ? 1 : 2)
-          ? 1
-          : 0.35,
+      color: ["#98a5af", "#0072b2", "#d55e00"][side],
+      opacity: side === (detail.flux.side === "left" ? 1 : 2) ? 1 : 0.3,
     },
-    data: tr.t.flatMap((v, i) => (tr.side[i] === side ? [[v, tr.y[i]]] : [])),
+    data: tr.t.flatMap((t, i) => (tr.side[i] === side ? [[t, tr.y[i]]] : [])),
+    xAxisIndex: 0,
+    yAxisIndex: 0,
   }));
   series.push({
-    name: "Used in fit",
+    name: "Used",
     type: "scatter",
-    symbolSize: 7,
-    itemStyle: {
-      color: detail.flux.side === "left" ? "#0072b2" : "#d55e00",
-      opacity: detail.flux.excluded ? 0.25 : 1,
-    },
-    data: tr.t.flatMap((v, i) => (tr.used[i] ? [[v, tr.y[i]]] : [])),
+    symbolSize: 5,
+    itemStyle: { color: detail.flux.side === "left" ? "#0072b2" : "#d55e00" },
+    data: tr.t.flatMap((t, i) => (tr.used[i] ? [[t, tr.y[i]]] : [])),
   });
   series.push({
-    name: "Fit",
+    name: "Linear fit",
     type: "line",
     showSymbol: false,
-    lineStyle: { width: 2, color: "#168b7c" },
-    data: [
-      [r.start, r.intercept + r.slope * r.start],
-      [r.stop, r.intercept + r.slope * r.stop],
-    ],
+    lineStyle: { color: "#168b7c", width: 1.5 },
+    data: line(r),
+    markArea: {
+      silent: true,
+      itemStyle: { color: "rgba(80,140,150,.045)" },
+      data: detail.switches.map((sw) => [
+        { xAxis: sw.t + o.valveOffset },
+        { xAxis: sw.t + o.valveOffset + 20 },
+      ]),
+    },
     markLine: {
       silent: true,
       symbol: "none",
       label: { show: false },
       lineStyle: { type: "dashed", color: "#a771be", opacity: 0.65 },
-      data: detail.switches.map((sw) => ({ xAxis: sw.t + detail.valveLagS })),
-    },
-    markArea: {
-      silent: true,
-      itemStyle: { color: "rgba(100,145,145,.06)" },
-      data: detail.switches.map((sw) => [
-        {
-          xAxis: sw.t + options.valveOffset,
-          itemStyle: {
-            color:
-              sw.side === "left"
-                ? "rgba(0,114,178,.035)"
-                : "rgba(213,94,0,.035)",
-          },
-        },
-        { xAxis: sw.t + options.valveOffset + 20 },
-      ]),
+      data:
+        Number.isFinite(lag) && Math.abs(lag) >= 1
+          ? detail.switches.map((sw) => ({ xAxis: sw.t + lag }))
+          : [],
     },
   });
-  if (sib)
+  if (robust)
     series.push({
-      name: "Sibling fit",
+      name: "Robust fit",
       type: "line",
       showSymbol: false,
-      lineStyle: { width: 1, type: "dashed", opacity: 0.3, color: "#d55e00" },
-      data: [
-        [sib.start, sib.intercept + sib.slope * sib.start],
-        [sib.stop, sib.intercept + sib.slope * sib.stop],
-      ],
+      lineStyle: { color: "#9d62ad", type: "dashed", width: 2 },
+      data: line(robust),
     });
+  if (sib)
+    series.push({
+      name: "Sibling",
+      type: "line",
+      showSymbol: false,
+      lineStyle: { color: "#7f8da4", opacity: 0.35, type: "dotted", width: 1 },
+      data: line(sib),
+    });
+  series.push({
+    name: "Residual",
+    type: "scatter",
+    xAxisIndex: 1,
+    yAxisIndex: 1,
+    symbolSize: 2,
+    itemStyle: { color: "#7e8fa6" },
+    data: tr.t.flatMap((t, i) =>
+      tr.used[i]
+        ? [[t, tr.y[i] - (tr.fit?.[i] ?? r.intercept + r.slope * t)]]
+        : [],
+    ),
+    markLine: {
+      silent: true,
+      symbol: "none",
+      label: { show: false },
+      data: [{ yAxis: 0 }],
+    },
+  });
+  function update(key: "start" | "stop" | "valveOffset", value: number) {
+    const next = options.perGas?.[gas]
+      ? {
+          ...drag.current,
+          perGas: {
+            ...drag.current.perGas,
+            [gas]: { ...drag.current.perGas?.[gas], [key]: value },
+          },
+        }
+      : { ...drag.current, [key]: value };
+    drag.current = next;
+    return next;
+  }
   return (
-    <Panel
-      title={gas + " concentration"}
-      extra={<span className="muted">ppm · 1 Hz · {tr.t.length} samples</span>}
-    >
-      <div className="trace-wrap">
+    <section className="trace-panel">
+      <h3>
+        {gas} <small>{unit(tr.unit)} · residual below</small>
+      </h3>
+      <div className="trace-fill">
         <Chart
           label={gas + " raw concentration trace"}
-          height={240}
+          height="100%"
+          group="review-traces"
+          onReady={(c) => {
+            c.on("datazoom", () => {
+              const config = c.getOption() as {
+                dataZoom: {
+                  startValue?: number;
+                  endValue?: number;
+                  start: number;
+                  end: number;
+                }[];
+              };
+              const z = config.dataZoom[0],
+                a = z.startValue ?? min + ((max - min) * z.start) / 100,
+                b = z.endValue ?? min + ((max - min) * z.end) / 100;
+              if (Math.abs(a - zoom[0]) > 0.01 || Math.abs(b - zoom[1]) > 0.01)
+                set({ traceZoom: [a, b] });
+            });
+          }}
           option={
-            { ...plotBase, animation: false, series } as EChartsCoreOption
+            {
+              animation: false,
+              grid: [
+                { left: 54, right: 12, top: 12, bottom: 72 },
+                { left: 54, right: 12, height: 30, bottom: 24 },
+              ],
+              tooltip: { trigger: "axis" },
+              axisPointer: { link: [{ xAxisIndex: "all" }] },
+              xAxis: [
+                {
+                  type: "value",
+                  min,
+                  max,
+                  gridIndex: 0,
+                  axisLabel: { show: false },
+                },
+                {
+                  type: "value",
+                  min,
+                  max,
+                  gridIndex: 1,
+                  axisLabel: { fontSize: 9 },
+                  name: "s",
+                  nameGap: 4,
+                },
+              ],
+              yAxis: [
+                {
+                  type: "value",
+                  scale: true,
+                  gridIndex: 0,
+                  splitNumber: 3,
+                  axisLabel: { fontSize: 10 },
+                },
+                {
+                  type: "value",
+                  scale: true,
+                  gridIndex: 1,
+                  splitNumber: 1,
+                  axisLabel: {
+                    fontSize: 8,
+                    formatter: (v: number) => v.toExponential(0),
+                  },
+                },
+              ],
+              dataZoom: [
+                {
+                  type: "inside",
+                  xAxisIndex: [0, 1],
+                  startValue: zoom[0],
+                  endValue: zoom[1],
+                  filterMode: "none",
+                },
+              ],
+              series,
+            } as EChartsCoreOption
           }
         />
-        <div className="handle-space">
-          {(["start", "stop"] as const).map((k) => (
-            <div
-              key={k}
-              role="slider"
-              tabIndex={0}
-              aria-label={gas + " " + k + " handle"}
-              aria-valuemin={0}
-              aria-valuemax={185}
-              aria-valuenow={options[k]}
-              className={"window-handle " + k}
-              style={{ left: (options[k] / 185) * 100 + "%" }}
-              onKeyDown={(e) => {
-                if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
-                  e.preventDefault();
-                  const v = {
-                    ...options,
-                    [k]: Math.max(
-                      k === "stop" ? options.start + 1 : 0,
-                      Math.min(
-                        k === "start" ? options.stop - 1 : 185,
-                        options[k] + (e.key === "ArrowRight" ? 1 : -1),
-                      ),
-                    ),
-                  };
-                  preview(v);
-                  commit(v);
+        <div className="trace-handle-space">
+          {(["start", "stop", "valveOffset"] as const).map((key) => {
+            const value =
+                key === "valveOffset" ? 20 + (o.valveOffset ?? 0) : o[key],
+              position = ((value - zoom[0]) / (zoom[1] - zoom[0])) * 100;
+            return (
+              <div
+                key={key}
+                role="slider"
+                tabIndex={0}
+                aria-label={
+                  gas +
+                  " " +
+                  (key === "valveOffset" ? "valve offset" : key) +
+                  " handle"
                 }
-              }}
-              onPointerDown={(e) => {
-                e.currentTarget.setPointerCapture(e.pointerId);
-              }}
-              onPointerMove={(e) => {
-                if (!e.currentTarget.hasPointerCapture(e.pointerId)) return;
-                const box =
-                    e.currentTarget.parentElement!.getBoundingClientRect(),
-                  v = Math.round(
-                    Math.max(
-                      0,
-                      Math.min(185, ((e.clientX - box.left) / box.width) * 185),
-                    ),
-                  );
-                const next = {
-                  ...drag.current,
-                  [k]:
-                    k === "start"
-                      ? Math.min(v, drag.current.stop - 1)
-                      : Math.max(v, drag.current.start + 1),
-                };
-                drag.current = next;
-                preview(next);
-              }}
-              onPointerUp={(e) => {
-                e.currentTarget.releasePointerCapture(e.pointerId);
-                commit(drag.current);
-              }}
-            >
-              <span>
-                {k} {options[k]}s
-              </span>
-            </div>
-          ))}
-          <div
-            className="window-handle offset-handle"
-            role="slider"
-            tabIndex={0}
-            aria-label={gas + " valve offset handle"}
-            aria-valuemin={-10}
-            aria-valuemax={10}
-            aria-valuenow={options.valveOffset}
-            style={{ left: ((20 + options.valveOffset) / 185) * 100 + "%" }}
-            onPointerDown={(e) =>
-              e.currentTarget.setPointerCapture(e.pointerId)
-            }
-            onPointerMove={(e) => {
-              if (!e.currentTarget.hasPointerCapture(e.pointerId)) return;
-              const box =
-                  e.currentTarget.parentElement!.getBoundingClientRect(),
-                valveOffset = Math.max(
-                  -10,
-                  Math.min(
-                    10,
-                    Math.round(
-                      (((e.clientX - box.left) / box.width) * 185 - 20) * 2,
-                    ) / 2,
-                  ),
-                );
-              const next = { ...drag.current, valveOffset };
-              drag.current = next;
-              preview(next);
-            }}
-            onPointerUp={(e) => {
-              e.currentTarget.releasePointerCapture(e.pointerId);
-              commit(drag.current);
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
-                e.preventDefault();
-                const next = {
-                  ...options,
-                  valveOffset: Math.max(
-                    -10,
-                    Math.min(
-                      10,
-                      options.valveOffset +
-                        (e.key === "ArrowRight" ? 0.5 : -0.5),
-                    ),
-                  ),
-                };
-                preview(next);
-                commit(next);
-              }
-            }}
-          >
-            <span>valve {options.valveOffset}s</span>
-          </div>
+                aria-valuemin={key === "valveOffset" ? -10 : 0}
+                aria-valuemax={key === "valveOffset" ? 10 : max}
+                aria-valuenow={o[key] ?? 0}
+                className={
+                  "window-handle " +
+                  (key === "valveOffset" ? "offset-handle" : key)
+                }
+                style={{ left: position + "%" }}
+                onPointerDown={(e) =>
+                  e.currentTarget.setPointerCapture(e.pointerId)
+                }
+                onPointerMove={(e) => {
+                  if (!e.currentTarget.hasPointerCapture(e.pointerId)) return;
+                  const box =
+                      e.currentTarget.parentElement!.getBoundingClientRect(),
+                    t =
+                      zoom[0] +
+                      ((e.clientX - box.left) / box.width) *
+                        (zoom[1] - zoom[0]),
+                    value =
+                      key === "valveOffset"
+                        ? Math.max(
+                            -10,
+                            Math.min(10, Math.round((t - 20) * 2) / 2),
+                          )
+                        : Math.max(0, Math.min(max, Math.round(t)));
+                  preview(update(key, value));
+                }}
+                onPointerUp={(e) => {
+                  e.currentTarget.releasePointerCapture(e.pointerId);
+                  commit(drag.current);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+                    e.preventDefault();
+                    const value =
+                      (o[key] ?? 0) + (e.key === "ArrowRight" ? 1 : -1);
+                    const next = update(key, value);
+                    preview(next);
+                    commit(next);
+                  }
+                }}
+              >
+                <span>
+                  {key === "valveOffset" ? "δ" : key} {o[key] ?? 0}s
+                </span>
+              </div>
+            );
+          })}
         </div>
       </div>
-      <Chart
-        label={gas + " residual strip"}
-        height={88}
-        option={
-          {
-            animation: false,
-            grid: { left: 65, right: 25, top: 12, bottom: 25 },
-            tooltip: { trigger: "axis" },
-            xAxis: {
-              type: "value",
-              min: 0,
-              max: 185,
-              axisLabel: { show: false },
-            },
-            yAxis: {
-              type: "value",
-              splitNumber: 2,
-              axisLabel: {
-                formatter: (v: number) => v.toExponential(1),
-                fontSize: 9,
-              },
-            },
-            series: [
-              {
-                type: "scatter",
-                symbolSize: 3,
-                itemStyle: { color: "#7486a1" },
-                data: tr.t.flatMap((t, i) =>
-                  tr.fit[i] !== null ? [[t, tr.y[i] - tr.fit[i]!]] : [],
-                ),
-                markLine: {
-                  silent: true,
-                  symbol: "none",
-                  label: { show: false },
-                  data: [{ yAxis: 0 }],
-                },
-              },
-            ],
-          } as EChartsCoreOption
-        }
-      />
-    </Panel>
+    </section>
   );
 }

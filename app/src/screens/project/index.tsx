@@ -8,11 +8,25 @@ import { Chart } from "../../shared/charts/Chart";
 import { Field, Panel, Status, pick, useAction } from "../../shared/common";
 import { useStore } from "../../store";
 export function Project() {
-  const navigation = useStore(useShallow(({ nav }) => ({ nav })));
+  const navigation = useStore(
+    useShallow(({ nav, screen }) => ({ nav, screen })),
+  );
   const action = useAction(),
-    q = useQuery({ queryKey: ["config"], queryFn: () => api.getConfig() }),
-    l = useQuery({ queryKey: ["layout"], queryFn: () => api.getLayout() }),
-    h = useQuery({ queryKey: ["history"], queryFn: () => api.history(15) }),
+    q = useQuery({
+      queryKey: ["config"],
+      enabled: navigation.screen === "Project",
+      queryFn: () => api.getConfig(),
+    }),
+    l = useQuery({
+      queryKey: ["layout"],
+      enabled: navigation.screen === "Project",
+      queryFn: () => api.getLayout(),
+    }),
+    h = useQuery({
+      queryKey: ["history"],
+      queryFn: () => api.history(15),
+      enabled: navigation.screen === "Project",
+    }),
     [draft, setDraft] = useState<ProjectConfig | null>(null),
     [edited, setEdited] = useState<Awaited<
       ReturnType<typeof api.getLayout>
@@ -327,7 +341,12 @@ export function Project() {
               <span>{new Date(c.time).toLocaleTimeString()}</span>
               <strong>{c.kind}</strong>
               <span>
-                {c.fluxIds.length ? "Flux " + c.fluxIds.join(", ") : "Project"}
+                {c.fluxIds.length
+                  ? c.fluxIds.length +
+                    " fluxes · " +
+                    c.fluxIds.slice(0, 3).join(", ") +
+                    (c.fluxIds.length > 3 ? "—" : "")
+                  : "Project"}
               </span>
             </div>
           ))

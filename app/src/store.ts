@@ -17,6 +17,8 @@ interface State {
   diagnosticCodes: string[];
   queueSort: "attention" | "time" | "plot";
   contactSheet: boolean;
+  treatmentZoom: [number, number] | null;
+  traceZoom: [number, number];
   reviewThese: (ids: number[]) => void;
   back: Screen | null;
   theme: "light" | "dark";
@@ -46,10 +48,17 @@ export const useStore = create<State>((set, get) => ({
   diagnosticCodes: [],
   queueSort: "attention",
   contactSheet: false,
+  traceZoom: [0, 185],
+  treatmentZoom: null,
   back: null,
   theme:
-    (localStorage.getItem("ffr-theme") as "light" | "dark") ||
-    (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"),
+    (typeof localStorage !== "undefined"
+      ? (localStorage.getItem("ffr-theme") as "light" | "dark")
+      : null) ||
+    (typeof matchMedia !== "undefined" &&
+    matchMedia("(prefers-color-scheme: dark)").matches
+      ? "dark"
+      : "light"),
   search: "",
   quick: "attention",
   treatment: "",

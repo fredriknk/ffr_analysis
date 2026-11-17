@@ -11,10 +11,13 @@ import {
   pick,
   useAction,
 } from "../../shared/common";
+import { useStore } from "../../store";
 export function External() {
+  const visible = useStore((s) => s.screen === "External data");
   const action = useAction(),
     series = useQuery({
       queryKey: ["series"],
+      enabled: visible,
       queryFn: () => api.listSeries(),
     }),
     [selected, setSelected] = useState(1),
@@ -38,7 +41,7 @@ export function External() {
   const points = useQuery({
     queryKey: ["series-points", selected],
     queryFn: () => api.getSeries([selected]),
-    enabled: !!series.data?.some((s) => s.id === selected),
+    enabled: visible && !!series.data?.some((s) => s.id === selected),
   });
   return (
     <div className="page">
