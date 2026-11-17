@@ -169,49 +169,61 @@ sources (robot, manual).
 
 Every flux row can be joined with every series (value nearest in time, with a maximum gap).
 
-### 4.9 Diagnostics (new, not in the legacy program)
+### 4.9 Diagnostics (review priority, independent of legacy regression)
 
-Finding bad fluxes is the main job of the program, so the core scores every flux and says
-*why* it looks suspicious. Diagnostics never change a flux value and never exclude anything
-on their own; they order the review queue and explain themselves. They are recomputed with
-the results and all thresholds live in `config.diagnostics` (defaults below, tune them on the
-real Capture data so that each code flags a plausible share of fluxes and report the rates).
+Diagnostics never change the reported flux or exclude a flux. Findings have
+`{code, severity: 'info'|'warn'|'bad', gas?, value?, impact?, message}` and are
+recomputed with results. All numeric rule thresholds are `config.diagnostics` fields.
 
-`Diagnostic = { code, severity: 'info' | 'warn' | 'bad', gas?: string, value?: number, message: string }`
+For each gas, `floor = noiseFloorMultiplier (3) ? median(flux standard error)`
+from non-excluded robot fluxes; standard error uses the physical flux conversion
+and `seSlope`, including zero slopes. Residual SD baselines use the same cohort.
 
-**Noise floor** `floor_g` per gas = 3 × median flux standard error of the non-excluded robot
-fluxes. "Near zero" always means relative to this.
+For N2O and CO2, estimate separate valve lags over `valveSearchS` (10 s), in
+`valveStepS` (0.5 s) steps, minimising both chambers' SSE. Require chamber contrast
+above `lagContrastSd` (4) robust noise SDs and SSE improvement at least
+`valveMinImprovement` (0.30). Lag is applied to the diagnostic refit when its
+magnitude is at least `valveMinLagS` (1 s). `valveLagS` is CO2; `N2O_lagS` is
+nullable when contrast is insufficient. Per-gas analysis options can override
+`start`, `stop`, `cutBeginnings`, `cutEnds`, `valveOffset`; absent values inherit
+flux-level options. Zero offset with absent per-gas overrides preserves parity.
 
-**Robust refit and impact** (N2O, CO2): same window, the gas's estimated valve lag applied
-when |lag| ≥ 1 s, 3 s more cut at both ends of every valve segment, points with
-|residual| > 4 MAD dropped. `impact = |flux − robustFlux| / max(|flux|, |robustFlux|, floor)`.
-Findings about signal shape take their severity from impact (info < 0.10, warn < 0.30, bad
-above), so the queue is led by fluxes whose value is actually wrong.
+Robust fits use the same window, gas-specific lag, `extraCutS` (3) extra seconds
+at each segment end, and at most two passes dropping residuals above `robustMad`
+(4) MAD. Store `<gas>_robustFlux`, `<gas>_impact`, `<gas>_seFlux`, and return
+`FluxDetail.robust: {gas,slope,intercept,start,stop,n,flux}[]`.
+`impact = abs(flux ? robustFlux) / max(abs(flux), abs(robustFlux), floor)`.
 
-| code | meaning |
+**Shape severity.** `valve_timing`, `edge_transient`, `spike`, `noisy` and
+`curvature` are info below `shapeWarnImpact` (0.15), warn below
+`shapeBadImpact` (0.35), otherwise bad. For the first four codes use the maximum
+impact over N2O and CO2, with a gas contributing zero unless its absolute flux
+change exceeds `shapeFloorMultiplier` (1) times its floor. Curvature instead uses
+the absolute first-half versus second-half flux difference divided by
+`max(abs(flux), floor)`, with the same original-versus-robust absolute floor gate and maximum over gases.
+Messages show robust versus original flux and effective impact. Small-effect
+findings remain visible as info chips and in diagnostic summaries.
+
+| Code | Candidate / severity rule (defaults) |
 |---|---|
-| `error` | the measurement failed validation (no fit) — bad |
-| `chamber_leak` | CO2 flux below 25 % of the day's median while the day's median is well above the floor: chamber probably not sealed — warn; bad when the sibling chamber shows normal respiration |
-| `co2_not_rising` | CO2 flux significantly below −floor — bad. Flat at noise level (winter) is not a finding |
-| `n2o_negative` | N2O flux significantly below −floor — warn; bad when far below or together with `chamber_leak` |
-| `valve_timing` | valve times do not match the signal: lag δ (per gas; −10…+10 s) that minimises the two chambers' summed SSE; flagged when \|δ\| is large and the SSE drops ≥ 30 %. Severity by impact. Stored as `valveLagS` (CO2) and `N2O_lagS` |
-| `edge_transient` | first/last used points of the valve segments sit off the fit — severity by impact |
-| `spike` | used points far off the fit — severity by impact |
-| `noisy` | residual SD > 4 × the project median for that gas — warn (bad > 10 ×) |
-| `curvature` | first-half and second-half fluxes differ by > 40 % and > 2 × floor — warn |
-| `neighbour_outlier` | far from comparable fluxes (same treatment ±3 days, else same plot ±10 days), N2O and CO2 — warn |
-| `few_points` | fewer than 20 used points or window < 60 s — warn (info when the user set the window) |
-| `valves_irregular` | valve pattern deviates from the project's normal — warn |
-| `legacy_qc`, `temp_fallback`, `no_plot` | info; `legacy_qc` alone gives attention 0 |
+| `error` | Measurement validation or regression failed: bad. |
+| `valve_timing` | Meaningful lag meeting the lag and improvement thresholds; shape severity. |
+| `edge_transient` | Edge residuals exceed interior residuals by `edgeRatio` (2.5); shape severity. |
+| `spike` | Used residual exceeds `spikeMad` (6) robust SDs; shape severity. |
+| `noisy` | Residual SD exceeds `noisyWarn` (4) times the gas baseline; shape severity, with no separate fixed bad threshold. |
+| `curvature` | Quadratic F-test p below `curvatureP` (1e-12), half-window slopes differ by `curvatureSlopeChange` (0.4); shape severity. |
+| `chamber_leak` | Day path: at least `leakMinDayPoints` (6) non-excluded robot observations; day median CO2 above `leakReferenceFloor` (5) floors and flux below `leakFraction` (0.25) of median: warn; bad if sibling CO2 exceeds `leakDaySiblingFraction` (0.5) of median or the N2O sibling test passes. Independently, sibling path: sibling CO2 above 5 floors and this flux below 0.25 of sibling: warn, bad if sibling N2O exceeds 5 floors and this N2O is below 0.25 of sibling. Both paths share the named reference/fraction thresholds. |
+| `co2_not_rising` | CO2 below `co2NegativeFloor` (1) negative floors with p below `n2oNegativeP` (0.01): bad; flat noise is fine. |
+| `n2o_negative` | N2O below `negativeInfoFloor` (1) negative floors with p below `n2oNegativeP` (0.01): info; warn below `negativeWarnFloor` (3) negative floors, bad below `negativeBadFloor` (5) or alongside `chamber_leak`. |
+| `neighbour_outlier` | Compare non-excluded same-treatment observations within `neighbourDays` (3), falling back to same plot within `neighbourFallbackDays` (10) when fewer than `minNeighbours` (6). Scale asinh by max(raw MAD, floor); transformed MAD is bounded by `neighbourAsinhMadMin` (0.15). Candidate exceeds both `neighbourZ` (3.5) scaled-asinh z and `neighbourRawZ` (8) raw z. Bad if scaled-asinh z exceeds `neighbourBadZ` (10), or flux exceeds `neighbourBadRatio` (10) times neighbours' median absolute flux and `neighbourBadFloor` (5) floors; otherwise warn. |
+| `few_points` | Below `minPoints` (20) or `minWindowS` (60): warn, info for an overridden window. |
+| `valves_irregular` | Not `normalSwitches` (10), repeated/missing sides, or duration differs from `normalSegmentS` (20) by `irregularFraction` (0.5): warn. |
+| `legacy_qc`, `temp_fallback`, `no_plot` | Legacy QC, missing temperature, or unassigned chamber: info. |
 
-`attention` (0–100) is one score per flux for sorting: bad ≥ 70, warn 30–69, info < 30,
-increasing with impact and the number of findings. Target on a real project: bad ≤ ~5 %,
-bad + warn ≤ ~20 % of fluxes. Reviewed fluxes keep their score; the UI
-decides what to hide.
-
-**Valve offset.** `AnalysisOptions.valveOffset` (seconds, default 0 = legacy parity) shifts
-every switch time before points are attributed to chambers. This is the fix for a timing
-mismatch, and it can be applied to many fluxes at once (a whole day usually shares the lag).
+`attention` grows with effective impact and number of findings: bad 70?100,
+warn 30?69, info 1?10. `legacy_qc` alone has attention 0. Reviewed fluxes keep
+their scores. Target on Capture: bad at most about 6%, bad plus warn at most 15%.
+The UI decides which reviewed or excluded fluxes to hide.
 
 ## 5. Project file
 

@@ -16,7 +16,22 @@ pub struct DiagnosticsConfig {
     pub robust_mad: f64,
     pub lag_contrast_sd: f64,
     pub noisy_warn: f64,
-    pub noisy_bad: f64,
+    pub shape_floor_multiplier: f64,
+    pub shape_warn_impact: f64,
+    pub shape_bad_impact: f64,
+    pub noise_floor_multiplier: f64,
+    pub negative_info_floor: f64,
+    pub co2_negative_floor: f64,
+    pub negative_warn_floor: f64,
+    pub negative_bad_floor: f64,
+    pub leak_reference_floor: f64,
+    pub leak_fraction: f64,
+    pub leak_day_sibling_fraction: f64,
+    pub neighbour_bad_z: f64,
+    pub neighbour_bad_ratio: f64,
+    pub neighbour_bad_floor: f64,
+    pub neighbour_asinh_mad_min: f64,
+    pub leak_min_day_points: usize,
     pub neighbour_raw_z: f64,
     pub curvature_p: f64,
     pub curvature_gases: Vec<String>,
@@ -46,7 +61,22 @@ impl Default for DiagnosticsConfig {
             robust_mad: 4.,
             lag_contrast_sd: 4.,
             noisy_warn: 4.,
-            noisy_bad: 10.,
+            shape_floor_multiplier: 1.0,
+            shape_warn_impact: 0.15,
+            shape_bad_impact: 0.35,
+            noise_floor_multiplier: 3.0,
+            negative_info_floor: 1.,
+            co2_negative_floor: 1.,
+            negative_warn_floor: 3.0,
+            negative_bad_floor: 5.0,
+            leak_reference_floor: 5.0,
+            leak_fraction: 0.25,
+            leak_day_sibling_fraction: 0.5,
+            neighbour_bad_z: 10.0,
+            neighbour_bad_ratio: 10.0,
+            neighbour_bad_floor: 5.0,
+            neighbour_asinh_mad_min: 0.15,
+            leak_min_day_points: 6,
             neighbour_raw_z: 8.,
             curvature_p: 1e-12,
             curvature_gases: vec!["N2O".into(), "CO2".into()],
@@ -532,7 +562,7 @@ pub const RULES: [(&str, &str, &str); 15] = [
     (
         "noisy",
         "Noisy trace",
-        "Residual SD exceeds 4 times the gas baseline (warn) or 10 times (bad).",
+        "Residual SD exceeds the gas baseline threshold; effective impact determines severity.",
     ),
     (
         "error",
@@ -557,7 +587,7 @@ pub const RULES: [(&str, &str, &str); 15] = [
     (
         "curvature",
         "Curved trace",
-        "Significant curvature changes half-window fluxes by more than 40 percent and twice the noise floor.",
+        "Significant curvature changes half-window slopes; effective half-window impact determines severity.",
     ),
     (
         "valve_timing",
@@ -616,7 +646,21 @@ impl DiagnosticsConfig {
             self.robust_mad,
             self.lag_contrast_sd,
             self.noisy_warn,
-            self.noisy_bad,
+            self.shape_floor_multiplier,
+            self.shape_warn_impact,
+            self.shape_bad_impact,
+            self.noise_floor_multiplier,
+            self.negative_info_floor,
+            self.co2_negative_floor,
+            self.negative_warn_floor,
+            self.negative_bad_floor,
+            self.leak_reference_floor,
+            self.leak_fraction,
+            self.leak_day_sibling_fraction,
+            self.neighbour_bad_z,
+            self.neighbour_bad_ratio,
+            self.neighbour_bad_floor,
+            self.neighbour_asinh_mad_min,
             self.neighbour_raw_z,
             self.valve_search_s,
             self.valve_step_s,
@@ -631,7 +675,10 @@ impl DiagnosticsConfig {
         ];
         if !self.extra_cut_s.is_finite()
             || self.extra_cut_s < 0.
-            || self.noisy_bad < self.noisy_warn
+            || self.shape_bad_impact < self.shape_warn_impact
+            || self.negative_bad_floor < self.negative_warn_floor
+            || self.negative_warn_floor < self.negative_info_floor
+            || self.leak_min_day_points < 1
             || probabilities
                 .iter()
                 .any(|v| !v.is_finite() || !(0. ..=1.).contains(v))

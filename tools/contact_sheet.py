@@ -8,7 +8,7 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import numpy as np
-p=argparse.ArgumentParser();p.add_argument('project');p.add_argument('--cli',default='target/release/ffr-cli.exe');p.add_argument('--out',type=pathlib.Path,default=pathlib.Path('local/sheets'));p.add_argument('--seed',type=int,default=17);p.add_argument('--ids',nargs='*',type=int);p.add_argument('--name',default='selected');a=p.parse_args();a.out.mkdir(parents=True,exist_ok=True)
+p=argparse.ArgumentParser();p.add_argument('project');p.add_argument('--cli',default='target/release/ffr-cli.exe');p.add_argument('--out',type=pathlib.Path,default=pathlib.Path('local/sheets'));p.add_argument('--seed',type=int,default=17);p.add_argument('--ids',nargs='*',type=int);p.add_argument('--name',default='selected');p.add_argument('--groups',nargs='+',help='Generate only these named groups');a=p.parse_args();a.out.mkdir(parents=True,exist_ok=True)
 def invoke(command,args):
  args={'projectPath':a.project,**args};r=subprocess.run([a.cli,'dump-json',command,json.dumps(args)],capture_output=True,check=False)
  if r.returncode:raise RuntimeError(r.stderr.decode('utf8',errors='replace'))
@@ -20,6 +20,7 @@ else:
  for code in sorted({c for r in robot for c in (r['diag'] or '').split(',') if c}):
   ids=[r['id'] for r in robot if code in (r['diag'] or '').split(',')];groups[code]=rng.sample(ids,min(16,len(ids)))
  clean=[r['id'] for r in robot if r['attention']==0];groups['attention_zero']=rng.sample(clean,min(16,len(clean)))
+if a.groups:groups={name:ids for name,ids in groups.items() if name in a.groups}
 # Remove only PNGs recorded by this tool's previous manifest, within this output directory.
 manifest=a.out/'index.json'
 if manifest.exists():

@@ -352,13 +352,13 @@ serde_json::to_string(findings)?])?;
                 findings[i].extend(contextual);
             }
         }
-        let baseline = crate::diagnostics::baselines(&rows);
+        let cfg = self.get_config()?;
+        let baseline = crate::diagnostics::baselines(&rows, &cfg.diagnostics);
         self.db()?.execute("INSERT INTO meta(key,value) VALUES('diagnostic_baseline',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value",[serde_json::to_string(&baseline)?])?;
         let analyses: Vec<_> = rows
             .iter()
             .map(|r| self.load_analysis(r["id"].as_i64().unwrap_or(0)))
             .collect::<Result<_>>()?;
-        let cfg = self.get_config()?;
         let zone: chrono_tz::Tz = cfg
             .time_zone
             .parse()
