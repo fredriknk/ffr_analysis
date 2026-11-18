@@ -2315,6 +2315,10 @@ th input.id-filter {
   font-size: 11px;
   padding: 5px 8px;
 }
+.wp-section > .wp-edit-controls {
+  display: grid;
+  gap: 7px;
+}
 .small {
   font-size: 11px;
 }

@@ -472,9 +472,11 @@ Screens:
    one `setLayout` and creates one project undo step. "Load waypoint list…" and "Edit route" open
    the Waypoints screen.
 8. **Waypoints** — the route editor (port of `ffr_waypoint_analyzer`), usable with or
-   without an open project: open a route CSV, edit on a map (move, rotate headings or a
-   group, box-select, add/insert/delete waypoints, set fields, snap positions and chamber
-   pairs, autorotate headings from the path), undo/redo, and save as a new CSV. The **Plots
+   without an open project. The editor opens **locked**. You can open a route CSV, navigate
+   the map, and select and inspect waypoints. Use "Unlock to edit" to move or rotate
+   waypoints, add/insert/delete them, edit fields, snap positions and chamber pairs, and
+   autorotate headings from the path. Undo and redo are available while unlocked. Save edits
+   as a new CSV or undo them before locking again. The **Plots
    from route** panel previews §4.6 live (grouping distance, shape, size, direction, label
    prefix; each plot shows how many times it is measured) and either creates a new project
    from it or replaces the open project's layout.

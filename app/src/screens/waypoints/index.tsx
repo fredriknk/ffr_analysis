@@ -115,6 +115,7 @@ export function Waypoints() {
     queryFn: () => api.getRoute(),
   });
   const [doc, setDoc] = useState<EditorDoc>(() => createDoc([])),
+    [locked, setLocked] = useState(true),
     [sourcePath, setSourcePath] = useState<string | null>(null),
     [fitKey, setFitKey] = useState(0),
     [selected, setSelected] = useState<Set<string>>(new Set()),
@@ -167,17 +168,25 @@ export function Waypoints() {
           ? points.find((p) => selected.has(p.uid))
           : undefined;
 
+  function lockEditor() {
+    setLocked(true);
+    setTool("move");
+    setPlacing(null);
+    setBox(null);
+    setPreview(null);
+    gesture.current = null;
+  }
   function load(next: Waypoint[], path: string | null) {
     setDoc(createDoc(next));
     setSourcePath(path);
     setSelected(new Set());
     setAnchor(null);
-    setPreview(null);
+    lockEditor();
     setFitKey((k) => k + 1);
   }
   /** Runs `fn` now, or after the user agrees to drop unsaved edits. */
   function guarded(label: string, fn: () => void) {
-    if (isDirty(doc) && doc.points.length) setPending({ label, run: fn });
+    if (dirty) setPending({ label, run: fn });
     else fn();
   }
   // A route handed over from Start ("New project from waypoint list").
@@ -204,6 +213,7 @@ export function Waypoints() {
   });
 
   function apply(label: string, next: EditorPoint[], select?: string[]) {
+    if (locked) return;
     setDoc((d) => commit(d, label, next));
     setPreview(null);
     if (select) {
@@ -215,6 +225,7 @@ export function Waypoints() {
     label: string,
     fn: () => EditorPoint[] | { points: EditorPoint[]; createdUids: string[] },
   ) {
+    if (locked) return;
     try {
       const r = fn();
       if (Array.isArray(r)) apply(label, r);
@@ -256,7 +267,7 @@ export function Waypoints() {
     setPlacing(null);
   }
   function deleteSelection() {
-    if (!selected.size) return;
+    if (locked || !selected.size) return;
     attempt("Delete " + selected.size, () =>
       deletePoints(doc.points, selected),
     );
@@ -282,13 +293,13 @@ export function Waypoints() {
     const path = await pickRoute(true, base + "_edited.csv");
     if (!path) return;
     await api.waypointsWrite(path, stripUids(doc.points), sourcePath);
-    setDoc((d) => markSaved(d));
+    setDoc((d) => (d === doc ? markSaved(d) : d));
     toastFn("Route saved to " + fileName(path));
   }
 
   // Map gestures -----------------------------------------------------------
   const rotationHandle = (view: MapView) => {
-    if (!selected.size || tool === "select") return null;
+    if (locked || !selected.size || tool === "select") return null;
     const sel = points.filter((p) => selected.has(p.uid));
     if (sel.length === 1) {
       if (autoRotate) return null;
@@ -311,11 +322,11 @@ export function Waypoints() {
       target = (e.target as Element).closest("[data-uid],[data-handle]"),
       uid = target?.getAttribute("data-uid") ?? null,
       view = map.current?.view();
-    if (placing) {
+    if (!locked && placing) {
       addAt(p.x, p.y);
       return true;
     }
-    if (target?.getAttribute("data-handle") === "rotate") {
+    if (!locked && target?.getAttribute("data-handle") === "rotate") {
       const sel = points.filter((q) => selected.has(q.uid));
       if (sel.length === 1)
         gesture.current = {
@@ -342,6 +353,10 @@ export function Waypoints() {
       }
       if (e.shiftKey) {
         selectPoint(uid, "range");
+        return true;
+      }
+      if (locked) {
+        setSelection([uid]);
         return true;
       }
       const already = selected.has(uid);
@@ -475,10 +490,10 @@ export function Waypoints() {
       if (typing) return;
       if ((e.ctrlKey || e.metaKey) && key.toLowerCase() === "z") {
         e.preventDefault();
-        setDoc((d) => (e.shiftKey ? redoDoc(d) : undoDoc(d)));
+        if (!locked) setDoc((d) => (e.shiftKey ? redoDoc(d) : undoDoc(d)));
       } else if ((e.ctrlKey || e.metaKey) && key.toLowerCase() === "y") {
         e.preventDefault();
-        setDoc((d) => redoDoc(d));
+        if (!locked) setDoc(redoDoc);
       } else if ((e.ctrlKey || e.metaKey) && key.toLowerCase() === "a") {
         e.preventDefault();
         setSelection(points.map((p) => p.uid));
@@ -492,7 +507,7 @@ export function Waypoints() {
         setPreview(null);
       } else if (key.toLowerCase() === "f" && !e.ctrlKey)
         map.current?.fit(points.map((p) => [p.x, p.y]));
-      else if (e.shiftKey && KIND_KEYS[key.toUpperCase()]) {
+      else if (!locked && e.shiftKey && KIND_KEYS[key.toUpperCase()]) {
         e.preventDefault();
         const kind = KIND_KEYS[key.toUpperCase()];
         setAddKind(kind);
@@ -546,6 +561,23 @@ export function Waypoints() {
       <header className="wp-toolbar">
         <strong className="wp-title">Waypoints</strong>
         <button
+          className={"lock-toggle" + (locked ? "" : " unlocked")}
+          aria-pressed={!locked}
+          disabled={!locked && dirty}
+          title={
+            locked
+              ? "Allow changes to the route"
+              : dirty
+                ? "Save or undo your route changes before locking"
+                : "Make the route read-only again"
+          }
+          onClick={() => (locked ? setLocked(false) : lockEditor())}
+        >
+          {locked
+            ? "\u{1F512} Locked \u00b7 Unlock to edit"
+            : "\u{1F513} Unlocked \u00b7 Lock"}
+        </button>
+        <button
           onClick={() =>
             guarded("Open another route", () => void openFile().catch(error))
           }
@@ -573,14 +605,14 @@ export function Waypoints() {
         </button>
         <span className="sep" />
         <button
-          disabled={!doc.undo.length}
+          disabled={locked || !doc.undo.length}
           title={"Undo " + (doc.undo.at(-1)?.label ?? "") + " (Ctrl+Z)"}
           onClick={() => setDoc(undoDoc)}
         >
           ↶ Undo
         </button>
         <button
-          disabled={!doc.redo.length}
+          disabled={locked || !doc.redo.length}
           title={"Redo " + (doc.redo.at(-1)?.label ?? "") + " (Ctrl+Y)"}
           onClick={() => setDoc(redoDoc)}
         >
@@ -593,6 +625,7 @@ export function Waypoints() {
               key={t}
               aria-pressed={tool === t}
               className={tool === t ? "on" : ""}
+              disabled={locked && t !== "select"}
               onClick={() => setTool(t)}
             >
               {t === "move" ? "Move" : t === "rotate" ? "Rotate" : "Select"}
@@ -705,7 +738,7 @@ export function Waypoints() {
           <h3>Route</h3>
           <div className="muted small" title={sourcePath ?? ""}>
             {fileName(sourcePath)}
-            {dirty && doc.points.length ? " · unsaved changes" : ""}
+            {dirty ? " · unsaved changes" : ""}
           </div>
           <div className="wp-stats">
             {points.length} waypoints · {length.toFixed(1)} m
@@ -750,79 +783,87 @@ export function Waypoints() {
           {!points.length && (
             <p className="muted small wp-empty">
               Open a route CSV (seven columns, no header:
-              X,Y,Z,Angle,Type,MeasureSide,Name), or place waypoints on the map.
+              X,Y,Z,Angle,Type,MeasureSide,Name), or unlock to place waypoints
+              on the map.
             </p>
           )}
         </div>
         <section className="wp-section">
           <h3>Add a waypoint</h3>
-          <div className="wp-form">
-            <label>
-              Type
-              <select
-                aria-label="New waypoint type"
-                value={addKind}
-                onChange={(e) => setAddKind(e.target.value as AddKind)}
-              >
-                <option value="Measure">Measure</option>
-                <option value="DriveThrough">DriveThrough</option>
-                <option value="TurningPoint">TurningPoint</option>
-                <option value="Stop">Stop</option>
-                <option value="pair">DriveThrough + TurningPoint</option>
-              </select>
-            </label>
-            <label>
-              Side
-              <select
-                aria-label="New waypoint side"
-                value={addSide}
-                onChange={(e) => setAddSide(e.target.value as WaypointSide)}
-              >
-                {["both", "left", "right", "none"].map((s) => (
-                  <option key={s}>{s}</option>
-                ))}
-              </select>
-            </label>
-            <label>
-              Route position
-              <select
-                aria-label="Route position"
-                value={addWhere}
-                onChange={(e) => setAddWhere(e.target.value as typeof addWhere)}
-              >
-                <option value="end">Append to end</option>
-                <option value="before">Insert before selected</option>
-                <option value="after">Insert after selected</option>
-              </select>
-            </label>
-          </div>
-          <button
-            className={placing ? "primary" : ""}
-            onClick={() => setPlacing(placing ? null : addKind)}
+          <fieldset
+            className="plain-fieldset wp-edit-controls"
+            disabled={locked}
           >
-            {placing ? "Cancel placement (Esc)" : "Place waypoint on map"}
-          </button>
-          <button
-            disabled={!primary || addWhere === "end"}
-            onClick={() =>
-              primary &&
-              attempt("Insert at midpoint", () =>
-                insertMidpoint(doc.points, {
-                  kind: addKind === "pair" ? "DriveThrough" : addKind,
-                  pair: addKind === "pair",
-                  side: addSide,
-                  anchorUid: primary.uid,
-                  position: addWhere === "before" ? "before" : "after",
-                }),
-              )
-            }
-          >
-            Insert at segment midpoint
-          </button>
-          <small className="muted">
-            New points align with travel. Shift+D / M / T / S / B arms
-            placement; click the map to place.
-          </small>
+            <div className="wp-form">
+              <label>
+                Type
+                <select
+                  aria-label="New waypoint type"
+                  value={addKind}
+                  onChange={(e) => setAddKind(e.target.value as AddKind)}
+                >
+                  <option value="Measure">Measure</option>
+                  <option value="DriveThrough">DriveThrough</option>
+                  <option value="TurningPoint">TurningPoint</option>
+                  <option value="Stop">Stop</option>
+                  <option value="pair">DriveThrough + TurningPoint</option>
+                </select>
+              </label>
+              <label>
+                Side
+                <select
+                  aria-label="New waypoint side"
+                  value={addSide}
+                  onChange={(e) => setAddSide(e.target.value as WaypointSide)}
+                >
+                  {["both", "left", "right", "none"].map((s) => (
+                    <option key={s}>{s}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Route position
+                <select
+                  aria-label="Route position"
+                  value={addWhere}
+                  onChange={(e) =>
+                    setAddWhere(e.target.value as typeof addWhere)
+                  }
+                >
+                  <option value="end">Append to end</option>
+                  <option value="before">Insert before selected</option>
+                  <option value="after">Insert after selected</option>
+                </select>
+              </label>
+            </div>
+            <button
+              className={placing ? "primary" : ""}
+              onClick={() => setPlacing(placing ? null : addKind)}
+            >
+              {placing ? "Cancel placement (Esc)" : "Place waypoint on map"}
+            </button>
+            <button
+              disabled={!primary || addWhere === "end"}
+              onClick={() =>
+                primary &&
+                attempt("Insert at midpoint", () =>
+                  insertMidpoint(doc.points, {
+                    kind: addKind === "pair" ? "DriveThrough" : addKind,
+                    pair: addKind === "pair",
+                    side: addSide,
+                    anchorUid: primary.uid,
+                    position: addWhere === "before" ? "before" : "after",
+                  }),
+                )
+              }
+            >
+              Insert at segment midpoint
+            </button>
+            <small className="muted">
+              New points align with travel. Shift+D / M / T / S / B arms
+              placement; click the map to place.
+            </small>
+          </fieldset>
         </section>
       </aside>
       <main className="wp-map">
@@ -870,137 +911,148 @@ export function Waypoints() {
               Select tool) selects a box; Ctrl adds.
             </p>
           )}
-          {primary && selected.size === 1 && (
-            <Inspector
-              key={primary.uid + JSON.stringify(primary)}
-              point={primary}
-              autoRotate={autoRotate}
-              onApply={(fields) =>
-                attempt("Edit " + primary.name, () =>
-                  followPath(setFields(doc.points, primary.uid, fields), [
-                    primary.uid,
-                  ]),
+          <fieldset
+            className="plain-fieldset wp-edit-controls"
+            disabled={locked}
+          >
+            {primary && selected.size === 1 && (
+              <Inspector
+                key={primary.uid + JSON.stringify(primary)}
+                point={primary}
+                autoRotate={autoRotate}
+                onApply={(fields) =>
+                  attempt("Edit " + primary.name, () =>
+                    followPath(setFields(doc.points, primary.uid, fields), [
+                      primary.uid,
+                    ]),
+                  )
+                }
+              />
+            )}
+            {selected.size > 1 && (
+              <>
+                <p className="small">
+                  {selected.size} selected
+                  {primary ? " · anchor " + primary.name : ""}
+                </p>
+                <div className="wp-form three">
+                  <label>
+                    ΔX · m
+                    <input
+                      type="number"
+                      step="0.1"
+                      value={transformInput.dx}
+                      onChange={(e) =>
+                        setTransformInput({
+                          ...transformInput,
+                          dx: Number(e.target.value),
+                        })
+                      }
+                    />
+                  </label>
+                  <label>
+                    ΔY · m
+                    <input
+                      type="number"
+                      step="0.1"
+                      value={transformInput.dy}
+                      onChange={(e) =>
+                        setTransformInput({
+                          ...transformInput,
+                          dy: Number(e.target.value),
+                        })
+                      }
+                    />
+                  </label>
+                  <label>
+                    Rotate · °
+                    <input
+                      type="number"
+                      step="1"
+                      value={transformInput.deg}
+                      onChange={(e) =>
+                        setTransformInput({
+                          ...transformInput,
+                          deg: Number(e.target.value),
+                        })
+                      }
+                    />
+                  </label>
+                </div>
+                <button
+                  onClick={() =>
+                    attempt("Transform selection", () => {
+                      const rotated = rotateGroup(
+                        doc.points,
+                        selected,
+                        (transformInput.deg * Math.PI) / 180,
+                        { pivot: centre(selectedList), positionsToo },
+                      );
+                      return followPath(
+                        movePoints(
+                          rotated,
+                          selected,
+                          transformInput.dx,
+                          transformInput.dy,
+                        ),
+                        selected,
+                      );
+                    })
+                  }
+                >
+                  Transform selection
+                </button>
+              </>
+            )}
+            <label className="check">
+              <input
+                type="checkbox"
+                checked={positionsToo}
+                onChange={(e) => setPositionsToo(e.target.checked)}
+              />
+              Rotate positions too
+            </label>
+            <label className="check">
+              <input
+                type="checkbox"
+                checked={autoRotate}
+                onChange={(e) => {
+                  setAutoRotate(e.target.checked);
+                  if (e.target.checked && selected.size)
+                    attempt("Align headings", () =>
+                      autorotate(doc.points, selected),
+                    );
+                }}
+              />
+              Autorotation from path
+            </label>
+            <button
+              disabled={!selected.size}
+              onClick={() =>
+                attempt("Align headings", () =>
+                  autorotate(doc.points, selected),
                 )
               }
-            />
-          )}
-          {selected.size > 1 && (
-            <>
-              <p className="small">
-                {selected.size} selected
-                {primary ? " · anchor " + primary.name : ""}
-              </p>
-              <div className="wp-form three">
-                <label>
-                  ΔX · m
-                  <input
-                    type="number"
-                    step="0.1"
-                    value={transformInput.dx}
-                    onChange={(e) =>
-                      setTransformInput({
-                        ...transformInput,
-                        dx: Number(e.target.value),
-                      })
-                    }
-                  />
-                </label>
-                <label>
-                  ΔY · m
-                  <input
-                    type="number"
-                    step="0.1"
-                    value={transformInput.dy}
-                    onChange={(e) =>
-                      setTransformInput({
-                        ...transformInput,
-                        dy: Number(e.target.value),
-                      })
-                    }
-                  />
-                </label>
-                <label>
-                  Rotate · °
-                  <input
-                    type="number"
-                    step="1"
-                    value={transformInput.deg}
-                    onChange={(e) =>
-                      setTransformInput({
-                        ...transformInput,
-                        deg: Number(e.target.value),
-                      })
-                    }
-                  />
-                </label>
-              </div>
-              <button
-                onClick={() =>
-                  attempt("Transform selection", () => {
-                    const rotated = rotateGroup(
-                      doc.points,
-                      selected,
-                      (transformInput.deg * Math.PI) / 180,
-                      { pivot: centre(selectedList), positionsToo },
-                    );
-                    return followPath(
-                      movePoints(
-                        rotated,
-                        selected,
-                        transformInput.dx,
-                        transformInput.dy,
-                      ),
-                      selected,
-                    );
-                  })
-                }
-              >
-                Transform selection
-              </button>
-            </>
-          )}
-          <label className="check">
-            <input
-              type="checkbox"
-              checked={positionsToo}
-              onChange={(e) => setPositionsToo(e.target.checked)}
-            />
-            Rotate positions too
-          </label>
-          <label className="check">
-            <input
-              type="checkbox"
-              checked={autoRotate}
-              onChange={(e) => {
-                setAutoRotate(e.target.checked);
-                if (e.target.checked && selected.size)
-                  attempt("Align headings", () =>
-                    autorotate(doc.points, selected),
-                  );
-              }}
-            />
-            Autorotation from path
-          </label>
-          <button
-            disabled={!selected.size}
-            onClick={() =>
-              attempt("Align headings", () => autorotate(doc.points, selected))
-            }
-          >
-            Align selected headings now
-          </button>
-          <label className="check">
-            <input
-              type="checkbox"
-              checked={alignAfterMove}
-              onChange={(e) => setAlignAfterMove(e.target.checked)}
-            />
-            Autoalign headings after moving
-          </label>
+            >
+              Align selected headings now
+            </button>
+            <label className="check">
+              <input
+                type="checkbox"
+                checked={alignAfterMove}
+                onChange={(e) => setAlignAfterMove(e.target.checked)}
+              />
+              Autoalign headings after moving
+            </label>
+          </fieldset>
           {!!selected.size && (
             <div className="button-row">
               <button onClick={focusSelection}>Focus</button>
-              <button className="danger" onClick={deleteSelection}>
+              <button
+                className="danger"
+                disabled={locked}
+                onClick={deleteSelection}
+              >
                 Delete <kbd>Del</kbd>
               </button>
             </div>
@@ -1008,88 +1060,93 @@ export function Waypoints() {
         </section>
         <section className="wp-section">
           <h3>Snap selected waypoints</h3>
-          <div className="wp-form">
-            <label>
-              Max distance · m
-              <input
-                type="number"
-                min="0.1"
-                step="0.1"
-                aria-label="Snap distance"
-                value={snapDistance}
-                onChange={(e) => setSnapDistance(Number(e.target.value))}
-              />
-            </label>
-            <label>
-              Waypoint snap
-              <select
-                aria-label="Waypoint snap mode"
-                value={snapAll ? "all" : "groups"}
-                onChange={(e) => setSnapAll(e.target.value === "all")}
-              >
-                <option value="groups">Nearby groups only</option>
-                <option value="all">All selected to one average</option>
-              </select>
-            </label>
-          </div>
-          <button
-            disabled={selected.size < 2}
-            onClick={() =>
-              attempt("Snap positions", () =>
-                followPath(
-                  snapPositions(
+          <fieldset
+            className="plain-fieldset wp-edit-controls"
+            disabled={locked}
+          >
+            <div className="wp-form">
+              <label>
+                Max distance · m
+                <input
+                  type="number"
+                  min="0.1"
+                  step="0.1"
+                  aria-label="Snap distance"
+                  value={snapDistance}
+                  onChange={(e) => setSnapDistance(Number(e.target.value))}
+                />
+              </label>
+              <label>
+                Waypoint snap
+                <select
+                  aria-label="Waypoint snap mode"
+                  value={snapAll ? "all" : "groups"}
+                  onChange={(e) => setSnapAll(e.target.value === "all")}
+                >
+                  <option value="groups">Nearby groups only</option>
+                  <option value="all">All selected to one average</option>
+                </select>
+              </label>
+            </div>
+            <button
+              disabled={selected.size < 2}
+              onClick={() =>
+                attempt("Snap positions", () =>
+                  followPath(
+                    snapPositions(
+                      doc.points,
+                      selected,
+                      snapAll ? null : snapDistance,
+                    ),
+                    selected,
+                  ),
+                )
+              }
+            >
+              Snap waypoint positions
+            </button>
+            <div className="wp-form">
+              <label>
+                Chamber pairing
+                <select
+                  aria-label="Chamber pairing"
+                  value={chamberMode}
+                  onChange={(e) =>
+                    setChamberMode(e.target.value as typeof chamberMode)
+                  }
+                >
+                  <option value="closest">Closest chambers</option>
+                  <option value="left">Left only</option>
+                  <option value="right">Right only</option>
+                  <option value="opposite">Left to right</option>
+                </select>
+              </label>
+            </div>
+            <button
+              disabled={selected.size < 2}
+              onClick={() => {
+                try {
+                  const r = snapChambers(
                     doc.points,
                     selected,
-                    snapAll ? null : snapDistance,
-                  ),
-                  selected,
-                ),
-              )
-            }
-          >
-            Snap waypoint positions
-          </button>
-          <div className="wp-form">
-            <label>
-              Chamber pairing
-              <select
-                aria-label="Chamber pairing"
-                value={chamberMode}
-                onChange={(e) =>
-                  setChamberMode(e.target.value as typeof chamberMode)
+                    snapDistance,
+                    chamberMode,
+                  );
+                  if (!r.matched.length) {
+                    toastFn("No chamber pairs within " + snapDistance + " m");
+                    return;
+                  }
+                  apply("Snap chambers", r.points);
+                  setLayers((l) => ({ ...l, chambers: true }));
+                  toastFn(r.matched.length + " chamber pairs aligned");
+                } catch (e) {
+                  error(e);
                 }
-              >
-                <option value="closest">Closest chambers</option>
-                <option value="left">Left only</option>
-                <option value="right">Right only</option>
-                <option value="opposite">Left to right</option>
-              </select>
-            </label>
-          </div>
-          <button
-            disabled={selected.size < 2}
-            onClick={() => {
-              try {
-                const r = snapChambers(
-                  doc.points,
-                  selected,
-                  snapDistance,
-                  chamberMode,
-                );
-                if (!r.matched.length) {
-                  toastFn("No chamber pairs within " + snapDistance + " m");
-                  return;
-                }
-                apply("Snap chambers", r.points);
-                setLayers((l) => ({ ...l, chambers: true }));
-                toastFn(r.matched.length + " chamber pairs aligned");
-              } catch (e) {
-                error(e);
-              }
-            }}
-          >
-            Snap chamber pairs
-          </button>
+              }}
+            >
+              Snap chamber pairs
+            </button>
+          </fieldset>
         </section>
         <PlotsPanel
           points={stripUids(doc.points)}
