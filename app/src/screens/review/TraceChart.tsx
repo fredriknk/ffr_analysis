@@ -4,9 +4,13 @@ import type { AnalysisOptions, FluxDetail, Gas } from "../../api/types";
 import { Chart } from "../../shared/charts/Chart";
 import { Empty, unit } from "../../shared/common";
 import { useStore } from "../../store";
+import { anchorSwitch, usedRuns } from "./traceGeometry";
 
 const chamberColour = ["#98a5af", "#0072b2", "#d55e00"],
-  chamberShade = ["", "rgba(0,114,178,.07)", "rgba(213,94,0,.07)"];
+  // Faint: this chamber's valve segments. Stronger: the points the fit uses,
+  // i.e. the segments after the cuts, inside start/stop.
+  chamberShade = ["", "rgba(0,114,178,.035)", "rgba(213,94,0,.035)"],
+  usedShade = ["", "rgba(0,114,178,.13)", "rgba(213,94,0,.13)"];
 type TooltipParam = {
   seriesName?: string;
   value?: unknown;
@@ -39,6 +43,7 @@ export function TraceChart({
     sib = detail.sibling.find((r) => r.gas === gas),
     o = { ...options, ...options.perGas?.[gas] },
     drag = useRef(options),
+    dragging = useRef(false),
     anchor = useRef<number | null>(null);
   drag.current = options;
   if (!tr || !r)
@@ -67,6 +72,11 @@ export function TraceChart({
         ]
       : [],
   );
+  const used = usedRuns(tr.t, tr.used).map(([a, b]) => [
+    { xAxis: a },
+    { xAxis: b },
+  ]);
+  const reportsRobust = o.fit === "robust";
   const line = (fit: typeof r | typeof robust) =>
     fit
       ? [
@@ -94,15 +104,25 @@ export function TraceChart({
     data: tr.t.flatMap((t, i) => (tr.used[i] ? [[t, tr.y[i]]] : [])),
   });
   series.push({
-    name: "Linear fit",
+    name: "Window",
+    type: "line",
+    data: [],
+    markArea: {
+      silent: true,
+      itemStyle: { color: chamberShade[side] },
+      data: segments,
+    },
+  });
+  series.push({
+    name: reportsRobust ? "Robust fit" : "Linear fit",
     type: "line",
     showSymbol: false,
     lineStyle: { color: "#168b7c", width: 1.5 },
     data: line(r),
     markArea: {
       silent: true,
-      itemStyle: { color: chamberShade[side] },
-      data: segments,
+      itemStyle: { color: usedShade[side] },
+      data: used,
     },
     markLine: {
       silent: true,
@@ -136,7 +156,7 @@ export function TraceChart({
       ],
     },
   });
-  if (robust)
+  if (robust && !reportsRobust)
     series.push({
       name: "Robust fit",
       type: "line",
@@ -191,19 +211,30 @@ export function TraceChart({
     const box = e.currentTarget.parentElement!.getBoundingClientRect();
     return zoom[0] + ((e.clientX - box.left) / box.width) * (zoom[1] - zoom[0]);
   };
-  // The offset handle sits on a real valve switch line: the one nearest the
-  // middle of the view, kept fixed while dragging.
-  const centre = (zoom[0] + zoom[1]) / 2,
-    nearest = switches.reduce(
-      (best, sw, i) =>
-        Math.abs(sw.t + offset - centre) <
-        Math.abs((switches[best]?.t ?? Infinity) + offset - centre)
-          ? i
-          : best,
-      0,
+  // The offset handle sits on a real valve switch line, kept fixed while it is
+  // dragged or has keyboard focus.
+  const nearest = anchorSwitch(
+      switches.map((sw) => sw.t),
+      (zoom[0] + zoom[1]) / 2,
     ),
     anchorIndex = anchor.current ?? nearest,
-    anchorSwitch = switches[anchorIndex];
+    anchored = switches[anchorIndex];
+  /** Starts a handle drag: no text selection, and the drag always ends. */
+  function beginDrag(e: React.PointerEvent<HTMLElement>) {
+    e.preventDefault();
+    e.currentTarget.focus();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    dragging.current = true;
+    document.body.classList.add("handle-dragging");
+  }
+  function endDrag(e: React.PointerEvent<HTMLElement>) {
+    if (e.currentTarget.hasPointerCapture(e.pointerId))
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    document.body.classList.remove("handle-dragging");
+    if (!dragging.current) return;
+    dragging.current = false;
+    commit(drag.current);
+  }
   function keyStep(
     e: React.KeyboardEvent,
     key: "start" | "stop" | "valveOffset",
@@ -383,26 +414,23 @@ export function TraceChart({
               }
               className={"window-handle " + key}
               style={{ left: toPercent(o[key]) + "%" }}
-              onPointerDown={(e) =>
-                e.currentTarget.setPointerCapture(e.pointerId)
-              }
+              onPointerDown={beginDrag}
               onPointerMove={(e) => {
-                if (!e.currentTarget.hasPointerCapture(e.pointerId)) return;
+                if (!dragging.current) return;
                 const value = Math.max(0, Math.min(max, Math.round(timeAt(e))));
                 if (value !== current(key)) preview(update(key, value));
               }}
-              onPointerUp={(e) => {
-                e.currentTarget.releasePointerCapture(e.pointerId);
-                commit(drag.current);
-              }}
+              onPointerUp={endDrag}
+              onPointerCancel={endDrag}
+              onLostPointerCapture={endDrag}
               onKeyDown={(e) => keyStep(e, key, 1, [0, max])}
             >
               <span>
-                {key === "start" ? "Start" : "Stop"} {o[key]} s
+                {key === "start" ? "▶ Start" : "Stop ◀"} {o[key]} s
               </span>
             </div>
           ))}
-          {anchorSwitch && (
+          {anchored && (
             <div
               role="slider"
               tabIndex={0}
@@ -416,28 +444,25 @@ export function TraceChart({
                 "are this chamber's segments. Dotted lines: switch times as logged."
               }
               className="window-handle offset-handle"
-              style={{ left: toPercent(anchorSwitch.t + offset) + "%" }}
+              style={{ left: toPercent(anchored.t + offset) + "%" }}
+              onFocus={() => (anchor.current = anchorIndex)}
+              onBlur={() => (anchor.current = null)}
               onPointerDown={(e) => {
                 anchor.current = anchorIndex;
-                e.currentTarget.setPointerCapture(e.pointerId);
+                beginDrag(e);
               }}
               onPointerMove={(e) => {
-                if (!e.currentTarget.hasPointerCapture(e.pointerId)) return;
+                if (!dragging.current) return;
                 const value = Math.max(
                   -10,
-                  Math.min(
-                    10,
-                    Math.round((timeAt(e) - anchorSwitch.t) * 2) / 2,
-                  ),
+                  Math.min(10, Math.round((timeAt(e) - anchored.t) * 2) / 2),
                 );
                 if (value !== current("valveOffset"))
                   preview(update("valveOffset", value));
               }}
-              onPointerUp={(e) => {
-                e.currentTarget.releasePointerCapture(e.pointerId);
-                anchor.current = null;
-                commit(drag.current);
-              }}
+              onPointerUp={endDrag}
+              onPointerCancel={endDrag}
+              onLostPointerCapture={endDrag}
               onKeyDown={(e) => keyStep(e, "valveOffset", 0.5, [-10, 10])}
             >
               <span>

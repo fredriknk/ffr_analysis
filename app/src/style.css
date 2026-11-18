@@ -2581,3 +2581,166 @@ button.danger {
   font-size: 11px;
   color: var(--text);
 }
+/* Review handles: start (green) and stop (red) are solid, labelled tabs at the
+   bottom; valve timing is a dashed slate line labelled at the top. */
+.trace-handle-space .window-handle.start,
+.trace-handle-space .window-handle.stop {
+  width: 16px;
+  margin-left: -8px;
+  border-left: 3px solid var(--handle-colour);
+}
+.trace-handle-space .window-handle.start {
+  --handle-colour: #1b8a4b;
+}
+.trace-handle-space .window-handle.stop {
+  --handle-colour: #c23b30;
+}
+.trace-handle-space .window-handle.start span,
+.trace-handle-space .window-handle.stop span {
+  font-size: 9px;
+  font-weight: 700;
+  color: #fff;
+  background: var(--handle-colour);
+  border-radius: 3px;
+  padding: 2px 5px;
+  height: auto;
+  left: -2px;
+}
+.trace-handle-space .window-handle.stop span {
+  left: auto;
+  right: 11px;
+}
+.trace-handle-space .window-handle.start:hover,
+.trace-handle-space .window-handle.stop:hover,
+.trace-handle-space .window-handle.start:focus-visible,
+.trace-handle-space .window-handle.stop:focus-visible {
+  border-left-width: 4px;
+  outline: none;
+}
+.trace-handle-space .offset-handle {
+  border-left: 2px dashed #5f7383;
+}
+[data-theme="dark"] .trace-handle-space .offset-handle {
+  border-left-color: #8fa3b1;
+}
+.trace-panel,
+.trace-handle-space,
+.window-handle {
+  user-select: none;
+  -webkit-user-select: none;
+}
+body.handle-dragging,
+body.handle-dragging * {
+  user-select: none !important;
+  -webkit-user-select: none !important;
+  cursor: ew-resize !important;
+}
+/* Review inspector: panels the user edits keep their place; the findings list
+   is last and scrolls inside the remaining height. */
+.compact-inspector {
+  overflow-y: auto !important;
+}
+.compact-inspector > section {
+  flex-shrink: 0;
+}
+.compact-inspector > section.compact-findings {
+  flex: 1 1 0;
+  min-height: 90px !important;
+  display: flex;
+  flex-direction: column;
+}
+.findings-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+.finding-sentence.open {
+  display: block;
+}
+.inspector-disclosure {
+  font-size: 10px;
+  margin-top: 4px;
+}
+.inspector-disclosure > summary {
+  cursor: pointer;
+  color: var(--accent);
+}
+.inspector-disclosure[open] > summary {
+  margin-bottom: 3px;
+}
+.inspector-disclosure > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.compact-result.gas-excluded > div:first-child > b {
+  text-decoration: line-through;
+  opacity: 0.6;
+}
+.gas-exclusion {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 9px;
+  color: #9d4944;
+  margin: 2px 0;
+}
+.gas-exclusion button {
+  margin-left: auto;
+  font-size: 9px;
+  padding: 1px 6px;
+}
+.trace-toolbar .fit-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: help;
+}
+.key-line {
+  display: inline-block;
+  width: 18px;
+  height: 0;
+  border-top: 2px solid #168b7c;
+}
+.key-line.dashed {
+  border-top: 2px dashed #9d62ad;
+}
+.label-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.info-toggle {
+  border: 0;
+  background: none;
+  padding: 0;
+  height: auto !important;
+  width: auto !important;
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 10px;
+}
+.mode-info {
+  margin-top: 5px;
+  padding: 6px 8px;
+  border-left: 2px solid var(--accent);
+  background: var(--active);
+  font-size: 10px;
+  line-height: 1.4;
+}
+.mode-info p {
+  margin: 0 0 4px;
+}
+.mode-info button {
+  font-size: 9px;
+  padding: 2px 6px;
+}
+.options-grid > label.check {
+  flex-direction: row;
+  align-items: center;
+  gap: 4px;
+}
+.options-grid > label.check input {
+  width: auto;
+  height: auto;
+}

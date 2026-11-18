@@ -69,6 +69,25 @@ impl Session {
         let layout = self.layout_value()?;
         assign(&mut row, &raw.metadata, side, cfg, &layout);
         row.insert("overridden".into(), json!(overridden));
+        let (opts, _) = self.options(id)?;
+        let mut findings = match findings {
+            Some(d) => d,
+            None => {
+                let lag = self.cached_lag(raw, &opts, &cfg.diagnostics)?;
+                crate::diagnostics::analyse(raw, side, &opts, &results, &cfg.diagnostics, lag)
+            }
+        };
+        // Diagnostics compare the ordinary fit with the robust one; only then
+        // does a robust fit method replace the reported regression.
+        crate::diagnostics::apply_fit_method(raw, side, &opts, &mut results, &cfg.diagnostics);
+        let dropped: Vec<&str> = findings
+            .diagnostics
+            .iter()
+            .filter(|d| d.code == "zero_readings")
+            .filter_map(|d| d.gas.as_deref())
+            .collect();
+        row.insert("autoExcludedGases".into(), json!(dropped));
+        apply_gas_exclusion(&mut row);
         for gas in regression::GASES {
             for suffix in ["slope", "rsq", "pval", "flux", "n", "resid"] {
                 row.insert(format!("{gas}_{suffix}"), Value::Null);
@@ -108,14 +127,6 @@ impl Session {
                 row.insert(name.into(), json!(value));
             }
         }
-        let (opts, _) = self.options(id)?;
-        let mut findings = match findings {
-            Some(d) => d,
-            None => {
-                let lag = self.cached_lag(raw, &opts, &cfg.diagnostics)?;
-                crate::diagnostics::analyse(raw, side, &opts, &results, &cfg.diagnostics, lag)
-            }
-        };
         if row["temperatureFallback"] == true {
             findings.diagnostics.push(crate::diagnostics::Diagnostic {
                 impact: None,
@@ -236,6 +247,10 @@ impl Session {
             });
         }
         self.neighbour_pass()?;
+        self.db()?.execute(
+            "INSERT INTO meta(key,value) VALUES('analysis_version',?1)              ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            [ANALYSIS_VERSION.to_string()],
+        )?;
         if let Some(tx) = tx {
             tx.commit()?;
         }

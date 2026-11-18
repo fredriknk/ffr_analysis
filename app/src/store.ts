@@ -10,6 +10,8 @@ export type Screen =
   | "Project";
 interface State {
   screen: Screen;
+  /** Path of the open project; selections below belong to it. */
+  projectPath: string;
   timeZone: string;
   reviewFrom: string;
   reviewTo: string;
@@ -46,12 +48,40 @@ interface State {
     plots?: boolean;
   } | null;
   nav: (s: Screen) => void;
+  /** A different project is open: forget everything selected in the last one. */
+  projectOpened: (path: string) => void;
   openFlux: (id: number) => void;
   goBack: () => void;
   set: (v: Partial<State>) => void;
 }
+/** Selections and filters that belong to one project. */
+const projectState = {
+  reviewFrom: "",
+  reviewTo: "",
+  selected: -1,
+  reviewIds: undefined,
+  diagnosticCodes: [],
+  includeInfo: false,
+  reviewVisited: false,
+  queueSort: "attention",
+  contactSheet: false,
+  traceZoom: [0, 185],
+  treatmentZoom: null,
+  back: null,
+  search: "",
+  quick: "attention",
+  reviewSource: "robot",
+  treatment: "",
+  plot: "",
+  from: "",
+  to: "",
+  focus: null,
+  dataSearch: "",
+  subset: undefined,
+} satisfies Partial<State>;
 export const useStore = create<State>((set, get) => ({
   screen: "Start",
+  projectPath: "",
   timeZone: "Europe/Oslo",
   reviewFrom: "",
   reviewTo: "",
@@ -131,5 +161,7 @@ export const useStore = create<State>((set, get) => ({
       });
   },
   goBack: () => set({ screen: get().back ?? "Review", back: null }),
+  projectOpened: (projectPath) =>
+    set({ ...structuredClone(projectState), projectPath }),
   set: (v) => set(v),
 }));

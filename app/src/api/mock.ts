@@ -42,6 +42,16 @@ const names = [
 ];
 const start = Date.UTC(2023, 0, 4, 11),
   end = start + 728 * 86400000;
+/** Gases a dropout excluded automatically, and the user's per-gas choices. */
+const autoExcluded = new Map<number, string[]>(),
+  gasChoices = new Map<number, Record<string, boolean>>();
+/** `<gas>_excluded` from the user's choice, else the automatic dropout rule. */
+function applyGasExclusion(r: T.FluxRow) {
+  const auto = autoExcluded.get(r.id) ?? [],
+    choice = gasChoices.get(r.id) ?? {};
+  for (const g of ["CO2", "N2O", "CO", "H2O", "licor_H2O"])
+    r[g + "_excluded"] = choice[g] ?? auto.includes(g);
+}
 export function createMock(seed = 42): T.FfrApi {
   let config: T.ProjectConfig = {
     name: "Ås field trial · 2023–24",
@@ -144,6 +154,12 @@ export function createMock(seed = 42): T.FfrApi {
         (k === 2 && v % 20 === 10 ? growth * 0.3 : 0)
       );
     });
+    // A few files have an N2O analyser dropout (zeros) in a left-chamber segment.
+    if (
+      ["N2O", "CO", "H2O"].includes(gas) &&
+      (row.measurementId ?? 0) % 41 === 7
+    )
+      for (let i = 125; i < 129; i++) y[i] = 0;
     return {
       gas,
       unit: "ppm",
@@ -320,6 +336,19 @@ export function createMock(seed = 42): T.FfrApi {
             ),
           };
         });
+    // The robust fit method reports the robust refit for N2O and CO2.
+    if (o.fit === "robust")
+      for (const fit of robust) {
+        const i = regs.findIndex((v) => v.gas === fit.gas);
+        if (i >= 0)
+          regs[i] = {
+            ...regs[i],
+            slope: fit.slope,
+            intercept: fit.intercept,
+            n: fit.n,
+            flux: fit.flux,
+          };
+      }
     return {
       regs,
       traces,
@@ -403,6 +432,29 @@ export function createMock(seed = 42): T.FfrApi {
           "Residual noise is high compared with this project's typical analyzer noise.",
         value: Number(r.N2O_resid),
       });
+    const effective = opts.get(r.id) ?? config.defaults;
+    const dropped: string[] = [];
+    autoExcluded.set(r.id, dropped);
+    for (const g of ["N2O", "CO2"] as T.Gas[]) {
+      const tr = a.traces.find((t) => t.gas === g),
+        o = { ...effective, ...effective.perGas?.[g] },
+        side = r.side === "left" ? 1 : 2;
+      if (!tr || r.source !== "robot") continue;
+      const window = tr.t.flatMap((t, i) =>
+          tr.side[i] === side && t >= o.start && t < o.stop ? [i] : [],
+        ),
+        zeros = window.filter((i) => tr.y[i] === 0).length;
+      if (!zeros) continue;
+      dropped.push(g);
+      a.diagnostics.push({
+        code: "zero_readings",
+        severity: "bad",
+        gas: g,
+        value: zeros,
+        message: `The ${g} analyser returned 0 for ${zeros} of ${window.length} readings in this chamber's window (instrument dropout). ${g} is excluded from summaries automatically; include it again if the fit is still usable.`,
+      });
+    }
+    applyGasExclusion(r);
     r.overridden = opts.has(r.id);
     diagnosticMap.set(r.id, a.diagnostics);
     r.diagSeverity = findingLevels(a.diagnostics);
@@ -556,6 +608,7 @@ export function createMock(seed = 42): T.FfrApi {
     config: T.ProjectConfig;
     layout: T.Layout;
     series: T.SeriesMeta[];
+    gasChoices?: [number, Record<string, boolean>][];
   };
   let series: T.SeriesMeta[] = [
     ["Air temperature", "°C", "Weather"],
@@ -581,6 +634,7 @@ export function createMock(seed = 42): T.FfrApi {
       config,
       layout,
       series,
+      gasChoices: [...gasChoices],
     });
   const restore = (s: Snapshot) => {
     rows.splice(0, rows.length, ...structuredClone(s.rows));
@@ -593,6 +647,8 @@ export function createMock(seed = 42): T.FfrApi {
     config = structuredClone(s.config);
     layout = structuredClone(s.layout);
     series = structuredClone(s.series);
+    gasChoices.clear();
+    s.gasChoices?.forEach(([id, c]) => gasChoices.set(id, { ...c }));
   };
   const persist = () => {
     try {
@@ -721,8 +777,12 @@ export function createMock(seed = 42): T.FfrApi {
       diagnostics: a.diagnostics.concat(
         (diagnosticMap.get(id) ?? []).filter(
           (d) =>
-            ["neighbour_outlier", "chamber_leak", "noisy"].includes(d.code) &&
-            !a.diagnostics.some((f) => f.code === d.code),
+            [
+              "neighbour_outlier",
+              "chamber_leak",
+              "noisy",
+              "zero_readings",
+            ].includes(d.code) && !a.diagnostics.some((f) => f.code === d.code),
         ),
       ),
       valveLagS: a.lag,
@@ -1027,8 +1087,17 @@ export function createMock(seed = 42): T.FfrApi {
     setFluxFlags: async (ids, flags) => {
       change("Flux flags", ids, () =>
         ids.forEach((id) => {
-          const r = row(id);
-          Object.assign(r, flags);
+          const r = row(id),
+            { gasExcluded, ...rest } = flags;
+          Object.assign(r, rest);
+          if (gasExcluded) {
+            const merged = { ...gasChoices.get(id) };
+            for (const [g, v] of Object.entries(gasExcluded))
+              if (v === null || v === undefined) delete merged[g];
+              else merged[g] = v;
+            gasChoices.set(id, merged);
+            applyGasExclusion(r);
+          }
           if (flags.plotOverride) {
             const p = layout.plots.find((p) => p.id === flags.plotOverride)!;
             Object.assign(r, {

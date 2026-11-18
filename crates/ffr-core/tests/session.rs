@@ -385,6 +385,10 @@ fn one_sided_files_do_not_create_unmeasured_chamber_errors() {
 /// Fluxes from several two-chamber files, so the project-wide pass has
 /// baselines, siblings and same-day neighbours to work with.
 fn multi_file_project(dir: &std::path::Path) -> Session {
+    project_with_dropout(dir, false)
+}
+/// With `dropout`, the first file's CO2 analyser returns zeros in a left segment.
+fn project_with_dropout(dir: &std::path::Path, dropout: bool) -> Session {
     let mut files = vec![];
     for k in 0..8 {
         let name = format!(
@@ -409,7 +413,12 @@ fn multi_file_project(dir: &std::path::Path) -> Session {
                 let left = (i / 20) % 2 == 0;
                 let slope = if left { 0.2 } else { 0.05 } * (1. + k as f64 * 0.3);
                 let noise = ((i * 7919 + k * 104729) % 997) as f64 / 997. - 0.5;
-                json!([t, [400. + slope * t + noise, 1., 1., 1.]])
+                let co2 = if dropout && k == 0 && (45..50).contains(&i) {
+                    0.
+                } else {
+                    400. + slope * t + noise
+                };
+                json!([t, [co2, 1., 1., 1.]])
             })
             .collect();
         let path = dir.join(&name);
@@ -500,6 +509,80 @@ fn incremental_edits_match_a_full_recompute() {
     }
     let after = s.get_flux_detail(ids[5]).expect("detail").diagnostics.len();
     assert_eq!(before, after);
+}
+
+#[test]
+fn instrument_dropout_excludes_that_gas_until_included() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let s = project_with_dropout(dir.path(), true);
+    s.set_layout(
+        ffr_core::Layout {
+            treatments: vec![
+                serde_json::from_value(json!({"id":1,"name":"T","colour":"#000000"}))
+                    .expect("treatment"),
+            ],
+            plots: vec![serde_json::from_value(
+                json!({"id":1,"label":"P","treatmentId":1,"polygon":null}),
+            )
+            .expect("plot")],
+        },
+        |_| {},
+    )
+    .expect("layout");
+    let all: Vec<i64> = s.list_fluxes().expect("table").data["id"]
+        .iter()
+        .filter_map(|v| v.as_i64())
+        .collect();
+    s.set_flux_flags(&all, json!({"plotOverride":1}))
+        .expect("plot");
+    let table = s.list_fluxes().expect("table");
+    let column = |t: &ffr_core::FluxTable, key: &str| t.data[key].clone();
+    let flagged: Vec<i64> = table.data["id"]
+        .iter()
+        .zip(&column(&table, "CO2_excluded"))
+        .filter(|(_, v)| **v == true)
+        .filter_map(|(id, _)| id.as_i64())
+        .collect();
+    assert_eq!(flagged.len(), 1, "only the left chamber of the first file");
+    let id = flagged[0];
+    let detail = s.get_flux_detail(id).expect("detail");
+    assert!(detail
+        .diagnostics
+        .iter()
+        .any(|d| d.code == "zero_readings" && d.gas.as_deref() == Some("CO2")));
+    assert_eq!(detail.flux["excluded"], false, "the flux itself stays in");
+    let count = |s: &Session| {
+        s.treatment_summary(ffr_core::SummaryQuery {
+            gas: "CO2".into(),
+            from: None,
+            to: None,
+            sources: vec!["robot".into()],
+            flux_ids: None,
+        })
+        .expect("summary")
+        .plots
+        .iter()
+        .map(|p| p.points.len())
+        .sum::<usize>()
+    };
+    let before = count(&s);
+    let rows = s
+        .set_flux_flags(&[id], json!({"gasExcluded":{"CO2":false}}))
+        .expect("include");
+    assert_eq!(rows[0]["CO2_excluded"], false);
+    assert_eq!(count(&s), before + 1);
+    // The choice survives a recompute; undo restores the automatic exclusion.
+    s.recompute_all(|_| {}).expect("recompute");
+    assert_eq!(
+        s.get_flux_detail(id).expect("detail").flux["CO2_excluded"],
+        false
+    );
+    s.undo().expect("undo");
+    assert_eq!(
+        s.get_flux_detail(id).expect("detail").flux["CO2_excluded"],
+        true
+    );
+    assert_eq!(count(&s), before);
 }
 
 #[test]

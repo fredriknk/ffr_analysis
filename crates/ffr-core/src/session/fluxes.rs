@@ -120,14 +120,20 @@ impl Session {
             for suffix in ["slope", "rsq", "pval", "flux", "n", "resid"] {
                 keys.insert(format!("{gas}_{suffix}"), "number".into());
             }
+            keys.insert(format!("{gas}_excluded"), "boolean".into());
         }
         for series in self.series_value()? {
             if let Some(name) = series["key"].as_str() {
                 keys.insert(name.into(), "number".into());
             }
         }
+        // Inputs of the per-gas `<gas>_excluded` columns, not columns themselves.
+        let internal = ["autoExcludedGases", "gasExcluded"];
         for row in &rows {
             for (k, v) in row {
+                if internal.contains(&k.as_str()) {
+                    continue;
+                }
                 keys.entry(k.clone()).or_insert_with(|| {
                     if k == "time" {
                         "time"
@@ -272,6 +278,15 @@ impl Session {
                 r.qc = regression::qc_with(r, side, &cfg.qc);
             }
         }
+        // Diagnostics judge the ordinary fit; the reported one may be robust.
+        let ordinary = results.clone();
+        let robust_used = crate::diagnostics::apply_fit_method(
+            &raw,
+            side,
+            &options,
+            &mut results,
+            &cfg.diagnostics,
+        );
         let sibling: Option<(i64, String)> = self
             .db()?
             .query_row(
@@ -293,7 +308,11 @@ impl Session {
                 // Same shifted switches and cuts as the regression, so the
                 // emphasised points are exactly the fitted ones.
                 let mut used = vec![false; t.len()];
-                if let Some(r) = results.get(gas) {
+                if let Some(indices) = robust_used.get(gas) {
+                    for i in indices {
+                        used[*i] = true;
+                    }
+                } else if let Some(r) = results.get(gas) {
                     for i in crate::diagnostics::used_indices(&raw, gas, side, &options, r) {
                         used[i] = true;
                     }
@@ -321,7 +340,7 @@ impl Session {
             .unwrap_or(json!({}));
         let lag = self.cached_lag(&raw, &options, &cfg.diagnostics)?;
         let analysis = if is_preview {
-            crate::diagnostics::analyse(&raw, side, &options, &results, &cfg.diagnostics, lag)
+            crate::diagnostics::analyse(&raw, side, &options, &ordinary, &cfg.diagnostics, lag)
         } else {
             self.load_analysis(id)?
         };
@@ -368,6 +387,13 @@ impl Session {
             );
             row = rows.remove(0);
             diagnostics = f.remove(0);
+            let dropped: Vec<&str> = diagnostics
+                .iter()
+                .filter(|d| d.code == "zero_readings")
+                .filter_map(|d| d.gas.as_deref())
+                .collect();
+            row.insert("autoExcludedGases".into(), json!(dropped));
+            apply_gas_exclusion(&mut row);
         }
         crate::diagnostics::decorate(&mut row, &mut diagnostics, valve_lag);
         Ok(json!({
@@ -461,7 +487,37 @@ impl Session {
             let mut row = self.row(*id)?;
             let mut differs = false;
             let mut reassign = false;
-            for key in ["excluded", "reviewed", "note", "plotOverride"] {
+            // `gasExcluded: {gas: bool | null}` merges into this flux's choices;
+            // null returns that gas to the automatic rule.
+            let mut flags = flags.clone();
+            if let Some(patch) = flags.get("gasExcluded").and_then(Value::as_object) {
+                let mut merged = row
+                    .get("gasExcluded")
+                    .and_then(Value::as_object)
+                    .cloned()
+                    .unwrap_or_default();
+                for (gas, v) in patch {
+                    if v.is_null() {
+                        merged.remove(gas);
+                    } else {
+                        merged.insert(gas.clone(), v.clone());
+                    }
+                }
+                if merged.is_empty() && !row.contains_key("gasExcluded") {
+                    if let Some(f) = flags.as_object_mut() {
+                        f.remove("gasExcluded");
+                    }
+                } else {
+                    flags["gasExcluded"] = Value::Object(merged);
+                }
+            }
+            for key in [
+                "excluded",
+                "reviewed",
+                "note",
+                "plotOverride",
+                "gasExcluded",
+            ] {
                 if let Some(v) = flags.get(key) {
                     if row.get(key).unwrap_or(&Value::Null) != v {
                         differs = true;
@@ -474,11 +530,18 @@ impl Session {
                 continue;
             }
             before.push(serde_json::to_value(&row)?);
-            for key in ["excluded", "reviewed", "note", "plotOverride"] {
+            for key in [
+                "excluded",
+                "reviewed",
+                "note",
+                "plotOverride",
+                "gasExcluded",
+            ] {
                 if let Some(v) = flags.get(key) {
                     row.insert(key.into(), v.clone());
                 }
             }
+            apply_gas_exclusion(&mut row);
             after.push(serde_json::to_value(&row)?);
             self.write_row(*id, &row)?;
             if reassign {
@@ -557,6 +620,7 @@ impl Session {
                     "stop",
                     "interval",
                     "crit",
+                    "fit",
                     "co2Guides",
                     "cutBeginnings",
                     "cutEnds",

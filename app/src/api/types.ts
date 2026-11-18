@@ -35,6 +35,8 @@ export interface AnalysisOptions {
   interval: number;
   crit: "steepest" | "mse";
   co2Guides: boolean;
+  /** Fit that gives the reported flux; absent means "ols". */
+  fit?: "ols" | "robust";
   cutBeginnings: number;
   cutEnds: number;
   valveOffset: number;
@@ -284,6 +286,8 @@ export interface FluxFlags {
   reviewed?: boolean;
   note?: string;
   plotOverride?: number;
+  /** Per-gas exclusion choice merged into the flux; null returns to automatic. */
+  gasExcluded?: Partial<Record<Gas, boolean | null>>;
 }
 export interface Change {
   id: number;

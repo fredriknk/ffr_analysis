@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { api, mockMode } from "./api";
@@ -85,6 +85,21 @@ export default function App() {
     if (info.data?.timeZone)
       useStore.getState().set({ timeZone: info.data.timeZone });
   }, [info.data?.timeZone]);
+  // Screens belong to one project. When another one opens they are unmounted,
+  // every cached query of the old project is dropped and the selections reset,
+  // then they mount again fresh.
+  const client = useQueryClient(),
+    path = info.data?.path ?? "",
+    [readyFor, setReadyFor] = useState("");
+  useEffect(() => {
+    if (path === readyFor) return;
+    client.removeQueries({
+      predicate: (q) => !["project", "recent"].includes(String(q.queryKey[0])),
+    });
+    useStore.getState().projectOpened(path);
+    setReadyFor(path);
+  }, [path, readyFor, client]);
+  const projectReady = !!info.data && readyFor === path;
   useEffect(() => {
     setToastHandler(setToast);
   }, []);
@@ -214,7 +229,7 @@ export default function App() {
           <div className="screen-body">
             {screens.map((screen) => (
               <div
-                key={screen}
+                key={screen + (standalone.has(screen) ? "" : ":" + readyFor)}
                 hidden={s.screen !== screen}
                 className="screen-slot"
               >
@@ -223,7 +238,7 @@ export default function App() {
                   <Start />
                 ) : screen === "Waypoints" ? (
                   <Waypoints />
-                ) : info.data ? (
+                ) : projectReady ? (
                   screen === "Review" ? (
                     <Review />
                   ) : screen === "Treatments" ? (
@@ -237,6 +252,8 @@ export default function App() {
                   ) : (
                     <Project />
                   )
+                ) : info.data ? (
+                  <Empty>Opening project…</Empty>
                 ) : (
                   <Empty>Open a project to begin.</Empty>
                 )}

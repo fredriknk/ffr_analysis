@@ -45,7 +45,8 @@ export function Review() {
     [offsetGas, setOffsetGas] = useState<"all" | "N2Oall" | "CO2" | "N2O">(
       "all",
     ),
-    [editGas, setEditGas] = useState<Gas>("N2O");
+    [editGas, setEditGas] = useState<Gas>("N2O"),
+    [modeInfo, setModeInfo] = useState(false);
   const layout = useQuery({
       queryKey: ["layout"],
       enabled: s.screen === "Review",
@@ -76,10 +77,22 @@ export function Review() {
   useEffect(() => {
     if (data.isSuccess && !initialized.current) {
       initialized.current = true;
-      if (!s.back && !s.reviewIds && filtered.length)
-        s.set({ selected: filtered[0].id });
+      if (!s.back && !s.reviewIds && filtered.length) {
+        // Opening a project resumes at the flux last viewed in it.
+        const last = lastViewed(s.projectPath);
+        s.set({
+          selected:
+            last !== null && data.data.rows.some((r) => r.id === last)
+              ? last
+              : filtered[0].id,
+        });
+      }
     }
-  }, [data.isSuccess, filtered, s]);
+  }, [data.isSuccess, data.data, filtered, s]);
+  useEffect(() => {
+    if (initialized.current && detail.data?.flux.id === s.selected)
+      rememberViewed(s.projectPath, s.selected);
+  }, [s.projectPath, s.selected, detail.data]);
   useEffect(() => {
     if (filtered.some((r) => r.id === s.selected))
       previousQueue.current = filtered.map((r) => r.id);
@@ -150,10 +163,10 @@ export function Review() {
         void save().then(() =>
           action(() => (key === "z" ? api.undo() : api.redo())),
         );
-      } else if (key === "arrowright") {
+      } else if (key === "arrowright" || key === "arrowdown") {
         e.preventDefault();
         step(1);
-      } else if (key === "arrowleft") {
+      } else if (key === "arrowleft" || key === "arrowup") {
         e.preventDefault();
         step(-1);
       } else if (key === "x" && d)
@@ -348,14 +361,44 @@ export function Review() {
     const r = d?.regressions.find((r) => r.gas === gas),
       robust = d?.robust?.find((r) => r.gas === gas),
       value = flux?.[gas + "_robustFlux"] ?? robust?.flux,
-      impact = flux?.[gas + "_impact"];
+      impact = flux?.[gas + "_impact"],
+      gasExcluded = flux?.[gas + "_excluded"] === true,
+      dropout = findings.some(
+        (f) => f.code === "zero_readings" && f.gas === gas,
+      );
     return (
-      <section className="compact-result" key={gas}>
+      <section
+        className={"compact-result" + (gasExcluded ? " gas-excluded" : "")}
+        key={gas}
+      >
         <div>
           <strong>{gas}</strong>
           <b>{significant(r?.flux)}</b>
           <small>{unit(r?.fluxUnit)}</small>
         </div>
+        {(gasExcluded || dropout) && (
+          <div className="gas-exclusion">
+            <span>
+              {gasExcluded
+                ? gas +
+                  " excluded" +
+                  (dropout ? " · instrument dropout" : "") +
+                  " · not in summaries"
+                : gas + " included despite the dropout"}
+            </span>
+            <button
+              onClick={() =>
+                void action(() =>
+                  api.setFluxFlags([active], {
+                    gasExcluded: { [gas]: !gasExcluded },
+                  }),
+                )
+              }
+            >
+              {gasExcluded ? "Include " + gas : "Exclude " + gas}
+            </button>
+          </div>
+        )}
         <div className="result-robust">
           <span>
             Robust <strong>{significant(value)}</strong>
@@ -474,7 +517,29 @@ export function Review() {
             <div className="trace-toolbar">
               <span className="dot left" />
               Left <span className="dot right" />
-              Right <span className="muted">Dashed: robust fit</span>
+              Right
+              <span
+                className="fit-key"
+                title={
+                  o.fit === "robust"
+                    ? "Reported flux: the robust refit. It drops points whose residual is over 4 MAD (two passes) and 3 s more at each valve-segment edge, and uses the estimated valve timing."
+                    : "Reported flux: ordinary least squares over the shaded points (legacy method)."
+                }
+              >
+                <i className="key-line solid" />
+                {o.fit === "robust"
+                  ? "Robust fit (reported)"
+                  : "Linear fit (reported)"}
+              </span>
+              {o.fit !== "robust" && (
+                <span
+                  className="fit-key"
+                  title="Diagnostic refit, not reported: drops residuals over 4 MAD and 3 s more at each segment edge, with the estimated valve timing. Impact is how far it moves the flux. Choose Fit: Robust in Analysis options to report it."
+                >
+                  <i className="key-line dashed" />
+                  Robust fit (check)
+                </span>
+              )}
               <details className="trace-gas-menu">
                 <summary>Traces: {traces.join(" + ")}</summary>
                 <div className="filter-popover">
@@ -546,8 +611,8 @@ export function Review() {
               </button>
               {hint && (
                 <span className="shortcut-strip">
-                  ←/→ step · X exclude · A review · R reset · S sibling · G go
-                  to · Ctrl Z/Y
+                  ←/→ or ↑/↓ step · X exclude · A review · R reset · S sibling ·
+                  G go to · Ctrl Z/Y
                   <button
                     aria-label="Dismiss shortcut hints"
                     onClick={() => {
@@ -594,52 +659,31 @@ export function Review() {
               </h3>
               {result("N2O")}
               {result("CO2")}
-              <details className="inspector-popup">
+              <details className="inspector-disclosure">
                 <summary>Other gases</summary>
-                <div className="filter-popover">
+                <div>
                   {gasNames
                     .filter((g) => !["N2O", "CO2"].includes(g))
                     .map(result)}
                 </div>
               </details>
             </section>
-            <section className="compact-findings">
-              <h3>Findings · {findings.length}</h3>
-              {findings.length ? (
-                findings.slice(0, 2).map((f, i) => (
-                  <p
-                    key={i}
-                    className={"finding-sentence " + f.severity}
-                    title={f.message}
-                  >
-                    <b>
-                      {f.gas ? f.gas + " · " : ""}
-                      {definition(f.code)}
-                    </b>{" "}
-                    {f.message}
-                  </p>
-                ))
-              ) : (
-                <p className="muted">No diagnostic findings.</p>
-              )}
-              {findings.length > 2 && (
-                <details className="inspector-popup">
-                  <summary>All {findings.length} findings</summary>
-                  <div className="filter-popover">
-                    {findings.map((f, i) => (
-                      <p key={i} className={"finding-sentence " + f.severity}>
-                        <b>{definition(f.code)}</b> {f.message}
-                      </p>
-                    ))}
-                  </div>
-                </details>
-              )}
-            </section>
             <section className="compact-options">
               <h3>Analysis options</h3>
               <div className="options-grid">
                 <label>
-                  Mode
+                  <span className="label-row">
+                    Window
+                    <button
+                      type="button"
+                      className="info-toggle"
+                      aria-label="About the window modes"
+                      aria-expanded={modeInfo}
+                      onClick={() => setModeInfo(!modeInfo)}
+                    >
+                      ⓘ
+                    </button>
+                  </span>
                   <select
                     aria-label="Regression mode"
                     value={o.mode}
@@ -653,6 +697,24 @@ export function Review() {
                     <option value="fixed">Fixed</option>
                     <option value="auto">Auto</option>
                     <option value="manual">Manual slope</option>
+                  </select>
+                </label>
+                <label>
+                  Fit
+                  <select
+                    aria-label="Fit method"
+                    value={o.fit ?? "ols"}
+                    disabled={o.mode === "manual"}
+                    title="Which fit gives the reported N₂O and CO₂ flux. Other gases always use least squares."
+                    onChange={(e) =>
+                      commit({
+                        ...o,
+                        fit: e.target.value as "ols" | "robust",
+                      })
+                    }
+                  >
+                    <option value="ols">Linear</option>
+                    <option value="robust">Robust</option>
                   </select>
                 </label>
                 {(["start", "stop", "cutBeginnings", "cutEnds"] as const).map(
@@ -696,6 +758,7 @@ export function Review() {
                   Reset <kbd>R</kbd>
                 </button>
               </div>
+              {modeInfo && <ModeInfo onOpenDefaults={() => s.nav("Project")} />}
               {o.mode === "manual" && (
                 <label>
                   Slope
@@ -711,21 +774,53 @@ export function Review() {
                 </label>
               )}
               {o.mode === "auto" && (
-                <label>
-                  Interval · s
-                  <input
-                    type="number"
-                    value={o.interval}
-                    onChange={(e) =>
-                      changePreview({ ...o, interval: Number(e.target.value) })
-                    }
-                    onBlur={() => commit(o)}
-                  />
-                </label>
+                <div className="options-grid">
+                  <label>
+                    Interval · s
+                    <input
+                      aria-label="Auto interval seconds"
+                      type="number"
+                      value={o.interval}
+                      onChange={(e) =>
+                        changePreview({
+                          ...o,
+                          interval: Number(e.target.value),
+                        })
+                      }
+                      onBlur={() => commit(o)}
+                    />
+                  </label>
+                  <label>
+                    Criterion
+                    <select
+                      aria-label="Auto criterion"
+                      value={o.crit}
+                      onChange={(e) =>
+                        commit({
+                          ...o,
+                          crit: e.target.value as AnalysisOptions["crit"],
+                        })
+                      }
+                    >
+                      <option value="steepest">Steepest</option>
+                      <option value="mse">Lowest MSE</option>
+                    </select>
+                  </label>
+                  <label className="check">
+                    <input
+                      type="checkbox"
+                      checked={o.co2Guides}
+                      onChange={(e) =>
+                        commit({ ...o, co2Guides: e.target.checked })
+                      }
+                    />
+                    CO₂ guides
+                  </label>
+                </div>
               )}
-              <details className="inspector-popup">
+              <details className="inspector-disclosure">
                 <summary>Per-gas overrides</summary>
-                <div className="filter-popover">
+                <div>
                   <select
                     aria-label="Override gas"
                     value={editGas}
@@ -870,9 +965,9 @@ export function Review() {
                   <kbd>S</kbd>
                 </button>
               )}
-              <details className="inspector-popup">
+              <details className="inspector-disclosure">
                 <summary>Plot assignment & note</summary>
-                <div className="filter-popover">
+                <div>
                   <Status loading={layout.isLoading} error={layout.error} />
                   <select
                     aria-label="Plot assignment"
@@ -906,9 +1001,88 @@ export function Review() {
                 </div>
               </details>
             </section>
+            <section className="compact-findings">
+              <h3>Findings · {findings.length}</h3>
+              <div className="findings-scroll">
+                {findings.length ? (
+                  findings.slice(0, 2).map((f, i) => (
+                    <p
+                      key={i}
+                      className={"finding-sentence " + f.severity}
+                      title={f.message}
+                    >
+                      <b>
+                        {f.gas ? f.gas + " · " : ""}
+                        {definition(f.code)}
+                      </b>{" "}
+                      {f.message}
+                    </p>
+                  ))
+                ) : (
+                  <p className="muted">No diagnostic findings.</p>
+                )}
+                {findings.length > 2 && (
+                  <details className="inspector-disclosure">
+                    <summary>All {findings.length} findings</summary>
+                    {findings.slice(2).map((f, i) => (
+                      <p
+                        key={i}
+                        className={"finding-sentence open " + f.severity}
+                      >
+                        <b>
+                          {f.gas ? f.gas + " · " : ""}
+                          {definition(f.code)}
+                        </b>{" "}
+                        {f.message}
+                      </p>
+                    ))}
+                  </details>
+                )}
+              </div>
+            </section>
           </>
         )}
       </aside>
+    </div>
+  );
+}
+/** The flux last viewed in a project, kept per project file. */
+function lastViewed(path: string) {
+  const v = Number(localStorage.getItem("ffr-last-flux:" + path));
+  return path && Number.isFinite(v) && v > 0 ? v : null;
+}
+function rememberViewed(path: string, id: number) {
+  if (path) localStorage.setItem("ffr-last-flux:" + path, String(id));
+}
+/** What the window modes do; opens in place under the options. */
+function ModeInfo({ onOpenDefaults }: { onOpenDefaults: () => void }) {
+  return (
+    <div className="mode-info">
+      <p>
+        <b>Fixed</b> fits every point of this chamber between Start and Stop,
+        after Cut begin/end at each valve switch (the shaded bands).
+      </p>
+      <p>
+        <b>Auto</b> searches between Start and Stop for the best window of{" "}
+        <i>Interval</i> seconds: <i>Steepest</i> takes the steepest slope
+        (legacy default), <i>Lowest MSE</i> the best-fitting window. With{" "}
+        <i>CO₂ guides</i>, N₂O and the other gases reuse the window found for
+        CO₂. Auto changes only the window, never the cuts or valve timing.
+      </p>
+      <p>
+        <b>Manual slope</b> reports a slope you type, without a fit.
+      </p>
+      <p>
+        <b>Fit</b>: <i>Linear</i> is ordinary least squares, the legacy method;{" "}
+        <i>Robust</i> reports the robust refit (dashed line) for N₂O and CO₂.
+      </p>
+      <p>
+        Fluxes use the project defaults until you change them here, for this
+        flux only.
+      </p>
+      <button type="button" onClick={onOpenDefaults}>
+        Project analysis defaults →
+      </button>
     </div>
   );
 }

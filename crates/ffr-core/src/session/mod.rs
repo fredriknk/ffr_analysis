@@ -45,6 +45,26 @@ impl Session {
             .ok_or_else(|| Error::Invalid("no project open".into()))
     }
 }
+/// Version of the stored per-flux analysis. Opening a project analysed by an older
+/// version recomputes every flux once (results, findings, derived columns).
+pub(crate) const ANALYSIS_VERSION: i64 = 2;
+/// Sets `<gas>_excluded` for every gas: the user's choice in `gasExcluded`
+/// (`{gas: bool}`) when given, else whether a dropout excluded it automatically
+/// (`autoExcludedGases`). Whole-flux `excluded` is separate and wins everywhere.
+pub(crate) fn apply_gas_exclusion(row: &mut FluxRow) {
+    let auto: Vec<String> = row
+        .get("autoExcludedGases")
+        .and_then(|v| serde_json::from_value(v.clone()).ok())
+        .unwrap_or_default();
+    let choice = row.get("gasExcluded").cloned().unwrap_or(Value::Null);
+    for gas in regression::GASES {
+        let excluded = choice
+            .get(gas)
+            .and_then(Value::as_bool)
+            .unwrap_or_else(|| auto.iter().any(|g| g == gas));
+        row.insert(format!("{gas}_excluded"), json!(excluded));
+    }
+}
 pub(crate) fn interpolate(p: &[(i64, f64)], time: i64) -> Option<f64> {
     if p.is_empty() {
         return None;

@@ -2,11 +2,13 @@ use super::*;
 
 impl Session {
     pub(super) fn summary_value(&self, q: SummaryQuery) -> Result<Value> {
+        let gas_excluded = format!("{}_excluded", q.gas);
         let rows: Vec<_> = self
             .rows()?
             .into_iter()
             .filter(|r| {
                 r["excluded"] != true
+                    && r.get(&gas_excluded) != Some(&Value::Bool(true))
                     && r["time"].as_i64().is_some_and(|t| {
                         q.from.is_none_or(|f| t >= f) && q.to.is_none_or(|f| t <= f)
                     })

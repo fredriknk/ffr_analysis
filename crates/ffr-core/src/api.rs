@@ -27,6 +27,10 @@ pub struct AnalysisOptions {
     pub cut_beginnings: f64,
     pub cut_ends: f64,
     pub valve_offset: f64,
+    /// Which fit gives the reported flux: `ols` (ordinary least squares over the
+    /// window, legacy) or `robust` (the diagnostic robust refit, N2O and CO2 only).
+    #[serde(skip_serializing_if = "is_ols")]
+    pub fit: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub slope: Option<f64>,
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
@@ -44,12 +48,19 @@ impl Default for AnalysisOptions {
             cut_beginnings: 4.,
             cut_ends: 3.,
             valve_offset: 0.,
+            fit: "ols".into(),
             slope: None,
             per_gas: BTreeMap::new(),
         }
     }
 }
+fn is_ols(fit: &str) -> bool {
+    fit == "ols"
+}
 impl AnalysisOptions {
+    pub fn robust(&self) -> bool {
+        self.fit == "robust"
+    }
     pub fn for_gas(&self, gas: &str) -> Self {
         let mut o = self.clone();
         if let Some(v) = self.per_gas.get(gas) {
@@ -84,6 +95,7 @@ impl AnalysisOptions {
             || !self.interval.is_finite()
             || self.interval <= 0.
             || !["steepest", "mse"].contains(&self.crit.as_str())
+            || !["ols", "robust"].contains(&self.fit.as_str())
             || (self.mode == "manual" && self.slope.is_none())
             || self.slope.is_some_and(|v| !v.is_finite())
         {

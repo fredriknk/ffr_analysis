@@ -176,7 +176,7 @@ export function findings(
     add(
       "legacy_qc",
       "info",
-      "The legacy N₂O quality check requests a closer look.",
+      "Check fit. The fit explains little of the N₂O trace. Informational only (legacy check).",
       n?.rsq,
       "N2O",
     );

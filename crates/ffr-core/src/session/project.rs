@@ -36,6 +36,10 @@ original INTEGER);
             "INSERT INTO meta VALUES ('layout',?1)",
             [serde_json::to_string(&StoredLayout::default())?],
         )?;
+        db.execute(
+            "INSERT INTO meta VALUES ('analysis_version',?1)",
+            [ANALYSIS_VERSION.to_string()],
+        )?;
         self.lag_cache.borrow_mut().clear();
         self.series_cache.borrow_mut().clear();
         self.values_cache.borrow_mut().clear();
@@ -107,6 +111,19 @@ original INTEGER);
             self.recompute_all(|_| {})?;
             self.db()?.execute_batch("PRAGMA user_version=3;")?;
             tx.commit()?;
+        }
+        let analysed: Option<String> = self
+            .db()?
+            .query_row(
+                "SELECT value FROM meta WHERE key='analysis_version'",
+                [],
+                |r| r.get(0),
+            )
+            .optional()?;
+        if analysed.and_then(|v| v.parse::<i64>().ok()).unwrap_or(1) < ANALYSIS_VERSION {
+            // Same file format; the stored results predate checks such as
+            // instrument dropouts, so refresh them once.
+            self.recompute_all(|_| {})?;
         }
         let info = self
             .project_info()?

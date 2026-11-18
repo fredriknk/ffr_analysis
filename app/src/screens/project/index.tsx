@@ -214,6 +214,24 @@ export function Project() {
                     </Field>
                   ),
                 )}
+                <Field label="Fit method (N₂O, CO₂)">
+                  <select
+                    aria-label="Default fit method"
+                    value={cfg.defaults.fit ?? "ols"}
+                    onChange={(e) =>
+                      setDraft({
+                        ...cfg,
+                        defaults: {
+                          ...cfg.defaults,
+                          fit: e.target.value as "ols" | "robust",
+                        },
+                      })
+                    }
+                  >
+                    <option value="ols">Least squares (legacy)</option>
+                    <option value="robust">Robust refit</option>
+                  </select>
+                </Field>
                 <Field label="Fallback temperature · °C">
                   <input
                     type="number"

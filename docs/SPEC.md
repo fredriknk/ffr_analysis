@@ -114,6 +114,9 @@ Port `prog/regression.py` and `Regressor._regress1` in `prog/find_regressions.py
 - **Auto window** (`interval`, `crit` = `steepest` | `mse`): `find_best_regression`.
   With `co2_guides`, other gases reuse the window found for CO2.
 - **Manual slope** (`slope` given): no fit.
+- **Fit method** (`fit`, per flux, project default `ols`): `ols` reports the ordinary
+  least-squares fit above (legacy). `robust` reports the robust refit of section 4.9 for
+  N2O and CO2 (same window bounds; other gases stay `ols`).
 - Statistics per regression: slope, intercept, n, mse = SSE/(n−2), r², two-sided p-value
   (Pearson, as `scipy.stats.pearsonr`), min_y, max_y, first_y, start, stop. Also store proper
   standard errors of slope and intercept (the legacy `se_*` formulas are wrong; do not port
@@ -169,7 +172,8 @@ Port the maths of `App.allplot` in `prog/ffr_gui.py` (`getN2Odata`, `run_all_plo
 - per treatment: mean and population SD of its plots' totals; geometric mean and geometric
   SD of positive fluxes; distribution of daily means for a box plot.
 
-Excluded fluxes never contribute. Works for any gas, any date range, and any subset of
+Excluded fluxes never contribute, nor do fluxes whose summarised gas is excluded
+(`<gas>_excluded`, 4.9). Works for any gas, any date range, and any subset of
 sources (robot, manual).
 
 ### 4.8 External data
@@ -187,7 +191,9 @@ Every flux row can be joined with every series (value nearest in time, with a ma
 
 ### 4.9 Diagnostics (review priority, independent of legacy regression)
 
-Diagnostics never change the reported flux or exclude a flux. Findings have
+Diagnostics never change the reported flux or exclude a flux, with one exception:
+an instrument dropout (`zero_readings`) excludes that gas automatically (below).
+Findings have
 `{code, severity: 'info'|'warn'|'bad', gas?, value?, impact?, message}` and are
 recomputed with results. All numeric rule thresholds are `config.diagnostics` fields.
 
@@ -234,7 +240,9 @@ findings remain visible as info chips and in diagnostic summaries.
 | `neighbour_outlier` | Compare non-excluded same-treatment observations within `neighbourDays` (3), falling back to same plot within `neighbourFallbackDays` (10) when fewer than `minNeighbours` (6). Scale asinh by max(raw MAD, floor); transformed MAD is bounded by `neighbourAsinhMadMin` (0.15). Candidate exceeds both `neighbourZ` (3.5) scaled-asinh z and `neighbourRawZ` (8) raw z. Bad if scaled-asinh z exceeds `neighbourBadZ` (10), or flux exceeds `neighbourBadRatio` (10) times neighbours' median absolute flux and `neighbourBadFloor` (5) floors; otherwise warn. |
 | `few_points` | Below `minPoints` (20) or `minWindowS` (60): warn, info for an overridden window. |
 | `valves_irregular` | Not `normalSwitches` (10), repeated/missing sides, or duration differs from `normalSegmentS` (20) by `irregularFraction` (0.5): warn. |
-| `legacy_qc`, `temp_fallback`, `no_plot` | Legacy QC, missing temperature, or unassigned chamber: info. |
+| `zero_readings` | N2O or CO2 analyser returned 0 (or non-finite) for any reading, or sent nothing for over `dropoutGapS` (5) s, among this chamber's points inside start/stop: bad, per gas. The gas is excluded automatically (`autoExcludedGases`); the user's per-gas choice (`gasExcluded`) overrides it and survives recomputes. |
+| `legacy_qc` | The legacy N2O check (shown as "N2O quality check"), with a plain-language reason: "Probably zero slope" is usually a real near-zero flux. Info. |
+| `temp_fallback`, `no_plot` | Missing temperature, or unassigned chamber: info. |
 
 `attention` grows with effective impact and number of findings: bad 70?100,
 warn 30–69, info 1–10. `legacy_qc` alone has attention 0. Reviewed fluxes keep
@@ -269,12 +277,14 @@ owner may refine, but keep these concepts):
   "co2Guides": true,                    // auto mode
   "cutBeginnings": 4, "cutEnds": 3,
   "valveOffset": 0,                     // seconds added to every valve switch time (4.9)
+  "fit": "ols",                         // "ols" | "robust": which fit is reported (4.4)
   "perGas": { "N2O": { "start": 20, "stop": 150 } }   // optional per-gas start, stop,
                                                       // cutBeginnings, cutEnds, valveOffset
 }
 ```
 
-`excluded` is a property of the flux, not an option. Legacy per-file options apply to both
+`excluded` is a property of the flux, not an option; so is the per-gas exclusion
+(`gasExcluded`, 4.9). Legacy per-file options apply to both
 sides of the file.
 
 ## 6. API between UI and core
@@ -345,7 +355,9 @@ field lists may grow, but do not rename.
   ```
 - `previewFlux(fluxId, options) → FluxDetail` — compute without saving (live while dragging)
 - `setFluxOptions(fluxIds, options | null) → FluxRow[]` — `null` resets to defaults
-- `setFluxFlags(fluxIds, { excluded?, reviewed?, note?, plotOverride? }) → FluxRow[]`
+- `setFluxFlags(fluxIds, { excluded?, reviewed?, note?, plotOverride?, gasExcluded? }) → FluxRow[]`
+  — `gasExcluded: {gas: boolean | null}` merges into the flux's per-gas choices (`null`
+  returns that gas to the automatic dropout rule); rows carry `<gas>_excluded`
   — `reviewed`/`note` change nothing else and are not recomputed
 - Edit commands return the edited rows first, then every other row whose diagnostics the
   edit re-scored (baselines, neighbours), so the UI patches its table instead of reloading
@@ -361,7 +373,8 @@ field lists may grow, but do not rename.
 
 Diagnostics in the existing shapes: `FluxTable` gains columns `attention` (number), `diag`
 (string: comma-separated codes, worst first), `valveLagS` (number), `<gas>_n`, and
-`<gas>_resid` (residual SD of the fit), `<gas>_robustFlux`, `<gas>_impact`, `N2O_lagS`;
+`<gas>_resid` (residual SD of the fit), `<gas>_robustFlux`, `<gas>_impact`, `N2O_lagS`,
+`<gas>_excluded` (boolean);
 `FluxDetail` gains `diagnostics: Diagnostic[]`, `valveLagS`,
 `robust: {gas, slope, intercept, start, stop, n, flux}[]`, and each trace gains `fit: (number|null)[]` = fitted value at each used point;
 `ProjectConfig` gains `diagnostics` (thresholds) .
@@ -409,7 +422,7 @@ Screens:
      shown faintly.
    - Right: results (flux, slope, r², p, n, QC flag per gas), context (plot, treatment, air
      temperature, precipitation, position), options (mode, window, cuts), note.
-   - Keyboard: ←/→ previous/next, `X` exclude, `R` reset to defaults, `A` mark reviewed and
+   - Keyboard: ←/→ or ↑/↓ previous/next, `X` exclude, `R` reset to defaults, `A` mark reviewed and
      go next, `Ctrl+Z`/`Ctrl+Y` undo/redo, `G` go to (number or date).
 3. **Treatments** — cumulative totals per treatment (bars with SD), box plot of daily
    means, cumulative curves per plot, time series of individual fluxes, weather strip

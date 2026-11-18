@@ -9,6 +9,11 @@ pub struct RobustFit {
     pub stop: f64,
     pub n: usize,
     pub flux: f64,
+    /// The full refit and the points it used, for `fit: "robust"` (not stored).
+    #[serde(skip)]
+    pub fit: Option<Regression>,
+    #[serde(skip)]
+    pub indices: Vec<usize>,
 }
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -152,10 +157,47 @@ pub fn robust_fits(
                 stop: r.stop,
                 n: f.n,
                 flux: f.slope * conversion(r),
+                fit: Some(f),
+                indices,
             });
         }
     }
     (fits, lags)
+}
+/// With `fit: "robust"`, replaces the N2O and CO2 regressions by their robust
+/// refits (window bounds kept) so the reported flux is the robust one. Returns
+/// the points each replaced fit used. Call after diagnostics, which compare the
+/// ordinary fit with the robust one.
+pub fn apply_fit_method(
+    raw: &Raw,
+    side: u8,
+    o: &AnalysisOptions,
+    results: &mut BTreeMap<String, Regression>,
+    c: &DiagnosticsConfig,
+) -> BTreeMap<String, Vec<usize>> {
+    let mut used = BTreeMap::new();
+    if !o.robust() {
+        return used;
+    }
+    let (fits, _) = robust_fits(raw, side, o, results, c);
+    for robust in fits {
+        let (Some(f), Some(r)) = (robust.fit, results.get_mut(&robust.gas)) else {
+            continue;
+        };
+        let factor = conversion(r);
+        *r = Regression {
+            flux_factor: r.flux_factor,
+            gas: r.gas.clone(),
+            start: r.start,
+            stop: r.stop,
+            flux: f.slope * factor,
+            flux_unit: r.flux_unit.clone(),
+            qc: r.qc.clone(),
+            ..f
+        };
+        used.insert(robust.gas, robust.indices);
+    }
+    used
 }
 pub fn baselines(rows: &[FluxRow], c: &DiagnosticsConfig) -> Baseline {
     let mut out = Baseline::new();
@@ -700,6 +742,8 @@ mod tests {
                     stop: 180.,
                     n: 60,
                     flux: robust_flux,
+                    fit: None,
+                    indices: vec![],
                 }],
                 ..Default::default()
             };
@@ -719,6 +763,8 @@ mod tests {
                 stop: 180.,
                 n: 60,
                 flux: 60.,
+                fit: None,
+                indices: vec![],
             }],
             half_differences: [("CO2".into(), 50.)].into_iter().collect(),
             ..Default::default()

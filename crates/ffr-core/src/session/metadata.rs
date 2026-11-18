@@ -59,6 +59,7 @@ pub(super) fn column_spec(key: &str) -> (String, String) {
                         "n" => "fit points",
                         "rsq" => "r²",
                         "pval" => "p-value",
+                        "excluded" => "excluded (this gas)",
                         _ => suffix,
                     };
                     return (format!("{gas} {label}"), unit.into());

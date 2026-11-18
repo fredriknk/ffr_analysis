@@ -52,6 +52,8 @@ pub struct DiagnosticsConfig {
     pub neighbour_days: f64,
     pub neighbour_fallback_days: f64,
     pub min_neighbours: usize,
+    /// A gap longer than this between readings inside a chamber's window is a dropout.
+    pub dropout_gap_s: f64,
 }
 impl Default for DiagnosticsConfig {
     fn default() -> Self {
@@ -97,6 +99,7 @@ impl Default for DiagnosticsConfig {
             neighbour_days: 3.,
             neighbour_fallback_days: 10.,
             min_neighbours: 6,
+            dropout_gap_s: 5.,
         }
     }
 }
@@ -235,6 +238,99 @@ pub fn decorate(row: &mut FluxRow, findings: &mut [Diagnostic], lag: f64) {
         serde_json::json!(severity_map(findings)),
     );
     row.insert("valveLagS".into(), serde_json::json!(lag));
+}
+/// Plain-language reading of the legacy N2O quality check result.
+pub fn legacy_qc_message(qc: &str) -> String {
+    let why = match qc {
+        "Probably zero slope" => {
+            "No significant slope and a small N2O range, so most likely a real              near-zero flux rather than an error"
+        }
+        "Outliers likely" => {
+            "The N2O range, or the slope relative to the range, is unusually large,              or p is only marginally significant"
+        }
+        "Fails p-test for other reason" => {
+            "No significant slope although the N2O range is not small; check the trace"
+        }
+        "Out of range - possibly zero slope" => {
+            "Concentrations are outside the normal ambient band and the slope is not significant"
+        }
+        "Out of range and negative" => {
+            "Concentrations are outside the normal ambient band and the trace falls"
+        }
+        "Out of range" => "Concentrations are outside the normal ambient band",
+        _ => "Check the trace",
+    };
+    format!("{qc}. {why}. Informational only (legacy check).")
+}
+/// Gases (N2O, CO2) whose analyser returned zeros, or nothing for a while, inside
+/// this chamber's window: an instrument dropout. The gas is excluded
+/// automatically (see `autoExcludedGases`) until the user includes it again.
+pub fn dropouts(
+    raw: &Raw,
+    side: u8,
+    o: &AnalysisOptions,
+    c: &DiagnosticsConfig,
+) -> Vec<Diagnostic> {
+    let mut out = vec![];
+    for gas in ["N2O", "CO2"] {
+        let Some((t, y)) = raw.channels.get(gas) else {
+            continue;
+        };
+        let e = o.for_gas(gas);
+        let (from, to) = if e.mode == "manual" {
+            (f64::NEG_INFINITY, f64::INFINITY)
+        } else {
+            (e.start, e.stop)
+        };
+        let ranges = group_ranges(
+            t,
+            &shifted(raw, e.valve_offset),
+            e.cut_beginnings,
+            e.cut_ends,
+        );
+        let (mut total, mut zeros, mut gap) = (0, 0, 0_f64);
+        for (a, b, _) in ranges.into_iter().filter(|p| p.2 == side) {
+            let mut last: Option<f64> = None;
+            for i in a..b {
+                if t[i] < from || t[i] >= to {
+                    continue;
+                }
+                total += 1;
+                if y[i] == 0. || !y[i].is_finite() {
+                    zeros += 1;
+                } else {
+                    if let Some(p) = last {
+                        gap = gap.max(t[i] - p);
+                    }
+                    last = Some(t[i]);
+                }
+            }
+        }
+        let long_gap = gap > c.dropout_gap_s;
+        if total == 0 || (zeros == 0 && !long_gap) {
+            continue;
+        }
+        let mut what = vec![];
+        if zeros > 0 {
+            what.push(format!("returned 0 for {zeros} of {total} readings"));
+        }
+        if long_gap {
+            what.push(format!("sent no readings for {gap:.0} s"));
+        }
+        out.push(finding(
+            "zero_readings",
+            "bad",
+            Some(gas),
+            zeros as f64,
+            format!(
+                "The {gas} analyser {} in this chamber's window (instrument dropout). \
+                 {gas} is excluded from summaries automatically; include it again if the \
+                 fit is still usable.",
+                what.join(" and ")
+            ),
+        ));
+    }
+    out
 }
 pub fn shifted(raw: &Raw, offset: f64) -> Vec<(f64, u8)> {
     if offset == 0. {
@@ -390,10 +486,11 @@ pub fn analyse(
                 "info",
                 Some("N2O"),
                 r.pval,
-                r.qc.clone(),
+                legacy_qc_message(&r.qc),
             ));
         }
     }
+    d.extend(dropouts(raw, side, o, c));
     let times: Vec<f64> = raw.switches.iter().map(|s| s.0).collect();
     let durations: Vec<f64> = times.windows(2).map(|p| p[1] - p[0]).collect();
     let sides: BTreeSet<u8> = raw.switches.iter().map(|p| p.1).collect();
@@ -574,7 +671,7 @@ pub fn analyse(
         valve_improvement: lag.1,
     }
 }
-pub const RULES: [(&str, &str, &str); 15] = [
+pub const RULES: [(&str, &str, &str); 16] = [
     (
         "noisy",
         "Noisy trace",
@@ -631,9 +728,17 @@ pub const RULES: [(&str, &str, &str); 15] = [
         "The fit has too few points or a short window, informational when its window was overridden.",
     ),
     (
+        "zero_readings",
+        "Instrument dropout",
+        "The analyser returned zeros or stopped reporting inside the chamber's window; \
+         that gas is excluded automatically until you include it again.",
+    ),
+    (
         "legacy_qc",
-        "Legacy N2O QC",
-        "The legacy N2O quality check reports a finding.",
+        "N2O quality check",
+        "The legacy N2O check: 'Probably zero slope' (no significant slope and a small \
+         range; usually a real near-zero flux), 'Outliers likely', 'Out of range' (outside \
+         the ambient band) or 'Fails p-test'. Informational; it never raises attention.",
     ),
     (
         "neighbour_outlier",
@@ -688,6 +793,7 @@ impl DiagnosticsConfig {
             self.neighbour_days,
             self.neighbour_fallback_days,
             self.min_window_s,
+            self.dropout_gap_s,
         ];
         if !self.extra_cut_s.is_finite()
             || self.extra_cut_s < 0.
@@ -990,6 +1096,61 @@ mod tests {
             *y += 0.1;
         }
         assert!(has(&run(&r, &AnalysisOptions::default()), "legacy_qc"));
+    }
+    #[test]
+    fn dropout_readings_flag_only_that_gas() {
+        let mut r = trace(0., false, false, false);
+        assert!(!has(&run(&r, &AnalysisOptions::default()), "zero_readings"));
+        // Zeros inside a left-chamber segment (20..40 s is the right one).
+        for i in 45..50 {
+            r.channels.get_mut("N2O").expect("channel").1[i] = 0.;
+        }
+        let f = run(&r, &AnalysisOptions::default());
+        let d: Vec<_> = f
+            .diagnostics
+            .iter()
+            .filter(|d| d.code == "zero_readings")
+            .collect();
+        assert_eq!(d.len(), 1);
+        assert_eq!(d[0].gas.as_deref(), Some("N2O"));
+        assert_eq!(d[0].severity, "bad");
+        assert_eq!(d[0].value, Some(5.));
+        // Zeros in the other chamber, or outside the window, do not count.
+        let o = AnalysisOptions {
+            stop: 40.,
+            ..Default::default()
+        };
+        assert!(!has(&run(&r, &o), "zero_readings"));
+        // A long silence (readings missing, not zero) also counts.
+        let mut r = trace(0., false, false, false);
+        let (t, y) = r.channels.get_mut("N2O").expect("channel");
+        let keep: Vec<bool> = t.iter().map(|t| !(85. ..95.).contains(t)).collect();
+        let mut k = keep.iter();
+        t.retain(|_| *k.next().unwrap_or(&true));
+        let mut k = keep.iter();
+        y.retain(|_| *k.next().unwrap_or(&true));
+        assert!(has(&run(&r, &AnalysisOptions::default()), "zero_readings"));
+    }
+    #[test]
+    fn robust_fit_method_reports_the_robust_refit() {
+        let r = trace(0., false, false, true);
+        let mut o = AnalysisOptions::default();
+        let c = DiagnosticsConfig::default();
+        let mut results =
+            regression::compute(&r, 1, &json!({}), &regression::legacy_options(&o), 20.)
+                .expect("fit");
+        let ordinary = results["CO2"].clone();
+        assert!(apply_fit_method(&r, 1, &o, &mut results, &c).is_empty());
+        o.fit = "robust".into();
+        o.validate().expect("valid");
+        let used = apply_fit_method(&r, 1, &o, &mut results, &c);
+        let robust = &results["CO2"];
+        assert!(used["CO2"].len() == robust.n && robust.n < ordinary.n);
+        assert!(!used["CO2"].contains(&51), "the spike is dropped");
+        assert_eq!((robust.start, robust.stop), (ordinary.start, ordinary.stop));
+        assert!((robust.flux - robust.slope * conversion(&ordinary)).abs() < 1e-9);
+        o.fit = "steepest".into();
+        assert!(o.validate().is_err());
     }
 }
 #[cfg(test)]

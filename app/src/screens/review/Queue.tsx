@@ -343,6 +343,9 @@ export function QueueList({ rows }: { rows: FluxRow[] }) {
     </div>
   );
 }
+/** The review trace's scheme: blue left chamber, orange right, green fit. */
+const chamberColour = { left: "#0072b2", right: "#d55e00" },
+  fitColour = "#168b7c";
 export function ContactSheet({
   rows,
   selected,
@@ -516,7 +519,8 @@ export function ContactSheet({
                             cx={px(t)}
                             cy={py(thumb.y[k])}
                             r={thumb.used[k] ? 1.9 : 1.2}
-                            fill={thumb.used[k] ? "var(--accent)" : "#91a0aa"}
+                            fill={chamberColour[r.side]}
+                            opacity={thumb.used[k] ? 1 : 0.35}
                           />
                         ))}
                         {!!thumb?.t.length && (
@@ -527,7 +531,7 @@ export function ContactSheet({
                             y2={py(
                               thumb.intercept + thumb.slope * thumb.t.at(-1)!,
                             )}
-                            stroke="var(--accent)"
+                            stroke={fitColour}
                             strokeWidth="1.5"
                           />
                         )}

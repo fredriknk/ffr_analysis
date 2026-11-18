@@ -163,6 +163,7 @@ export function summarize(
   const valid = rows.filter(
     (r) =>
       !r.excluded &&
+      r[q.gas + "_excluded"] !== true &&
       typeof r[q.gas + "_flux"] === "number" &&
       Number.isFinite(r[q.gas + "_flux"]) &&
       q.sources.includes(r.source) &&
