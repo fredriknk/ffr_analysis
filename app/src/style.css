@@ -876,7 +876,7 @@ td {
   gap: 7px;
 }
 .treatment-edit small {
-  grid-column: 2;
+  grid-column: 2 / -1;
 }
 .history-row {
   display: flex;
@@ -1330,8 +1330,9 @@ td {
    appears for operations that take noticeable time. */
 .operation-progress {
   position: fixed;
-  top: 72px;
-  right: 24px;
+  bottom: 45px;
+  left: 50%;
+  transform: translateX(-50%);
   z-index: 40;
   display: flex;
   align-items: center;
@@ -2482,4 +2483,101 @@ button.danger {
 }
 .wp-form .wide {
   grid-column: 1 / -1;
+}
+.plain-fieldset {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+.plain-fieldset:disabled input,
+.plain-fieldset:disabled select {
+  opacity: 0.7;
+}
+.plot-tools {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.plot-select-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.plot-select-head h3 {
+  flex: 1;
+}
+.plot-select-head button {
+  padding: 3px 8px;
+  font-size: 11px;
+}
+.corner-pick {
+  display: grid;
+  grid-template-columns: auto auto;
+  align-items: center;
+  gap: 4px 10px;
+  margin: 8px 0;
+}
+.corner-pick > div {
+  display: grid;
+  grid-template-columns: 28px 28px;
+  gap: 3px;
+}
+.corner-pick > div button {
+  padding: 2px 0;
+  font-size: 14px;
+  line-height: 1.2;
+}
+.corner-pick > span:last-child {
+  grid-column: 1 / -1;
+}
+.corner-pick button.on,
+.plot-map-toolbar button.on {
+  background: var(--accent, #1f8a70);
+  border-color: var(--accent, #1f8a70);
+  color: #fff;
+}
+.lock-toggle {
+  font-weight: 600;
+}
+.lock-toggle.unlocked {
+  background: #fff4e0;
+  border-color: #d9912b;
+  color: #8a5300;
+}
+[data-theme="dark"] .lock-toggle.unlocked {
+  background: #3a2a10;
+  border-color: #d9912b;
+  color: #ffcf8a;
+}
+.unlock-banner {
+  margin: 0 0 14px;
+  padding: 9px 14px;
+  border: 1px solid #d9912b;
+  border-radius: 6px;
+  background: #fff8ec;
+  color: #6b4300;
+  font-size: 12px;
+}
+[data-theme="dark"] .unlock-banner {
+  background: #2b2111;
+  color: #ffd9a0;
+}
+.treatment-edit {
+  grid-template-columns: 34px 1fr 26px;
+}
+.icon-button {
+  padding: 0;
+  width: 26px;
+  font-size: 15px;
+  line-height: 1;
+}
+.wp-form label.check {
+  flex-direction: row;
+  align-items: center;
+  align-self: end;
+  gap: 6px;
+  padding-bottom: 6px;
+  font-size: 11px;
+  color: var(--text);
 }

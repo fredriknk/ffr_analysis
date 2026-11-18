@@ -6,6 +6,7 @@ import {
   plotSize,
   renumberPlots,
   reshapePlots,
+  type Numbering,
 } from "./plotTools";
 
 /** A 3 × 2 grid of 4 × 6 m plots rotated by `turn`, first edge along the rows. */
@@ -66,21 +67,39 @@ describe("project plot tools", () => {
     });
     expect(plotSize(out[0].polygon!)[0]).toBeCloseTo(4, 9);
   });
-  it("numbers plots row by row or column by column", () => {
+  it("numbers plots from any corner, by rows or columns, optionally snaking", () => {
+    // On the map: ids 4 5 6 are the top row, 1 2 3 the bottom row, left to right.
     const plots = grid(0.4).reverse(),
       ids = new Set(plots.map((p) => p.id)),
-      label = (ps: Plot[]) =>
-        [...ps].sort((a, b) => a.id - b.id).map((p) => p.label);
-    // Rows run along the first edge; the top row (largest v) comes first.
-    expect(label(renumberPlots(plots, ids, "P", 1, "along"))).toEqual([
-      "P4",
-      "P5",
+      label = (o: Partial<Numbering>) =>
+        renumberPlots(plots, ids, {
+          prefix: "P",
+          start: 1,
+          corner: "topLeft",
+          by: "rows",
+          snake: false,
+          ...o,
+        })
+          .sort((a, b) => a.id - b.id)
+          .map((p) => p.label);
+    expect(label({})).toEqual(["P4", "P5", "P6", "P1", "P2", "P3"]);
+    expect(label({ by: "columns", corner: "topRight" })).toEqual([
       "P6",
+      "P4",
+      "P2",
+      "P5",
+      "P3",
+      "P1",
+    ]);
+    expect(label({ corner: "bottomLeft", snake: true })).toEqual([
       "P1",
       "P2",
       "P3",
+      "P6",
+      "P5",
+      "P4",
     ]);
-    expect(label(renumberPlots(plots, ids, "B", 10, "list"))).toEqual([
+    expect(label({ by: "list", prefix: "B", start: 10 })).toEqual([
       "B15",
       "B14",
       "B13",

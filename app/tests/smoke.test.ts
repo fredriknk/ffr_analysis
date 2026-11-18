@@ -353,6 +353,62 @@ test("new project from a waypoint list", async ({ page }) => {
     .click();
   await expect(page.locator(".map-plot")).toHaveCount(36);
   await expect(page.locator(".plot-label", { hasText: /^P1$/ })).toHaveCount(1);
+  // Locked by default: plots can be selected but not edited.
+  const plotsOnMap = page.locator(".map-plot");
+  await plotsOnMap.nth(2).click();
+  await expect(page.getByLabel("Selected plot label")).toBeDisabled();
+  // Clicking empty map clears the selection.
+  const canvas = page.locator(".plot-map-canvas");
+  const area = (await canvas.boundingBox())!;
+  await page.mouse.click(area.x + 15, area.y + area.height - 60);
+  await expect(page.getByText("No plot selected")).toBeVisible();
+  await page.getByRole("button", { name: /Unlock to edit/ }).click();
+  await expect(page.locator(".unlock-banner")).toBeVisible();
+  // Shift-drag selects every plot inside the box.
+  await canvas.scrollIntoViewIfNeeded();
+  const view = (await canvas.boundingBox())!;
+  await page.keyboard.down("Shift");
+  await page.mouse.move(view.x + view.width - 5, view.y + 5);
+  await page.mouse.down();
+  await page.mouse.move(view.x + 5, view.y + view.height - 5, {
+    steps: 6,
+  });
+  await page.mouse.up();
+  await page.keyboard.up("Shift");
+  await expect(page.getByText("36 plots selected")).toBeVisible();
+  // A plain click on one selected plot keeps only that one.
+  await plotsOnMap.nth(5).click();
+  await expect(page.getByLabel("Selected plot label")).toBeEnabled();
+  await page.getByRole("button", { name: "All", exact: true }).click();
+  // Number from the top right, column by column.
+  await page.getByLabel("Plot numbering direction").selectOption("columns");
+  await page.getByRole("button", { name: "Start top right" }).click();
+  await page.getByRole("button", { name: "Rename 36 selected plots" }).click();
+  const labels = await page.locator(".plot-label").evaluateAll((ts) =>
+    ts.map((t) => {
+      const r = t.getBoundingClientRect();
+      return { text: t.textContent, x: r.x + r.width / 2, y: r.y };
+    }),
+  );
+  const at = (text: string) => labels.find((l) => l.text === text)!;
+  // P1 is the top-right plot, P2 below it, P7 starts the next column left.
+  expect(at("P1").y).toBeLessThanOrEqual(Math.min(...labels.map((l) => l.y)));
+  expect(at("P2").y).toBeGreaterThan(at("P1").y);
+  expect(at("P7").x).toBeLessThan(at("P1").x - 20);
+  await page.getByRole("button", { name: "Add treatment" }).click();
+  await expect(page.getByLabel("Treatment 2", { exact: true })).toBeVisible();
+  await page
+    .locator(".plot-map-dirty")
+    .getByRole("button", { name: "Save" })
+    .click();
+  await expect(page.locator(".plot-map-dirty")).toHaveCount(0);
+  await page.getByRole("button", { name: /Unlocked/ }).click();
+  await expect(
+    page.getByRole("button", { name: "Add treatment" }),
+  ).toBeDisabled();
+  await page
+    .locator(".page")
+    .screenshot({ path: "test-results/project-lock.png" });
   await page.getByRole("button", { name: "Edit route" }).click();
   await expect(
     page.getByRole("button", { name: "Use as project layout…" }),

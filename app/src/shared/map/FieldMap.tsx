@@ -60,6 +60,8 @@ type Props = {
   onPointerDown?: (p: MapPointer) => boolean | void;
   onPointerMove?: (p: MapPointer) => void;
   onPointerUp?: (p: MapPointer) => void;
+  /** A press that was not handled and did not pan (a click on empty map). */
+  onBackgroundClick?: (p: MapPointer) => void;
   cursor?: string;
   label: string;
   className?: string;
@@ -87,6 +89,7 @@ export const FieldMap = forwardRef<FieldMapHandle, Props>(function FieldMap(
     onPointerDown,
     onPointerMove,
     onPointerUp,
+    onBackgroundClick,
     cursor,
     label,
     className,
@@ -292,7 +295,16 @@ export const FieldMap = forwardRef<FieldMapHandle, Props>(function FieldMap(
         onPointerUp={(e) => {
           e.currentTarget.releasePointerCapture(e.pointerId);
           if (pan.current) {
+            const still =
+              Math.hypot(
+                e.clientX - pan.current.sx,
+                e.clientY - pan.current.sy,
+              ) < 4;
             pan.current = null;
+            if (still && e.button === 0) {
+              const p = pointer(e);
+              if (p) onBackgroundClick?.(p);
+            }
             return;
           }
           const p = pointer(e);

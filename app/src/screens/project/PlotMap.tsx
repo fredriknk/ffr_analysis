@@ -17,6 +17,8 @@ import {
   positioned,
   renumberPlots,
   reshapePlots,
+  type Corner,
+  type Numbering,
   type PlotShape,
   type Shape,
 } from "./plotTools";
@@ -27,6 +29,30 @@ const count = (selected: number, all: number) =>
     ? selected + " selected plot" + (selected === 1 ? "" : "s")
     : "all " + all + " plots";
 
+const cornerName = (c: Corner) => c.replace(/([A-Z])/, " $1").toLowerCase();
+/** Plain-language numbering: "Starts top right, goes down, next column to
+ *  the left." */
+function describe(o: Numbering) {
+  const top = o.corner.startsWith("top"),
+    left = o.corner.endsWith("Left"),
+    vertical = top ? "down" : "up",
+    sideways = left ? "right" : "left";
+  const goes = o.by === "rows" ? sideways : vertical,
+    next =
+      o.by === "rows"
+        ? "next row " + vertical
+        : "next column to the " + sideways;
+  return (
+    "Starts " +
+    cornerName(o.corner) +
+    ", goes " +
+    goes +
+    ", " +
+    next +
+    (o.snake ? ", turning back each time." : ".")
+  );
+}
+
 /** The project's field: plots, measured chamber positions and the route. */
 export function PlotMap({
   layout,
@@ -36,7 +62,10 @@ export function PlotMap({
   dirty,
   onSave,
   onDiscard,
+  locked,
 }: {
+  /** Locked projects can be looked at and selected, not edited. */
+  locked: boolean;
   layout: Layout;
   crs: string;
   rows: FluxRow[] | undefined;
@@ -56,7 +85,17 @@ export function PlotMap({
       ids: Set<number>;
       offset: XY;
       moved: boolean;
+      /** Plain click on an already selected plot: select only it on release. */
+      only: number | null;
     } | null>(null),
+    [box, setBox] = useState<{
+      sx: number;
+      sy: number;
+      ex: number;
+      ey: number;
+      add: boolean;
+    } | null>(null),
+    [boxTool, setBoxTool] = useState(false),
     [layers, setLayers] = useState({
       labels: true,
       chambers: true,
@@ -69,10 +108,12 @@ export function PlotMap({
       height: 4,
       angle: null,
     }),
-    [naming, setNaming] = useState({
+    [naming, setNaming] = useState<Numbering>({
       prefix: "P",
       start: 1,
-      order: "along" as "list" | "along" | "across",
+      corner: "topLeft",
+      by: "rows",
+      snake: false,
     });
   const colour = useMemo(
     () => new Map(layout.treatments.map((t) => [t.id, t.colour])),
@@ -122,10 +163,22 @@ export function PlotMap({
     });
 
   function down(p: MapPointer) {
-    const hit = (p.event.target as Element).closest("[data-plot]");
-    if (!hit) return false;
-    const id = Number(hit.getAttribute("data-plot")),
-      additive = p.event.shiftKey || p.event.ctrlKey || p.event.metaKey;
+    const e = p.event,
+      hit = (e.target as Element).closest("[data-plot]"),
+      additive = e.shiftKey || e.ctrlKey || e.metaKey;
+    if (!hit || boxTool) {
+      // Empty map: Shift-drag (or the box tool) draws a selection box.
+      if (!boxTool && !e.shiftKey) return false;
+      setBox({
+        sx: p.sx,
+        sy: p.sy,
+        ex: p.sx,
+        ey: p.sy,
+        add: e.ctrlKey || e.metaKey || (boxTool && e.shiftKey),
+      });
+      return true;
+    }
+    const id = Number(hit.getAttribute("data-plot"));
     let next = selected;
     if (additive) {
       next = new Set(selected);
@@ -141,11 +194,16 @@ export function PlotMap({
         ids: next,
         offset: { x: 0, y: 0 },
         moved: false,
+        only: !additive && next.size > 1 ? id : null,
       });
     return true;
   }
   function move(p: MapPointer) {
-    if (!drag) return;
+    if (box) {
+      setBox({ ...box, ex: p.sx, ey: p.sy });
+      return;
+    }
+    if (!drag || locked) return;
     const moved = drag.moved || Math.hypot(p.sx - drag.sx, p.sy - drag.sy) > 3;
     if (moved)
       setDrag({
@@ -155,6 +213,23 @@ export function PlotMap({
       });
   }
   function up() {
+    if (box) {
+      const view = map.current?.view(),
+        [x0, x1] = [box.sx, box.ex].sort((a, b) => a - b),
+        [y0, y1] = [box.sy, box.ey].sort((a, b) => a - b);
+      if (view && x1 - x0 + y1 - y0 > 4) {
+        const inside = positioned(layout.plots)
+          .filter((q) => {
+            const c = centroid(q.polygon),
+              s = view.toScreen(c.x, c.y);
+            return s.x >= x0 && s.x <= x1 && s.y >= y0 && s.y <= y1;
+          })
+          .map((q) => q.id);
+        setSelected(new Set([...(box.add ? selected : []), ...inside]));
+      } else if (!box.add) setSelected(new Set());
+      setBox(null);
+      return;
+    }
     if (drag?.moved) {
       const { x: dx, y: dy } = drag.offset;
       onChange({
@@ -165,7 +240,7 @@ export function PlotMap({
             : q,
         ),
       });
-    }
+    } else if (drag?.only != null) setSelected(new Set([drag.only]));
     setDrag(null);
   }
   async function loadRoute() {
@@ -255,6 +330,14 @@ export function PlotMap({
                 : k[0].toUpperCase() + k.slice(1)}
             </label>
           ))}
+          <button
+            className={boxTool ? "on" : ""}
+            aria-pressed={boxTool}
+            title="Drag a box to select plots (or Shift-drag on the map). Ctrl adds to the selection."
+            onClick={() => setBoxTool(!boxTool)}
+          >
+            Box select
+          </button>
           {dirty && (
             <span className="plot-map-dirty">
               Unsaved layout changes
@@ -283,10 +366,19 @@ export function PlotMap({
             fit={fit}
             fitKey={layout.plots.length + ":" + placed.length}
             label="Field plot map"
-            cursor={drag?.moved ? "grabbing" : undefined}
+            cursor={
+              drag?.moved
+                ? "grabbing"
+                : boxTool || box
+                  ? "crosshair"
+                  : undefined
+            }
             onPointerDown={down}
             onPointerMove={move}
             onPointerUp={up}
+            onBackgroundClick={(p) => {
+              if (!(p.event.ctrlKey || p.event.metaKey)) setSelected(new Set());
+            }}
           >
             {(view) => (
               <PlotLayer
@@ -298,6 +390,7 @@ export function PlotMap({
                 layers={layers}
                 chambers={chambers}
                 route={route.data?.points ?? null}
+                box={box}
               />
             )}
           </FieldMap>
@@ -313,18 +406,42 @@ export function PlotMap({
               · {lost} fluxes fall outside every plot
             </span>
           )}
-          {" · "}Click a plot to select it, Shift-click to add, drag to move.
+          {" · "}Click a plot to select it, Ctrl-click to add or remove,
+          Shift-drag to box-select, click empty map or Esc to clear
+          {locked ? "." : ", drag to move."}
         </p>
       </div>
       <aside className="plot-map-side">
         <section className="wp-section">
-          <h3>
-            {one
-              ? "Plot " + one.label
-              : sel.length
-                ? sel.length + " plots selected"
-                : "No plot selected"}
-          </h3>
+          <div className="plot-select-head">
+            <h3>
+              {one
+                ? "Plot " + one.label
+                : sel.length
+                  ? sel.length + " plots selected"
+                  : "No plot selected"}
+            </h3>
+            <button
+              disabled={sel.length === layout.plots.length}
+              onClick={() =>
+                setSelected(new Set(layout.plots.map((p) => p.id)))
+              }
+            >
+              All
+            </button>
+            <button
+              disabled={!sel.length}
+              onClick={() => setSelected(new Set())}
+            >
+              None
+            </button>
+          </div>
+          {locked && (
+            <p className="muted small">
+              The project is locked. Unlock it at the top of the page to edit
+              plots.
+            </p>
+          )}
           {!sel.length && (
             <p className="muted small">
               Select plots on the map to name them, set treatment or block, or
@@ -332,7 +449,7 @@ export function PlotMap({
             </p>
           )}
           {sel.length > 0 && (
-            <div className="wp-form">
+            <fieldset className="wp-form plain-fieldset" disabled={locked}>
               {one && (
                 <label>
                   Label
@@ -407,156 +524,192 @@ export function PlotMap({
               >
                 Zoom to selection
               </button>
-            </div>
+            </fieldset>
           )}
         </section>
-        <section className="wp-section">
-          <h3>Plot size</h3>
-          <div className="wp-form">
-            <label>
-              Shape
-              <select
-                aria-label="New plot shape"
-                value={shape.shape}
-                onChange={(e) =>
-                  setShape({ ...shape, shape: e.target.value as Shape })
-                }
-              >
-                <option value="rectangle">Rectangle</option>
-                <option value="square">Square</option>
-                <option value="auto">Auto square (touching)</option>
-              </select>
-            </label>
-            {shape.shape === "square" && (
+        <fieldset className="plain-fieldset plot-tools" disabled={locked}>
+          <section className="wp-section">
+            <h3>Plot size</h3>
+            <div className="wp-form">
               <label>
-                Side · m{" "}
+                Shape
+                <select
+                  aria-label="New plot shape"
+                  value={shape.shape}
+                  onChange={(e) =>
+                    setShape({ ...shape, shape: e.target.value as Shape })
+                  }
+                >
+                  <option value="rectangle">Rectangle</option>
+                  <option value="square">Square</option>
+                  <option value="auto">Auto square (touching)</option>
+                </select>
+              </label>
+              {shape.shape === "square" && (
+                <label>
+                  Side · m{" "}
+                  {num(
+                    shape.size,
+                    (size) => setShape({ ...shape, size }),
+                    "Square side",
+                  )}
+                </label>
+              )}
+              {shape.shape === "rectangle" && (
+                <>
+                  <label>
+                    Width · m{" "}
+                    {num(
+                      shape.width,
+                      (width) => setShape({ ...shape, width }),
+                      "Plot width",
+                    )}
+                  </label>
+                  <label>
+                    Length · m{" "}
+                    {num(
+                      shape.height,
+                      (height) => setShape({ ...shape, height }),
+                      "Plot length",
+                    )}
+                  </label>
+                </>
+              )}
+              <label>
+                Direction · °
+                <input
+                  type="number"
+                  step="0.5"
+                  aria-label="Plot direction degrees"
+                  placeholder="keep current"
+                  value={
+                    shape.angle === null
+                      ? ""
+                      : Math.round(((shape.angle * 180) / Math.PI) * 100) / 100
+                  }
+                  onChange={(e) =>
+                    setShape({
+                      ...shape,
+                      angle:
+                        e.target.value === ""
+                          ? null
+                          : (Number(e.target.value) * Math.PI) / 180,
+                    })
+                  }
+                />
+              </label>
+            </div>
+            <p className="muted small">
+              Width runs along each plot&apos;s first side, length across it.
+              {currentSize && " Selected: " + currentSize + "."}
+            </p>
+            <button
+              disabled={!placed.length}
+              onClick={() =>
+                onChange({
+                  ...layout,
+                  plots: reshapePlots(layout.plots, scope, shape),
+                })
+              }
+            >
+              Resize {count(sel.length, placed.length)}
+            </button>
+          </section>
+          <section className="wp-section">
+            <h3>Names</h3>
+            <div className="wp-form">
+              <label>
+                Prefix
+                <input
+                  aria-label="Plot name prefix"
+                  value={naming.prefix}
+                  onChange={(e) =>
+                    setNaming({ ...naming, prefix: e.target.value })
+                  }
+                />
+              </label>
+              <label>
+                First number{" "}
                 {num(
-                  shape.size,
-                  (size) => setShape({ ...shape, size }),
-                  "Square side",
+                  naming.start,
+                  (start) => setNaming({ ...naming, start }),
+                  "First plot number",
+                  "1",
                 )}
               </label>
-            )}
-            {shape.shape === "rectangle" && (
-              <>
-                <label>
-                  Width · m{" "}
-                  {num(
-                    shape.width,
-                    (width) => setShape({ ...shape, width }),
-                    "Plot width",
-                  )}
-                </label>
-                <label>
-                  Length · m{" "}
-                  {num(
-                    shape.height,
-                    (height) => setShape({ ...shape, height }),
-                    "Plot length",
-                  )}
-                </label>
-              </>
-            )}
-            <label>
-              Direction · °
-              <input
-                type="number"
-                step="0.5"
-                aria-label="Plot direction degrees"
-                placeholder="keep current"
-                value={
-                  shape.angle === null
-                    ? ""
-                    : Math.round(((shape.angle * 180) / Math.PI) * 100) / 100
-                }
-                onChange={(e) =>
-                  setShape({
-                    ...shape,
-                    angle:
-                      e.target.value === ""
-                        ? null
-                        : (Number(e.target.value) * Math.PI) / 180,
-                  })
-                }
-              />
-            </label>
-          </div>
-          <p className="muted small">
-            Width runs along each plot&apos;s first side, length across it.
-            {currentSize && " Selected: " + currentSize + "."}
-          </p>
-          <button
-            disabled={!placed.length}
-            onClick={() =>
-              onChange({
-                ...layout,
-                plots: reshapePlots(layout.plots, scope, shape),
-              })
-            }
-          >
-            Resize {count(sel.length, placed.length)}
-          </button>
-        </section>
-        <section className="wp-section">
-          <h3>Names</h3>
-          <div className="wp-form">
-            <label>
-              Prefix
-              <input
-                aria-label="Plot name prefix"
-                value={naming.prefix}
-                onChange={(e) =>
-                  setNaming({ ...naming, prefix: e.target.value })
-                }
-              />
-            </label>
-            <label>
-              First number{" "}
-              {num(
-                naming.start,
-                (start) => setNaming({ ...naming, start }),
-                "First plot number",
-                "1",
-              )}
-            </label>
-            <label className="wide">
-              Order
-              <select
-                aria-label="Plot numbering order"
-                value={naming.order}
-                onChange={(e) =>
-                  setNaming({
-                    ...naming,
-                    order: e.target.value as typeof naming.order,
-                  })
-                }
+              <label>
+                Fill
+                <select
+                  aria-label="Plot numbering direction"
+                  value={naming.by}
+                  onChange={(e) =>
+                    setNaming({
+                      ...naming,
+                      by: e.target.value as Numbering["by"],
+                    })
+                  }
+                >
+                  <option value="rows">Rows</option>
+                  <option value="columns">Columns</option>
+                  <option value="list">Current order</option>
+                </select>
+              </label>
+              <label className="check">
+                <input
+                  type="checkbox"
+                  checked={naming.snake}
+                  disabled={naming.by === "list"}
+                  onChange={(e) =>
+                    setNaming({ ...naming, snake: e.target.checked })
+                  }
+                />
+                Snake
+              </label>
+            </div>
+            {naming.by !== "list" && (
+              <div
+                className="corner-pick"
+                role="group"
+                aria-label="Number 1 starts in"
               >
-                <option value="along">Row by row, along the field</option>
-                <option value="across">
-                  Column by column, across the field
-                </option>
-                <option value="list">Current plot order</option>
-              </select>
-            </label>
-          </div>
-          <button
-            disabled={!layout.plots.length}
-            onClick={() =>
-              onChange({
-                ...layout,
-                plots: renumberPlots(
-                  layout.plots,
-                  scope,
-                  naming.prefix,
-                  naming.start,
-                  naming.order,
-                ),
-              })
-            }
-          >
-            Rename {count(sel.length, layout.plots.length)}
-          </button>
-        </section>
+                <span className="muted small">Number {naming.start} in</span>
+                <div>
+                  {(
+                    [
+                      ["topLeft", "\u2196"],
+                      ["topRight", "\u2197"],
+                      ["bottomLeft", "\u2199"],
+                      ["bottomRight", "\u2198"],
+                    ] as [Corner, string][]
+                  ).map(([c, arrow]) => (
+                    <button
+                      key={c}
+                      className={naming.corner === c ? "on" : ""}
+                      aria-pressed={naming.corner === c}
+                      aria-label={"Start " + cornerName(c)}
+                      title={"Start " + cornerName(c)}
+                      onClick={() => setNaming({ ...naming, corner: c })}
+                    >
+                      {arrow}
+                    </button>
+                  ))}
+                </div>
+                <span className="muted small">{describe(naming)}</span>
+              </div>
+            )}
+            <button
+              disabled={!layout.plots.length}
+              onClick={() =>
+                onChange({
+                  ...layout,
+                  plots: renumberPlots(layout.plots, scope, naming),
+                })
+              }
+            >
+              Rename {count(sel.length, layout.plots.length)}
+            </button>
+          </section>
+        </fieldset>
       </aside>
     </div>
   );
@@ -571,7 +724,9 @@ function PlotLayer({
   layers,
   chambers,
   route,
+  box,
 }: {
+  box: { sx: number; sy: number; ex: number; ey: number } | null;
   view: MapView;
   layout: Layout;
   colour: Map<number, string>;
@@ -665,6 +820,15 @@ function PlotLayer({
             </text>
           );
         })}
+      {box && (
+        <rect
+          className="selection-box"
+          x={Math.min(box.sx, box.ex)}
+          y={Math.min(box.sy, box.ey)}
+          width={Math.abs(box.ex - box.sx)}
+          height={Math.abs(box.ey - box.sy)}
+        />
+      )}
     </g>
   );
 }
