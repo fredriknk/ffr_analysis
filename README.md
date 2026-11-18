@@ -1,13 +1,9 @@
 # FFR Analyzer 2
+All credit for methodology and the methods in this should go to [Lars Molstad](https://github.com/larsmolstad) as he developed the original [ffr_analysis](https://github.com/larsmolstad/ffr_analysis) program ive based this on.
 
 Desktop program for reviewing gas fluxes measured by the Field Flux Robot: check every
 chamber measurement, find the ones that look wrong, compare treatments over time, bring in
 manual measurements, weather and soil loggers, and export to Excel.
-
-It replaces the Python/Tkinter *FFR analysis program* written by Lars Molstad. The new core
-reproduces that program's regressions and fluxes exactly (checked on the full Capture
-dataset: 7,460 of 7,460 chamber measurements). The old program is kept on the
-[`legacy-python`](../../tree/legacy-python) branch.
 
 ## Install
 
