@@ -363,9 +363,10 @@ export function Review() {
       value = flux?.[gas + "_robustFlux"] ?? robust?.flux,
       impact = flux?.[gas + "_impact"],
       gasExcluded = flux?.[gas + "_excluded"] === true,
-      dropout = findings.some(
+      dropout = findings.find(
         (f) => f.code === "zero_readings" && f.gas === gas,
-      );
+      ),
+      zeros = Number(dropout?.value ?? 0);
     return (
       <section
         className={"compact-result" + (gasExcluded ? " gas-excluded" : "")}
@@ -380,11 +381,12 @@ export function Review() {
           <div className="gas-exclusion">
             <span>
               {gasExcluded
-                ? gas +
-                  " excluded" +
-                  (dropout ? " · instrument dropout" : "") +
-                  " · not in summaries"
-                : gas + " included despite the dropout"}
+                ? gas + " excluded · not in summaries"
+                : "Instrument dropout · " +
+                  (zeros
+                    ? zeros + " zero reading" + (zeros === 1 ? "" : "s")
+                    : "missing readings") +
+                  " left out of the fit"}
             </span>
             <button
               onClick={() =>

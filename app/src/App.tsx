@@ -6,6 +6,7 @@ import { openStartupProject } from "./api/startup";
 import type { Progress } from "./api/types";
 import { Start } from "./screens/start";
 import { Empty, error, setToastHandler, useAction } from "./shared/common";
+import { useRawFolderWatch } from "./shared/hooks/useRawFolderWatch";
 import { useStore, type Screen } from "./store";
 const Data = lazy(() =>
   import("./screens/data").then((m) => ({ default: m.Data })),
@@ -100,6 +101,7 @@ export default function App() {
     setReadyFor(path);
   }, [path, readyFor, client]);
   const projectReady = !!info.data && readyFor === path;
+  useRawFolderWatch(projectReady ? path : null);
   useEffect(() => {
     setToastHandler(setToast);
   }, []);

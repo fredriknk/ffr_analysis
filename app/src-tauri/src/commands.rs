@@ -541,6 +541,9 @@ pub fn handlers() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static
         waypoint_plots,
         apply_waypoint_layout,
         get_route,
+        raw_folder_get,
+        raw_folder_set,
+        raw_folder_scan,
         map_tiles_get,
         map_tiles_set,
         map_tile,
@@ -618,6 +621,21 @@ async fn apply_waypoint_layout(
 ) -> Result<Layout, ApiError> {
     run_task(app, "apply_waypoint_layout", move |s, app| {
         Ok(s.apply_waypoint_layout(args, |p| progress(app, p))?)
+    })
+    .await
+}
+#[tauri::command]
+async fn raw_folder_get(app: AppHandle) -> Result<Option<RawFolder>, ApiError> {
+    run(app, move |s, _| Ok(s.raw_folder_get()?)).await
+}
+#[tauri::command]
+async fn raw_folder_set(app: AppHandle, folder: Option<RawFolder>) -> Result<(), ApiError> {
+    run(app, move |s, _| Ok(s.raw_folder_set(folder)?)).await
+}
+#[tauri::command]
+async fn raw_folder_scan(app: AppHandle) -> Result<FolderReport, ApiError> {
+    run(app, move |s, app| {
+        Ok(s.raw_folder_scan(|p| progress(app, p))?)
     })
     .await
 }

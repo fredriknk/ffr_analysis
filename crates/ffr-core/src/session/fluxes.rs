@@ -381,12 +381,6 @@ impl Session {
             );
             row = rows.remove(0);
             diagnostics = f.remove(0);
-            let dropped: Vec<&str> = diagnostics
-                .iter()
-                .filter(|d| d.code == "zero_readings")
-                .filter_map(|d| d.gas.as_deref())
-                .collect();
-            row.insert("autoExcludedGases".into(), json!(dropped));
             apply_gas_exclusion(&mut row);
         }
         crate::diagnostics::decorate(&mut row, &mut diagnostics, valve_lag);
@@ -736,6 +730,8 @@ impl Session {
             .into_iter()
             .filter(|r| r.2 == side)
             .flat_map(|(a, b, _)| a..b)
+            // Zero readings are dropouts: not fitted and not drawn.
+            .filter(|i| y[*i] != 0.)
             .collect();
             let n = all.len().min(max_points);
             let indices: Vec<usize> = (0..n)

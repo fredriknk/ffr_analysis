@@ -389,6 +389,15 @@ fn multi_file_project(dir: &std::path::Path) -> Session {
 }
 /// With `dropout`, the first file's CO2 analyser returns zeros in a left segment.
 fn project_with_dropout(dir: &std::path::Path, dropout: bool) -> Session {
+    let files = write_robot_files(dir, dropout);
+    let mut s = Session::default();
+    s.project_create(dir.join("multi.ffr").to_str().expect("path"), "Multi")
+        .expect("create");
+    s.import_raw_files(&files, |_| {}).expect("import");
+    s
+}
+/// Eight synthetic robot files (two days, both chambers) written to `dir`.
+fn write_robot_files(dir: &std::path::Path, dropout: bool) -> Vec<String> {
     let mut files = vec![];
     for k in 0..8 {
         let name = format!(
@@ -433,11 +442,7 @@ fn project_with_dropout(dir: &std::path::Path, dropout: bool) -> Session {
         .expect("write");
         files.push(path.to_string_lossy().into_owned());
     }
-    let mut s = Session::default();
-    s.project_create(dir.join("multi.ffr").to_str().expect("path"), "Multi")
-        .expect("create");
-    s.import_raw_files(&files, |_| {}).expect("import");
-    s
+    files
 }
 
 #[test]
@@ -511,24 +516,25 @@ fn incremental_edits_match_a_full_recompute() {
     assert_eq!(before, after);
 }
 
+fn one_plot(polygon: serde_json::Value) -> ffr_core::Layout {
+    ffr_core::Layout {
+        treatments: vec![
+            serde_json::from_value(json!({"id":1,"name":"T","colour":"#000000"}))
+                .expect("treatment"),
+        ],
+        plots: vec![serde_json::from_value(
+            json!({"id":1,"label":"P","treatmentId":1,"polygon":polygon}),
+        )
+        .expect("plot")],
+    }
+}
+
 #[test]
-fn instrument_dropout_excludes_that_gas_until_included() {
+fn instrument_dropout_drops_the_points_not_the_flux() {
     let dir = tempfile::tempdir().expect("tempdir");
     let s = project_with_dropout(dir.path(), true);
-    s.set_layout(
-        ffr_core::Layout {
-            treatments: vec![
-                serde_json::from_value(json!({"id":1,"name":"T","colour":"#000000"}))
-                    .expect("treatment"),
-            ],
-            plots: vec![serde_json::from_value(
-                json!({"id":1,"label":"P","treatmentId":1,"polygon":null}),
-            )
-            .expect("plot")],
-        },
-        |_| {},
-    )
-    .expect("layout");
+    s.set_layout(one_plot(serde_json::Value::Null), |_| {})
+        .expect("layout");
     let all: Vec<i64> = s.list_fluxes().expect("table").data["id"]
         .iter()
         .filter_map(|v| v.as_i64())
@@ -536,21 +542,43 @@ fn instrument_dropout_excludes_that_gas_until_included() {
     s.set_flux_flags(&all, json!({"plotOverride":1}))
         .expect("plot");
     let table = s.list_fluxes().expect("table");
-    let column = |t: &ffr_core::FluxTable, key: &str| t.data[key].clone();
     let flagged: Vec<i64> = table.data["id"]
         .iter()
-        .zip(&column(&table, "CO2_excluded"))
-        .filter(|(_, v)| **v == true)
+        .zip(&table.data["diag"])
+        .filter(|(_, d)| d.as_str().is_some_and(|d| d.contains("zero_readings")))
         .filter_map(|(id, _)| id.as_i64())
         .collect();
     assert_eq!(flagged.len(), 1, "only the left chamber of the first file");
     let id = flagged[0];
     let detail = s.get_flux_detail(id).expect("detail");
-    assert!(detail
+    let finding = detail
         .diagnostics
         .iter()
-        .any(|d| d.code == "zero_readings" && d.gas.as_deref() == Some("CO2")));
-    assert_eq!(detail.flux["excluded"], false, "the flux itself stays in");
+        .find(|d| d.code == "zero_readings")
+        .expect("finding");
+    assert_eq!(
+        (finding.gas.as_deref(), finding.severity.as_str()),
+        (Some("CO2"), "warn")
+    );
+    assert_eq!(detail.flux["excluded"], false);
+    assert_eq!(detail.flux["CO2_excluded"], false, "the gas stays in");
+    // The zero readings are never fitted.
+    let trace = detail
+        .traces
+        .iter()
+        .find(|t| t.gas == "CO2")
+        .expect("trace");
+    let fit = detail
+        .regressions
+        .iter()
+        .find(|r| r.gas == "CO2")
+        .expect("fit");
+    assert!(trace
+        .used
+        .iter()
+        .zip(&trace.y)
+        .all(|(u, y)| !*u || *y != 0.));
+    assert_eq!(trace.used.iter().filter(|u| **u).count(), fit.n);
     let count = |s: &Session| {
         s.treatment_summary(ffr_core::SummaryQuery {
             gas: "CO2".into(),
@@ -566,23 +594,67 @@ fn instrument_dropout_excludes_that_gas_until_included() {
         .sum::<usize>()
     };
     let before = count(&s);
+    // The per-gas button still excludes the gas by hand; it survives a
+    // recompute and undoes.
     let rows = s
-        .set_flux_flags(&[id], json!({"gasExcluded":{"CO2":false}}))
-        .expect("include");
-    assert_eq!(rows[0]["CO2_excluded"], false);
-    assert_eq!(count(&s), before + 1);
-    // The choice survives a recompute; undo restores the automatic exclusion.
+        .set_flux_flags(&[id], json!({"gasExcluded":{"CO2":true}}))
+        .expect("exclude");
+    assert_eq!(rows[0]["CO2_excluded"], true);
+    assert_eq!(count(&s), before - 1);
     s.recompute_all(|_| {}).expect("recompute");
-    assert_eq!(
-        s.get_flux_detail(id).expect("detail").flux["CO2_excluded"],
-        false
-    );
-    s.undo().expect("undo");
     assert_eq!(
         s.get_flux_detail(id).expect("detail").flux["CO2_excluded"],
         true
     );
+    s.undo().expect("undo");
     assert_eq!(count(&s), before);
+}
+
+#[test]
+fn raw_folder_imports_new_files_inside_the_field() {
+    let data = tempfile::tempdir().expect("tempdir");
+    let nested = data.path().join("2022-09");
+    std::fs::create_dir(&nested).expect("subfolder");
+    write_robot_files(&nested, false);
+    std::fs::write(data.path().join("notes.txt"), "not a robot file").expect("write");
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut s = Session::default();
+    s.project_create(dir.path().join("p.ffr").to_str().expect("path"), "Folder")
+        .expect("create");
+    assert!(s.raw_folder_scan(|_| {}).is_err(), "no folder yet");
+    // A plot far from the robot: every file is outside the field.
+    s.set_layout(
+        one_plot(json!([
+            [500., 500.],
+            [510., 500.],
+            [510., 510.],
+            [500., 510.]
+        ])),
+        |_| {},
+    )
+    .expect("layout");
+    s.raw_folder_set(Some(ffr_core::RawFolder {
+        path: data.path().to_string_lossy().into(),
+        ..Default::default()
+    }))
+    .expect("set");
+    let r = s.raw_folder_scan(|_| {}).expect("scan");
+    assert_eq!((r.files, r.outside_field, r.imported), (8, 8, 0));
+    // The left chambers (at 1.2, 4) are inside this plot.
+    s.set_layout(
+        one_plot(json!([[0., 3.], [3., 3.], [3., 5.], [0., 5.]])),
+        |_| {},
+    )
+    .expect("layout");
+    let r = s.raw_folder_scan(|_| {}).expect("scan");
+    assert_eq!((r.files, r.known, r.imported), (8, 0, 8));
+    assert_eq!(s.list_fluxes().expect("table").rows, 16);
+    let r = s.raw_folder_scan(|_| {}).expect("scan");
+    assert_eq!((r.known, r.imported), (8, 0));
+    let stored = s.raw_folder_get().expect("get").expect("folder");
+    assert_eq!(stored.last_report.expect("report").known, 8);
+    s.raw_folder_set(None).expect("forget");
+    assert!(s.raw_folder_get().expect("get").is_none());
 }
 
 #[test]

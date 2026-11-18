@@ -381,6 +381,23 @@ export interface ImportReport {
   skipped: number;
   errors: { path: string; message: string }[];
 }
+/** A folder of robot raw files the project imports new files from. */
+export interface RawFolder {
+  path: string;
+  /** Import only files with a chamber inside one of the project's plots. */
+  fieldOnly: boolean;
+  /** Check automatically while the project is open. */
+  auto: boolean;
+  lastScan?: number | null;
+  lastReport?: FolderReport | null;
+}
+export interface FolderReport {
+  files: number;
+  known: number;
+  outsideField: number;
+  imported: number;
+  errors: { path: string; message: string }[];
+}
 export interface LegacyScan {
   rawDir?: string;
   manualPath?: string;
@@ -481,6 +498,9 @@ export interface FfrApi {
   /** Replaces the project's plots (one undo step), stores the route, recomputes. */
   applyWaypointLayout(args: ApplyWaypointLayoutArgs): Promise<Layout>;
   getRoute(): Promise<StoredRoute | null>;
+  rawFolderGet(): Promise<RawFolder | null>;
+  rawFolderSet(folder: RawFolder | null): Promise<void>;
+  rawFolderScan(): Promise<FolderReport>;
   mapTilesGet(): Promise<MapTiles | null>;
   mapTilesSet(dir: string | null): Promise<MapTiles | null>;
   mapTile(z: number, x: number, y: number): Promise<MapTile | null>;

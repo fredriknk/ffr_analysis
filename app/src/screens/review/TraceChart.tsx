@@ -84,6 +84,7 @@ export function TraceChart({
           [fit.stop, fit.intercept + fit.slope * fit.stop],
         ]
       : [];
+  const zeroReadings = tr.y.filter((y) => y === 0).length;
   const series: object[] = [0, 1, 2].map((s) => ({
     name: s === 0 ? "Cut" : s === 1 ? "Left" : "Right",
     type: "scatter",
@@ -92,7 +93,11 @@ export function TraceChart({
       color: chamberColour[s],
       opacity: s === side ? 1 : 0.3,
     },
-    data: tr.t.flatMap((t, i) => (tr.side[i] === s ? [[t, tr.y[i]]] : [])),
+    // Zero readings are instrument dropouts: never fitted, and hidden so they
+    // do not stretch the concentration axis.
+    data: tr.t.flatMap((t, i) =>
+      tr.side[i] === s && tr.y[i] !== 0 ? [[t, tr.y[i]]] : [],
+    ),
     xAxisIndex: 0,
     yAxisIndex: 0,
   }));
@@ -259,7 +264,16 @@ export function TraceChart({
   return (
     <section className="trace-panel">
       <h3>
-        {gas} <small>{unit(tr.unit)} · residual below</small>
+        {gas}{" "}
+        <small>
+          {unit(tr.unit)} · residual below
+          {zeroReadings > 0 &&
+            " · " +
+              zeroReadings +
+              " zero reading" +
+              (zeroReadings === 1 ? "" : "s") +
+              " hidden"}
+        </small>
         {hasLag && (
           <button
             className="snap-lag"

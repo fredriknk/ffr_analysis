@@ -42,15 +42,13 @@ const names = [
 ];
 const start = Date.UTC(2023, 0, 4, 11),
   end = start + 728 * 86400000;
-/** Gases a dropout excluded automatically, and the user's per-gas choices. */
-const autoExcluded = new Map<number, string[]>(),
-  gasChoices = new Map<number, Record<string, boolean>>();
-/** `<gas>_excluded` from the user's choice, else the automatic dropout rule. */
+/** The user's per-gas exclusion choices. */
+const gasChoices = new Map<number, Record<string, boolean>>();
+/** `<gas>_excluded` from the user's choice (default included). */
 function applyGasExclusion(r: T.FluxRow) {
-  const auto = autoExcluded.get(r.id) ?? [],
-    choice = gasChoices.get(r.id) ?? {};
+  const choice = gasChoices.get(r.id) ?? {};
   for (const g of ["CO2", "N2O", "CO", "H2O", "licor_H2O"])
-    r[g + "_excluded"] = choice[g] ?? auto.includes(g);
+    r[g + "_excluded"] = choice[g] ?? false;
 }
 export function createMock(seed = 42): T.FfrApi {
   let config: T.ProjectConfig = {
@@ -90,6 +88,7 @@ export function createMock(seed = 42): T.FfrApi {
     savedAt: start,
   });
   let route: T.StoredRoute | null = demoRouteStored();
+  let rawFolder: T.RawFolder | null = null;
   let open = false,
     path = "demo.ffr",
     clientId: string | null = null;
@@ -433,8 +432,6 @@ export function createMock(seed = 42): T.FfrApi {
         value: Number(r.N2O_resid),
       });
     const effective = opts.get(r.id) ?? config.defaults;
-    const dropped: string[] = [];
-    autoExcluded.set(r.id, dropped);
     for (const g of ["N2O", "CO2"] as T.Gas[]) {
       const tr = a.traces.find((t) => t.gas === g),
         o = { ...effective, ...effective.perGas?.[g] },
@@ -445,13 +442,12 @@ export function createMock(seed = 42): T.FfrApi {
         ),
         zeros = window.filter((i) => tr.y[i] === 0).length;
       if (!zeros) continue;
-      dropped.push(g);
       a.diagnostics.push({
         code: "zero_readings",
-        severity: "bad",
+        severity: "warn",
         gas: g,
         value: zeros,
-        message: `The ${g} analyser returned 0 for ${zeros} of ${window.length} readings in this chamber's window (instrument dropout). ${g} is excluded from summaries automatically; include it again if the fit is still usable.`,
+        message: `The ${g} analyser returned 0 for ${zeros} of ${window.length} readings in this chamber's window (instrument dropout). Zero readings are left out of the fit and hidden from the trace; check that enough points remain, or exclude ${g} for this flux.`,
       });
     }
     applyGasExclusion(r);
@@ -1394,6 +1390,26 @@ export function createMock(seed = 42): T.FfrApi {
       return structuredClone(layout);
     },
     getRoute: async () => (open && route ? structuredClone(route) : null),
+    rawFolderGet: async () => structuredClone(rawFolder),
+    rawFolderSet: async (folder) => {
+      if (folder && !folder.path.trim())
+        throw { code: "core", message: "choose a folder" };
+      rawFolder = folder ? { ...rawFolder, ...structuredClone(folder) } : null;
+    },
+    rawFolderScan: async () => {
+      if (!rawFolder) throw { code: "core", message: "no raw-data folder set" };
+      // The synthetic folder holds the demo's own files: nothing new.
+      const files = new Set(rows.map((r) => r.measurementId)).size;
+      const report: T.FolderReport = {
+        files: files + 3,
+        known: files,
+        outsideField: rawFolder.fieldOnly ? 3 : 0,
+        imported: 0,
+        errors: [],
+      };
+      rawFolder = { ...rawFolder, lastScan: Date.now(), lastReport: report };
+      return report;
+    },
     mapTilesGet: async () => null,
     mapTilesSet: async (dir) => {
       if (dir)

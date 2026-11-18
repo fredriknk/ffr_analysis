@@ -74,13 +74,6 @@ impl Session {
         // Diagnostics compare the ordinary fit with the robust one; only then
         // does a robust fit method replace the reported regression.
         crate::diagnostics::apply_fit_method(raw, side, &opts, &mut results, &cfg.diagnostics);
-        let dropped: Vec<&str> = findings
-            .diagnostics
-            .iter()
-            .filter(|d| d.code == "zero_readings")
-            .filter_map(|d| d.gas.as_deref())
-            .collect();
-        row.insert("autoExcludedGases".into(), json!(dropped));
         apply_gas_exclusion(&mut row);
         for gas in regression::GASES {
             for suffix in ["slope", "rsq", "pval", "flux", "n", "resid"] {

@@ -2851,3 +2851,24 @@ body.handle-dragging * {
   line-height: 1.35;
   font: inherit;
 }
+/* External data: robot data folder. */
+.raw-folder-row {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  margin: 8px 0;
+}
+.raw-folder-row .path-input {
+  flex: 1;
+}
+.check-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 0;
+}
+.raw-folder-report {
+  margin-top: 8px;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}

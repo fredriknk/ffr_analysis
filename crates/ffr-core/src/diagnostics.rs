@@ -264,7 +264,8 @@ pub fn legacy_qc_message(qc: &str) -> String {
 }
 /// Gases (N2O, CO2) whose analyser returned zeros, or nothing for a while, inside
 /// this chamber's window: an instrument dropout. The gas is excluded
-/// automatically (see `autoExcludedGases`) until the user includes it again.
+/// The zero readings are left out of the fit (as legacy always did) and out of
+/// the trace view; the flux itself stays in.
 pub fn dropouts(
     raw: &Raw,
     side: u8,
@@ -319,13 +320,13 @@ pub fn dropouts(
         }
         out.push(finding(
             "zero_readings",
-            "bad",
+            "warn",
             Some(gas),
             zeros as f64,
             format!(
                 "The {gas} analyser {} in this chamber's window (instrument dropout). \
-                 {gas} is excluded from summaries automatically; include it again if the \
-                 fit is still usable.",
+                 Zero readings are left out of the fit and hidden from the trace; check \
+                 that enough points remain, or exclude {gas} for this flux.",
                 what.join(" and ")
             ),
         ));
@@ -730,8 +731,8 @@ pub const RULES: [(&str, &str, &str); 16] = [
     (
         "zero_readings",
         "Instrument dropout",
-        "The analyser returned zeros or stopped reporting inside the chamber's window; \
-         that gas is excluded automatically until you include it again.",
+        "The analyser returned zeros or stopped reporting inside the chamber's window. \
+         Zero readings are left out of the fit and hidden from the trace.",
     ),
     (
         "legacy_qc",
@@ -1112,7 +1113,7 @@ mod tests {
             .collect();
         assert_eq!(d.len(), 1);
         assert_eq!(d[0].gas.as_deref(), Some("N2O"));
-        assert_eq!(d[0].severity, "bad");
+        assert_eq!(d[0].severity, "warn");
         assert_eq!(d[0].value, Some(5.));
         // Zeros in the other chamber, or outside the window, do not count.
         let o = AnalysisOptions {

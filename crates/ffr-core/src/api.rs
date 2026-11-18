@@ -479,3 +479,40 @@ pub struct FluxThumb {
     pub slope: f64,
     pub intercept: f64,
 }
+/// The project's raw-data folder. The path is machine-specific and optional:
+/// a project copied elsewhere simply has a folder that does not exist there.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct RawFolder {
+    pub path: String,
+    /// Import only files with a chamber inside one of the project's plots.
+    pub field_only: bool,
+    /// Check automatically while the project is open (the app decides when).
+    pub auto: bool,
+    /// When the folder was last checked (Unix ms) and what that found.
+    pub last_scan: Option<i64>,
+    pub last_report: Option<FolderReport>,
+}
+impl Default for RawFolder {
+    fn default() -> Self {
+        Self {
+            path: String::new(),
+            field_only: true,
+            auto: true,
+            last_scan: None,
+            last_report: None,
+        }
+    }
+}
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct FolderReport {
+    /// Robot files in the folder (names that parse as robot file names).
+    pub files: usize,
+    /// Already in the project.
+    pub known: usize,
+    /// New, but no chamber inside any plot (with `fieldOnly`).
+    pub outside_field: usize,
+    pub imported: usize,
+    pub errors: Vec<ImportError>,
+}

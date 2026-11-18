@@ -12,6 +12,7 @@ import {
   useAction,
 } from "../../shared/common";
 import { useStore } from "../../store";
+import { RawFolderPanel } from "./RawFolderPanel";
 export function External() {
   const visible = useStore((s) => s.screen === "External data");
   const action = useAction(),
@@ -287,6 +288,7 @@ export function External() {
           )}
         </Panel>
       )}
+      <RawFolderPanel visible={visible} />
       <Panel title="met.no weather">
         <p className="muted">
           Hourly temperature and precipitation. Client ID stays outside the

@@ -65,6 +65,12 @@ fn call(s: &mut Session, command: &str, a: Value) -> Result<Value> {
             json!(s.apply_waypoint_layout(serde_json::from_value(a)?, |_| {})?)
         }
         "getRoute" => json!(s.get_route()?),
+        "rawFolderGet" => json!(s.raw_folder_get()?),
+        "rawFolderSet" => {
+            s.raw_folder_set(serde_json::from_value(a["folder"].clone())?)?;
+            Value::Null
+        }
+        "rawFolderScan" => json!(s.raw_folder_scan(|_| {})?),
         "getLayout" => json!(s.get_layout()?),
         "setLayout" => {
             s.set_layout(serde_json::from_value(a["layout"].clone())?, |_| {})?;

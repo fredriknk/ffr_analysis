@@ -30,6 +30,7 @@ pub struct Session {
 
 mod export;
 mod fluxes;
+mod folder;
 mod history;
 mod import;
 mod project;
@@ -47,21 +48,16 @@ impl Session {
 }
 /// Version of the stored per-flux analysis. Opening a project analysed by an older
 /// version recomputes every flux once (results, findings, derived columns).
-pub(crate) const ANALYSIS_VERSION: i64 = 2;
-/// Sets `<gas>_excluded` for every gas: the user's choice in `gasExcluded`
-/// (`{gas: bool}`) when given, else whether a dropout excluded it automatically
-/// (`autoExcludedGases`). Whole-flux `excluded` is separate and wins everywhere.
+/// 3: instrument dropouts no longer exclude a gas automatically.
+pub(crate) const ANALYSIS_VERSION: i64 = 3;
+/// Sets `<gas>_excluded` for every gas from the user's per-gas choice in
+/// `gasExcluded` (`{gas: bool}`; default included). Whole-flux `excluded` is
+/// separate and wins everywhere. Drops the 2.1.0 `autoExcludedGases` field.
 pub(crate) fn apply_gas_exclusion(row: &mut FluxRow) {
-    let auto: Vec<String> = row
-        .get("autoExcludedGases")
-        .and_then(|v| serde_json::from_value(v.clone()).ok())
-        .unwrap_or_default();
+    row.remove("autoExcludedGases");
     let choice = row.get("gasExcluded").cloned().unwrap_or(Value::Null);
     for gas in regression::GASES {
-        let excluded = choice
-            .get(gas)
-            .and_then(Value::as_bool)
-            .unwrap_or_else(|| auto.iter().any(|g| g == gas));
+        let excluded = choice.get(gas).and_then(Value::as_bool).unwrap_or(false);
         row.insert(format!("{gas}_excluded"), json!(excluded));
     }
 }

@@ -172,8 +172,8 @@ Port the maths of `App.allplot` in `prog/ffr_gui.py` (`getN2Odata`, `run_all_plo
 - per treatment: mean and population SD of its plots' totals; geometric mean and geometric
   SD of positive fluxes; distribution of daily means for a box plot.
 
-Excluded fluxes never contribute, nor do fluxes whose summarised gas is excluded
-(`<gas>_excluded`, 4.9). Works for any gas, any date range, and any subset of
+Excluded fluxes never contribute, nor do fluxes whose summarised gas the user excluded
+(`<gas>_excluded`, 6). Works for any gas, any date range, and any subset of
 sources (robot, manual).
 
 ### 4.8 External data
@@ -191,8 +191,7 @@ Every flux row can be joined with every series (value nearest in time, with a ma
 
 ### 4.9 Diagnostics (review priority, independent of legacy regression)
 
-Diagnostics never change the reported flux or exclude a flux, with one exception:
-an instrument dropout (`zero_readings`) excludes that gas automatically (below).
+Diagnostics never change the reported flux or exclude a flux.
 Findings have
 `{code, severity: 'info'|'warn'|'bad', gas?, value?, impact?, message}` and are
 recomputed with results. All numeric rule thresholds are `config.diagnostics` fields.
@@ -240,7 +239,7 @@ findings remain visible as info chips and in diagnostic summaries.
 | `neighbour_outlier` | Compare non-excluded same-treatment observations within `neighbourDays` (3), falling back to same plot within `neighbourFallbackDays` (10) when fewer than `minNeighbours` (6). Scale asinh by max(raw MAD, floor); transformed MAD is bounded by `neighbourAsinhMadMin` (0.15). Candidate exceeds both `neighbourZ` (3.5) scaled-asinh z and `neighbourRawZ` (8) raw z. Bad if scaled-asinh z exceeds `neighbourBadZ` (10), or flux exceeds `neighbourBadRatio` (10) times neighbours' median absolute flux and `neighbourBadFloor` (5) floors; otherwise warn. |
 | `few_points` | Below `minPoints` (20) or `minWindowS` (60): warn, info for an overridden window. |
 | `valves_irregular` | Not `normalSwitches` (10), repeated/missing sides, or duration differs from `normalSegmentS` (20) by `irregularFraction` (0.5): warn. |
-| `zero_readings` | N2O or CO2 analyser returned 0 (or non-finite) for any reading, or sent nothing for over `dropoutGapS` (5) s, among this chamber's points inside start/stop: bad, per gas. The gas is excluded automatically (`autoExcludedGases`); the user's per-gas choice (`gasExcluded`) overrides it and survives recomputes. |
+| `zero_readings` | Instrument dropout: N2O or CO2 analyser returned 0 (or non-finite) for any reading, or sent nothing for over `dropoutGapS` (5) s, among this chamber's points inside start/stop: warn, per gas. Zero readings are never fitted (4.4) and the UI hides them from traces and thumbnails; the flux and the gas stay in. |
 | `legacy_qc` | The legacy N2O check (shown as "N2O quality check"), with a plain-language reason: "Probably zero slope" is usually a real near-zero flux. Info. |
 | `temp_fallback`, `no_plot` | Missing temperature, or unassigned chamber: info. |
 
@@ -287,8 +286,8 @@ Per-gas values apply to that gas's regression and diagnostics alike. Stored opti
 normalised: a per-gas entry keeps only the fields above that differ from the flux-level
 value (legacy imports are normalised the same way).
 
-`excluded` is a property of the flux, not an option; so is the per-gas exclusion
-(`gasExcluded`, 4.9). Legacy per-file options apply to both
+`excluded` is a property of the flux, not an option; so is the user's per-gas exclusion
+(`gasExcluded`, 6). Legacy per-file options apply to both
 sides of the file.
 
 ## 6. API between UI and core
@@ -310,6 +309,14 @@ field lists may grow, but do not rename.
   paths, counts, which inputs exist)
 - `legacyImport(args: {legacyDir, rawDir, manualPath?, loggerPath?, metnoPicklePath?, outPath}) → ProjectInfo`
 - `importRawFiles(paths: string[]) → ImportReport` — add new robot files to an open project
+- `rawFolderGet() → RawFolder | null`, `rawFolderSet(folder | null)`,
+  `rawFolderScan() → FolderReport` — the project's robot data folder
+  `{ path, fieldOnly, auto, lastScan?, lastReport? }`. A scan imports robot files in the
+  folder (up to three subfolder levels) that are not yet in the project; with `fieldOnly`
+  only files with a measured chamber that the plot assignment (4.6) puts in a plot (a
+  project without plots accepts all). Files left out are looked at again next scan.
+  `FolderReport = { files, known, outsideField, imported, errors }`. The path is
+  machine-specific and optional; it is not an undoable edit.
 
 `ProjectInfo = { path, name, timeZone, schemaVersion, counts: {measurements, fluxes, excluded, overridden, reviewed, manual, series}, timeRange: [number, number] | null }`
 
@@ -360,8 +367,8 @@ field lists may grow, but do not rename.
 - `previewFlux(fluxId, options) → FluxDetail` — compute without saving (live while dragging)
 - `setFluxOptions(fluxIds, options | null) → FluxRow[]` — `null` resets to defaults
 - `setFluxFlags(fluxIds, { excluded?, reviewed?, note?, plotOverride?, gasExcluded? }) → FluxRow[]`
-  — `gasExcluded: {gas: boolean | null}` merges into the flux's per-gas choices (`null`
-  returns that gas to the automatic dropout rule); rows carry `<gas>_excluded`
+  — `gasExcluded: {gas: boolean | null}` merges into the flux's per-gas exclusions (`null`
+  or `false`: included, the default); rows carry `<gas>_excluded`
   — `reviewed`/`note` change nothing else and are not recomputed
 - Edit commands return the edited rows first, then every other row whose diagnostics the
   edit re-scored (baselines, neighbours), so the UI patches its table instead of reloading
@@ -452,7 +459,8 @@ Screens:
    "show these in Treatments", export to Excel/CSV with the three modes.
 6. **External data** — list of series with a preview chart; import wizard for
    Excel/CSV (pick sheet, header row, time column, value columns, aggregate); met.no fetch;
-   manual flux import.
+   manual flux import; the **robot data folder** (choose it, "only inside the plots",
+   automatic checks on opening and every 5 minutes, "Import new files now", last result).
 7. **Project** — name, time zone, default analysis options, gases/units, treatments and
    plots, backup copy. The **field map** draws plot polygons coloured by treatment with
    labels, every measured chamber position (positions outside every plot in red) and the
