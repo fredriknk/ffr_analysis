@@ -394,6 +394,7 @@ strong {
 }
 .start-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 10px;
   margin-bottom: 50px;
 }
@@ -2743,4 +2744,22 @@ body.handle-dragging * {
 .options-grid > label.check input {
   width: auto;
   height: auto;
+}
+/* Start: long folder names and paths wrap instead of running off the pane. */
+.start p,
+.start small,
+.start strong {
+  overflow-wrap: anywhere;
+}
+.path-input {
+  width: 100%;
+  min-width: 0;
+  resize: none;
+  field-sizing: content;
+  min-height: 34px;
+  word-break: break-all;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  line-height: 1.35;
+  font: inherit;
 }

@@ -123,34 +123,25 @@ export function Start() {
         <Panel title="Import legacy project">
           <div className="form-grid">
             <Field label="Legacy folder">
-              <input value={dir} onChange={(e) => setDir(e.target.value)} />
+              <PathInput value={dir} onChange={setDir} />
             </Field>
             <button onClick={() => void pick(true).then((p) => p && setDir(p))}>
               Browse folder
             </button>
             <Field label="Raw data folder">
-              <input value={raw} onChange={(e) => setRaw(e.target.value)} />
+              <PathInput value={raw} onChange={setRaw} />
             </Field>
             <Field label="Output project">
-              <input value={out} onChange={(e) => setOut(e.target.value)} />
+              <PathInput value={out} onChange={setOut} />
             </Field>
             <Field label="Manual flux file (optional)">
-              <input
-                value={manual}
-                onChange={(e) => setManual(e.target.value)}
-              />
+              <PathInput value={manual} onChange={setManual} />
             </Field>
             <Field label="Logger file (optional)">
-              <input
-                value={logger}
-                onChange={(e) => setLogger(e.target.value)}
-              />
+              <PathInput value={logger} onChange={setLogger} />
             </Field>
             <Field label="Weather pickle (optional)">
-              <input
-                value={weather}
-                onChange={(e) => setWeather(e.target.value)}
-              />
+              <PathInput value={weather} onChange={setWeather} />
             </Field>
           </div>
           <button
@@ -224,5 +215,26 @@ export function Start() {
         </div>
       )}
     </div>
+  );
+}
+/** A path field that wraps (anywhere) so the whole path stays visible. */
+function PathInput({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  return (
+    <textarea
+      className="path-input"
+      rows={1}
+      spellCheck={false}
+      value={value}
+      onChange={(e) => onChange(e.target.value.replace(/[\r\n]+/g, ""))}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") e.preventDefault();
+      }}
+    />
   );
 }
