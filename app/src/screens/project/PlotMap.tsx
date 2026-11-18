@@ -17,6 +17,7 @@ import {
   positioned,
   renumberPlots,
   reshapePlots,
+  routeTravelAngle,
   type Corner,
   type Numbering,
   type PlotShape,
@@ -59,7 +60,9 @@ export function PlotMap({
   crs,
   rows,
   onChange,
+  hasLayoutHistory,
   dirty,
+  saving,
   onSave,
   onDiscard,
   locked,
@@ -70,12 +73,15 @@ export function PlotMap({
   crs: string;
   rows: FluxRow[] | undefined;
   onChange: (l: Layout) => void;
+  hasLayoutHistory: boolean;
   dirty: boolean;
+  saving: boolean;
   onSave: () => void;
   onDiscard: () => void;
 }) {
   const store = useStore(),
     map = useRef<FieldMapHandle>(null),
+    canvas = useRef<HTMLDivElement>(null),
     route = useQuery({ queryKey: ["route"], queryFn: () => api.getRoute() }),
     [selected, setSelected] = useState<Set<number>>(new Set()),
     [drag, setDrag] = useState<{
@@ -95,7 +101,6 @@ export function PlotMap({
       ey: number;
       add: boolean;
     } | null>(null),
-    [boxTool, setBoxTool] = useState(false),
     [layers, setLayers] = useState({
       labels: true,
       chambers: true,
@@ -163,30 +168,32 @@ export function PlotMap({
     });
 
   function down(p: MapPointer) {
+    canvas.current?.focus({ preventScroll: true });
     const e = p.event,
       hit = (e.target as Element).closest("[data-plot]"),
       additive = e.shiftKey || e.ctrlKey || e.metaKey;
-    if (!hit || boxTool) {
-      // Empty map: Shift-drag (or the box tool) draws a selection box.
-      if (!boxTool && !e.shiftKey) return false;
+    if (!hit) {
+      if (!e.shiftKey) return false;
       setBox({
         sx: p.sx,
         sy: p.sy,
         ex: p.sx,
         ey: p.sy,
-        add: e.ctrlKey || e.metaKey || (boxTool && e.shiftKey),
+        add: e.ctrlKey || e.metaKey,
       });
       return true;
     }
     const id = Number(hit.getAttribute("data-plot"));
-    let next = selected;
     if (additive) {
-      next = new Set(selected);
+      const next = new Set(selected);
       if (next.has(id)) next.delete(id);
       else next.add(id);
-    } else if (!selected.has(id)) next = new Set([id]);
+      setSelected(next);
+      return true;
+    }
+    const next = selected.has(id) && !locked ? selected : new Set([id]);
     setSelected(next);
-    if (next.has(id))
+    if (!locked)
       setDrag({
         start: { x: p.x, y: p.y },
         sx: p.sx,
@@ -194,7 +201,7 @@ export function PlotMap({
         ids: next,
         offset: { x: 0, y: 0 },
         moved: false,
-        only: !additive && next.size > 1 ? id : null,
+        only: next.size > 1 ? id : null,
       });
     return true;
   }
@@ -212,11 +219,11 @@ export function PlotMap({
         offset: { x: p.x - drag.start.x, y: p.y - drag.start.y },
       });
   }
-  function up() {
+  function up(p: MapPointer) {
     if (box) {
       const view = map.current?.view(),
-        [x0, x1] = [box.sx, box.ex].sort((a, b) => a - b),
-        [y0, y1] = [box.sy, box.ey].sort((a, b) => a - b);
+        [x0, x1] = [box.sx, p.sx].sort((a, b) => a - b),
+        [y0, y1] = [box.sy, p.sy].sort((a, b) => a - b);
       if (view && x1 - x0 + y1 - y0 > 4) {
         const inside = positioned(layout.plots)
           .filter((q) => {
@@ -230,8 +237,9 @@ export function PlotMap({
       setBox(null);
       return;
     }
-    if (drag?.moved) {
-      const { x: dx, y: dy } = drag.offset;
+    if (drag?.moved && !locked) {
+      const dx = p.x - drag.start.x,
+        dy = p.y - drag.start.y;
       onChange({
         ...layout,
         plots: layout.plots.map((q) =>
@@ -284,6 +292,7 @@ export function PlotMap({
           ? "mixed sizes"
           : null;
   const scope = sel.length ? selected : new Set(layout.plots.map((p) => p.id));
+  const maximizing = shape.shape === "maximize";
 
   return (
     <div className="plot-map">
@@ -330,26 +339,25 @@ export function PlotMap({
                 : k[0].toUpperCase() + k.slice(1)}
             </label>
           ))}
-          <button
-            className={boxTool ? "on" : ""}
-            aria-pressed={boxTool}
-            title="Drag a box to select plots (or Shift-drag on the map). Ctrl adds to the selection."
-            onClick={() => setBoxTool(!boxTool)}
-          >
-            Box select
-          </button>
-          {dirty && (
+          {hasLayoutHistory && (
             <span className="plot-map-dirty">
-              Unsaved layout changes
-              <button className="primary" onClick={onSave}>
+              {dirty ? "Unsaved layout changes" : "Layout edits undone"}
+              <button
+                className="primary"
+                disabled={!dirty || saving}
+                onClick={onSave}
+              >
                 Save
               </button>
-              <button onClick={onDiscard}>Discard</button>
+              <button disabled={saving} onClick={onDiscard}>
+                Discard
+              </button>
             </span>
           )}
         </div>
         <div
           className="plot-map-canvas"
+          ref={canvas}
           tabIndex={0}
           onKeyDown={(e) => {
             if (e.key === "Escape") setSelected(new Set());
@@ -366,13 +374,7 @@ export function PlotMap({
             fit={fit}
             fitKey={layout.plots.length + ":" + placed.length}
             label="Field plot map"
-            cursor={
-              drag?.moved
-                ? "grabbing"
-                : boxTool || box
-                  ? "crosshair"
-                  : undefined
-            }
+            cursor={drag?.moved ? "grabbing" : box ? "crosshair" : undefined}
             onPointerDown={down}
             onPointerMove={move}
             onPointerUp={up}
@@ -406,9 +408,13 @@ export function PlotMap({
               · {lost} fluxes fall outside every plot
             </span>
           )}
-          {" · "}Click a plot to select it, Ctrl-click to add or remove,
-          Shift-drag to box-select, click empty map or Esc to clear
-          {locked ? "." : ", drag to move."}
+        </p>
+        <p className="muted small plot-map-legend">
+          Click to select. Shift-click or Ctrl-click to add or remove.
+          Shift-drag on empty map to box-select, or hold Ctrl as well to add.
+          Click empty map or press Esc to clear.
+          {!locked &&
+            " Drag plots to move them. Ctrl+Z / Ctrl+Y undo and redo."}
         </p>
       </div>
       <aside className="plot-map-side">
@@ -537,12 +543,20 @@ export function PlotMap({
                   aria-label="New plot shape"
                   value={shape.shape}
                   onChange={(e) =>
-                    setShape({ ...shape, shape: e.target.value as Shape })
+                    setShape({
+                      ...shape,
+                      shape: e.target.value as Shape,
+                      angle:
+                        maximizing === (e.target.value === "maximize")
+                          ? shape.angle
+                          : null,
+                    })
                   }
                 >
                   <option value="rectangle">Rectangle</option>
                   <option value="square">Square</option>
                   <option value="auto">Auto square (touching)</option>
+                  <option value="maximize">Maximize</option>
                 </select>
               </label>
               {shape.shape === "square" && (
@@ -576,12 +590,12 @@ export function PlotMap({
                 </>
               )}
               <label>
-                Direction · °
+                {maximizing ? "Travel direction" : "Direction"} · °
                 <input
                   type="number"
                   step="0.5"
                   aria-label="Plot direction degrees"
-                  placeholder="keep current"
+                  placeholder={maximizing ? "auto" : "keep current"}
                   value={
                     shape.angle === null
                       ? ""
@@ -600,7 +614,9 @@ export function PlotMap({
               </label>
             </div>
             <p className="muted small">
-              Width runs along each plot&apos;s first side, length across it.
+              {maximizing
+                ? "Extend along travel until a neighbour touches, keeping the current width."
+                : "Width runs along each plot's first side, length across it."}
               {currentSize && " Selected: " + currentSize + "."}
             </p>
             <button
@@ -608,7 +624,12 @@ export function PlotMap({
               onClick={() =>
                 onChange({
                   ...layout,
-                  plots: reshapePlots(layout.plots, scope, shape),
+                  plots: reshapePlots(
+                    layout.plots,
+                    scope,
+                    shape,
+                    routeTravelAngle(route.data?.points ?? []),
+                  ),
                 })
               }
             >

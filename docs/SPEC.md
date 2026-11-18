@@ -458,13 +458,18 @@ Screens:
    labels, every measured chamber position (positions outside every plot in red) and the
    stored route. The page opens **locked**: everything can be viewed and selected, nothing
    edited, until "Unlock to edit" (it can't be locked again with unsaved changes). Click
-   selects a plot, Ctrl-click adds/removes, Shift-drag or the Box select tool selects by
-   rectangle, clicking empty map, Esc or "None" clears; dragging moves plots. The side panel
+   selects a plot. Shift-click or Ctrl-click adds/removes. Shift-drag on empty map selects by
+   rectangle and Ctrl+Shift-drag adds to the selection. Click empty map, press Esc or use
+   "None" to clear. Dragging moves plots when unlocked. The side panel
    sets label, treatment and block, resizes plots around their centres (rectangle, square or
-   touching squares; keeps each plot's direction unless one is given) and renumbers them
+   touching squares, or Maximize). Maximize keeps each plot's width and extends its length
+   along travel until it touches a neighbour. The stored route supplies the travel direction
+   when available, with the existing layout's length axis as a fallback. Other resize modes
+   keep each plot's direction by default. The side panel also renumbers plots
    (prefix, first number, rows / columns / current order, starting in any corner as seen on
    the north-up map, optionally snaking). Treatments can be added and, when no plot uses
-   them, removed. Edits stay a draft until saved (one `setLayout`, one undo step). "Load waypoint list…" and "Edit route" open
+   them, removed. Ctrl+Z and Ctrl+Y undo and redo layout edits within the draft. Saving uses
+   one `setLayout` and creates one project undo step. "Load waypoint list…" and "Edit route" open
    the Waypoints screen.
 8. **Waypoints** — the route editor (port of `ffr_waypoint_analyzer`), usable with or
    without an open project: open a route CSV, edit on a map (move, rotate headings or a

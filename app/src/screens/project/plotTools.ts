@@ -1,13 +1,13 @@
-import type { Plot } from "../../api/types";
+import type { Plot, Waypoint } from "../../api/types";
 import { fieldAngle, type XY } from "../../waypoints/geometry";
 
-export type Shape = "auto" | "square" | "rectangle";
+export type Shape = "auto" | "square" | "rectangle" | "maximize";
 export interface PlotShape {
   shape: Shape;
   size: number;
   width: number;
   height: number;
-  /** Radians; null = the field direction found from the plot centres. */
+  /** Radians. For Maximize this is the travel axis; otherwise the first edge. */
   angle: number | null;
 }
 
@@ -52,14 +52,157 @@ export function plotSize(polygon: [number, number][]): [number, number] {
     Math.hypot(c[0] - b[0], c[1] - b[1]),
   ];
 }
-/** New footprints around the current centres of `ids`. Width runs along each
- *  plot's own first edge (or `angle` when given), length across it, as in the
- *  route plot generator. */
+
+/** Treat driving in opposite directions as the same axis. */
+export function routeTravelAngle(points: readonly Waypoint[]): number | null {
+  let x = 0,
+    y = 0,
+    count = 0;
+  for (const p of points) {
+    if (p.kind !== "Measure" || p.side === "none") continue;
+    x += Math.cos(2 * p.angle);
+    y += Math.sin(2 * p.angle);
+    count++;
+  }
+  return Math.hypot(x, y) > 1e-6 * count ? Math.atan2(y, x) / 2 : null;
+}
+
+const DISTANCE_EPSILON = 1e-6;
+type Point = [number, number];
+
+/** Distance from the plot centre to a polygon within its fixed-width strip. */
+function stripLimit(
+  centre: Point,
+  halfWidth: number,
+  polygon: Point[],
+): number {
+  const low = centre[1] - halfWidth,
+    high = centre[1] + halfWidth;
+  const across = polygon.map((p) => p[1]);
+  if (
+    Math.max(...across) <= low + DISTANCE_EPSILON ||
+    Math.min(...across) >= high - DISTANCE_EPSILON
+  )
+    return Infinity;
+
+  // The first contact is either inside the polygon already, or on an edge
+  // clipped to the width strip. Check each edge even for non-convex plots.
+  let inside = false,
+    limit = Infinity;
+  polygon.forEach(([x, y], i) => {
+    const [nextX, nextY] = polygon[(i + 1) % polygon.length];
+    const atY = (edge: number) => x + ((edge - y) / (nextY - y)) * (nextX - x);
+    if (y > centre[1] !== nextY > centre[1] && atY(centre[1]) > centre[0])
+      inside = !inside;
+    const along = [];
+    if (y >= low && y <= high) along.push(x);
+    if (nextY >= low && nextY <= high) along.push(nextX);
+    for (const edge of [low, high]) {
+      if ((y < edge && nextY > edge) || (nextY < edge && y > edge))
+        along.push(atY(edge));
+    }
+    if (along.length)
+      limit = Math.min(
+        limit,
+        Math.max(
+          0,
+          Math.min(...along) - centre[0],
+          centre[0] - Math.max(...along),
+        ),
+      );
+  });
+  return inside ? 0 : limit;
+}
+
+/** Grow centred rectangles along a common travel axis at their existing widths. */
+function maximizePlots(plots: Plot[], ids: ReadonlySet<number>, angle: number) {
+  const cos = Math.cos(angle),
+    sin = Math.sin(angle);
+  const projected = positioned(plots).map((plot) => {
+    const { x, y } = centroid(plot.polygon);
+    return {
+      plot,
+      centre: [x * cos + y * sin, -x * sin + y * cos] as Point,
+      width: plotSize(plot.polygon)[0] / 2,
+      polygon: plot.polygon.map(
+        ([x, y]): Point => [x * cos + y * sin, -x * sin + y * cos],
+      ),
+      halfLength: 0,
+    };
+  });
+  let candidates = projected.filter(
+    (p) => ids.has(p.plot.id) && p.width > DISTANCE_EPSILON,
+  );
+  const fixed = projected.filter((p) => !candidates.includes(p));
+  type Footprint = (typeof projected)[number];
+  const neighbours = (a: Footprint, b: Footprint) =>
+    a !== b &&
+    Math.abs(a.centre[1] - b.centre[1]) < a.width + b.width - DISTANCE_EPSILON;
+  const separation = (a: Footprint, b: Footprint) =>
+    Math.abs(a.centre[0] - b.centre[0]);
+  const fixedLimit = (p: Footprint) =>
+    Math.min(...fixed.map((q) => stripLimit(p.centre, p.width, q.polygon)));
+  const midpointLimit = (p: Footprint) =>
+    Math.min(
+      ...candidates
+        .filter((q) => neighbours(p, q))
+        .map((q) => separation(p, q) / 2),
+    );
+
+  // Keep footprints intact where the strip is blocked at its centre or there
+  // is no neighbour to bound the length. They still constrain other plots.
+  while (candidates.length) {
+    const blocked = candidates.filter((p) => {
+      p.halfLength = Math.min(fixedLimit(p), midpointLimit(p));
+      return p.halfLength <= DISTANCE_EPSILON || !Number.isFinite(p.halfLength);
+    });
+    if (!blocked.length) break;
+    fixed.push(...blocked);
+    candidates = candidates.filter((p) => !blocked.includes(p));
+  }
+
+  // Start at the shared midpoints. If a neighbour was capped sooner, take up
+  // the remaining room without moving that neighbour or either plot centre.
+  for (const p of candidates)
+    p.halfLength = Math.min(
+      fixedLimit(p),
+      ...candidates
+        .filter((q) => neighbours(p, q))
+        .map((q) => separation(p, q) - q.halfLength),
+    );
+
+  const resized = new Map(
+    candidates.map(({ plot, centre: [u, v], width: w, halfLength: h }) => [
+      plot.id,
+      (
+        [
+          [u - h, v + w],
+          [u - h, v - w],
+          [u + h, v - w],
+          [u + h, v + w],
+        ] as Point[]
+      ).map(([a, b]): Point => [a * cos - b * sin, a * sin + b * cos]),
+    ]),
+  );
+  return plots.map((p) => {
+    const polygon = resized.get(p.id);
+    return polygon ? { ...p, polygon } : p;
+  });
+}
+
+/** New footprints around the current centres of `ids`. */
 export function reshapePlots(
   plots: Plot[],
   ids: ReadonlySet<number>,
   o: PlotShape,
+  travelAngle: number | null = null,
 ): Plot[] {
+  if (o.shape === "maximize")
+    return maximizePlots(
+      plots,
+      ids,
+      o.angle ?? travelAngle ?? layoutAngle(plots) + Math.PI / 2,
+    );
   const placed = positioned(plots),
     centres = new Map(placed.map((p) => [p.id, centroid(p.polygon)]));
   return plots.map((p) => {

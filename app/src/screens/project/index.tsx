@@ -1,5 +1,5 @@
-import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useReducer, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { api } from "../../api";
 import type { Layout, ProjectConfig, Treatment } from "../../api/types";
@@ -13,6 +13,7 @@ import {
 } from "../../shared/common";
 import { PlotMap } from "./PlotMap";
 import { useStore } from "../../store";
+import { emptyLayoutDraft, layoutDraftReducer } from "./layoutDraft";
 /** Colours for new treatments (distinct, readable on the map in both themes). */
 const PALETTE = [
   "#2a9d8f",
@@ -33,6 +34,7 @@ export function Project() {
     useShallow(({ nav, screen }) => ({ nav, screen })),
   );
   const action = useAction(),
+    client = useQueryClient(),
     q = useQuery({
       queryKey: ["config"],
       enabled: navigation.screen === "Project",
@@ -49,13 +51,43 @@ export function Project() {
       enabled: navigation.screen === "Project",
     }),
     [draft, setDraft] = useState<ProjectConfig | null>(null),
-    [edited, setEdited] = useState<Layout | null>(null),
+    [history, dispatch] = useReducer(layoutDraftReducer, emptyLayoutDraft),
+    [saving, setSaving] = useState(false),
     // Settings and layout are read-only until explicitly unlocked.
     [locked, setLocked] = useState(true);
   const cfg = draft ?? q.data,
+    edited = history.current,
     layout = edited ?? l.data;
   const rows = useRows(),
     dirty = draft !== null || edited !== null;
+  const setEdited = (next: Layout) =>
+    dispatch({ type: "edit", layout: next, saved: l.data });
+  const resetLayout = () => dispatch({ type: "reset" });
+  const hasLayoutHistory = edited !== null || history.future.length > 0;
+
+  useEffect(() => {
+    if (navigation.screen !== "Project") return;
+    function onKeyDown(e: KeyboardEvent) {
+      const key = e.key.toLowerCase();
+      if (
+        e.defaultPrevented ||
+        !(e.ctrlKey || e.metaKey) ||
+        (key !== "z" && key !== "y") ||
+        (e.target instanceof HTMLElement &&
+          (e.target.matches("input, textarea, select") ||
+            e.target.isContentEditable))
+      )
+        return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      if (saving) return;
+      const redo = key === "y" || e.shiftKey;
+      if (hasLayoutHistory) dispatch({ type: redo ? "redo" : "undo" });
+      else void action(() => (redo ? api.redo() : api.undo()));
+    }
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  });
   function addTreatment() {
     if (!layout) return;
     const used = new Set(layout.treatments.map((t) => t.colour.toLowerCase())),
@@ -72,11 +104,19 @@ export function Project() {
       };
     setEdited({ ...layout, treatments: [...layout.treatments, treatment] });
   }
-  const saveLayout = () =>
-    void action(async () => {
-      if (layout) await api.setLayout(layout);
-      setEdited(null);
-    }, "Field layout saved");
+  async function saveLayout() {
+    if (!edited || saving) return;
+    setSaving(true);
+    try {
+      await action(async () => {
+        await api.setLayout(edited);
+        client.setQueryData(["layout"], edited);
+        resetLayout();
+      }, "Field layout saved");
+    } finally {
+      setSaving(false);
+    }
+  }
   return (
     <div className="page">
       <div className="page-heading">
@@ -96,7 +136,10 @@ export function Project() {
                   ? "Save or discard your changes before locking"
                   : "Make settings and layout read-only again"
             }
-            onClick={() => setLocked(!locked)}
+            onClick={() => {
+              if (!locked) resetLayout();
+              setLocked(!locked);
+            }}
           >
             {locked
               ? "\u{1F512} Locked \u00b7 Unlock to edit"
@@ -169,10 +212,12 @@ export function Project() {
             crs={cfg?.crs || "EPSG:32632"}
             rows={rows.data?.rows}
             onChange={setEdited}
+            hasLayoutHistory={hasLayoutHistory}
             dirty={edited !== null}
+            saving={saving}
             onSave={saveLayout}
-            onDiscard={() => setEdited(null)}
-            locked={locked}
+            onDiscard={resetLayout}
+            locked={locked || saving}
           />
         </Panel>
       )}
@@ -307,12 +352,12 @@ export function Project() {
               title="Treatments & plots"
               extra={
                 <div className="button-group">
-                  <button disabled={locked} onClick={addTreatment}>
+                  <button disabled={locked || saving} onClick={addTreatment}>
                     Add treatment
                   </button>
                   <button
                     className="primary"
-                    disabled={edited === null}
+                    disabled={saving || edited === null}
                     onClick={saveLayout}
                   >
                     Save field layout
@@ -320,7 +365,7 @@ export function Project() {
                 </div>
               }
             >
-              <fieldset className="plain-fieldset" disabled={locked}>
+              <fieldset className="plain-fieldset" disabled={locked || saving}>
                 <div className="layout-editor">
                   {layout.treatments.map((t, i) => (
                     <div key={t.id} className="treatment-edit">

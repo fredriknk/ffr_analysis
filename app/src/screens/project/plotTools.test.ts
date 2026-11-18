@@ -6,6 +6,7 @@ import {
   plotSize,
   renumberPlots,
   reshapePlots,
+  routeTravelAngle,
   type Numbering,
 } from "./plotTools";
 
@@ -66,6 +67,94 @@ describe("project plot tools", () => {
       angle: null,
     });
     expect(plotSize(out[0].polygon!)[0]).toBeCloseTo(4, 9);
+  });
+  const maximize = {
+    shape: "maximize",
+    size: 1,
+    width: 1,
+    height: 1,
+    angle: null,
+  } as const;
+
+  function footprint(id: number, x: number, y: number, width = 2): Plot {
+    return {
+      id,
+      label: "P" + id,
+      treatmentId: 1,
+      block: 1,
+      polygon: [
+        [x - 1, y + width / 2],
+        [x - 1, y - width / 2],
+        [x + 1, y - width / 2],
+        [x + 1, y + width / 2],
+      ],
+    };
+  }
+
+  it("uses opposite route headings as one axis and keeps plot widths at their centres", () => {
+    const travel = 0.43;
+    const angle = routeTravelAngle(
+      [travel, travel + Math.PI].map((angle) => ({
+        x: 0,
+        y: 0,
+        z: 0,
+        name: "Measure",
+        kind: "Measure",
+        side: "both",
+        angle,
+      })),
+    );
+    expect(angle).toBeCloseTo(travel, 9);
+    const plots = [footprint(1, 0, 0, 3), footprint(2, 10, 0)].map((p) => ({
+      ...p,
+      polygon: p.polygon!.map(([x, y]): [number, number] => [
+        599000 + x * Math.cos(travel) - y * Math.sin(travel),
+        6615000 + x * Math.sin(travel) + y * Math.cos(travel),
+      ]),
+    }));
+    const out = reshapePlots(plots, new Set([1, 2]), maximize, angle);
+    out.forEach((p, i) => {
+      const [width, length] = plotSize(p.polygon!);
+      expect(width).toBeCloseTo(i === 0 ? 3 : 2, 7);
+      expect(length).toBeCloseTo(10, 7);
+      expect(centroid(p.polygon!).x).toBeCloseTo(
+        centroid(plots[i].polygon!).x,
+        7,
+      );
+      expect(centroid(p.polygon!).y).toBeCloseTo(
+        centroid(plots[i].polygon!).y,
+        7,
+      );
+    });
+  });
+  it("fills the space up to fixed neighbours and ignores adjacent strips", () => {
+    const plots = [
+      footprint(1, 0, 0),
+      footprint(2, 10, 0),
+      footprint(3, -3, 0),
+      footprint(4, 1, 2),
+    ];
+    const out = reshapePlots(plots, new Set([1, 2]), maximize);
+    expect(plotSize(out[0].polygon!)).toEqual([2, 4]);
+    expect(plotSize(out[1].polygon!)).toEqual([2, 16]);
+    expect(out[2]).toBe(plots[2]);
+    expect(out[3]).toBe(plots[3]);
+  });
+  it("clips a fixed neighbour to the width strip and leaves isolated plots alone", () => {
+    const fixed = {
+      ...footprint(2, 8, 0),
+      polygon: [
+        [9, 0],
+        [12, 2],
+        [9, 4],
+        [6, 2],
+      ] as [number, number][],
+    };
+    const plots = [footprint(1, 0, 0), fixed, footprint(3, 4, -9)];
+    const out = reshapePlots(plots, new Set([1, 3]), { ...maximize, angle: 0 });
+    expect(plotSize(out[0].polygon!)).toEqual([2, 15]);
+    expect(out[1]).toBe(fixed);
+    expect(out[2]).toBe(plots[2]);
   });
   it("numbers plots from any corner, by rows or columns, optionally snaking", () => {
     // On the map: ids 4 5 6 are the top row, 1 2 3 the bottom row, left to right.
