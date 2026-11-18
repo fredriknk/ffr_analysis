@@ -1,149 +1,230 @@
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import type { EChartsCoreOption } from "echarts/core";
-import { useState } from "react";
+import type { ECElementEvent } from "echarts/core";
+import { memo, useMemo, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { api } from "../../api";
-import type { Gas } from "../../api/types";
-import { Chart } from "../../shared/charts/Chart";
+import type { FluxRow, Gas } from "../../api/types";
 import { Empty, Field, Panel, Status, fmt, useRows } from "../../shared/common";
 import { TimeBrush } from "../../shared/filters/TimeBrush";
 import { dateTime, unit } from "../../shared/format";
 import { useStore } from "../../store";
-import {
-  inverse,
-  quantile,
-  transformed,
-  type AxisScale,
-} from "../outliers/axes";
+import { DistributionChart } from "./DistributionChart";
+import { EmissionMap } from "./EmissionMap";
+import { EnvironmentalContext } from "./EnvironmentalContext";
+import { TimeChart, timeAxis, timeZoom } from "./TimeChart";
+import { TotalChart } from "./TotalChart";
+
+const Overview = memo(TimeBrush);
+const emptyRows: FluxRow[] = [];
+const dayMs = 86400000;
+const timeGrid = { left: 65, right: 30, top: 25, bottom: 65 };
+
+function openFluxPoint(p: ECElementEvent) {
+  const value = p.value as number[];
+  if (value?.[2]) useStore.getState().openFlux(value[2]);
+}
+
 export function Treatments() {
   const visible = useStore((s) => s.screen === "Treatments");
   const allFluxes = useRows();
+  const rows = allFluxes.data?.rows ?? emptyRows;
   const s = useStore(
-      useShallow(
-        ({
-          gas,
-          from,
-          to,
-          sources,
-          subset,
-          focus,
-          treatmentZoom,
-          set,
-          openFlux,
-        }) => ({
-          gas,
-          from,
-          to,
-          sources,
-          subset,
-          focus,
-          treatmentZoom,
-          set,
-          openFlux,
-        }),
-      ),
-    ),
-    [fluxAsinh, setFluxAsinh] = useState(true),
-    [boxScale, setBoxScale] = useState<AxisScale>("asinh"),
-    [hidden, setHidden] = useState<number[]>([]),
-    [showExcluded, setShowExcluded] = useState(false);
+    useShallow(({ gas, from, to, sources, subset, focus, set, openFlux }) => ({
+      gas,
+      from,
+      to,
+      sources,
+      subset,
+      focus,
+      set,
+      openFlux,
+    })),
+  );
+  const [fluxAsinh, setFluxAsinh] = useState(true);
+  const [hidden, setHidden] = useState<number[]>([]);
+  const [showExcluded, setShowExcluded] = useState(false);
   const seriesMeta = useQuery({
     queryKey: ["series"],
     enabled: visible,
     queryFn: () => api.listSeries(),
   });
-  const temperature = seriesMeta.data?.find(
-      (s) => /air.*temp|temperature/i.test(s.name) && !/soil/i.test(s.name),
-    ),
-    rain = seriesMeta.data?.find((s) => /precip|rain/i.test(s.name)),
-    weatherIds = [temperature?.id, rain?.id].filter(
-      (id): id is number => id !== undefined,
-    );
-  const q = {
-    gas: s.gas,
-    from: s.from ? Date.parse(s.from) : undefined,
-    to: s.to ? Date.parse(s.to) + 86400000 : undefined,
-    sources: s.sources,
-    fluxIds: s.subset,
-  };
+  const from = s.from ? Date.parse(s.from) : undefined;
+  const to = s.to ? Date.parse(s.to) + dayMs : undefined;
+  const q = { gas: s.gas, from, to, sources: s.sources, fluxIds: s.subset };
   const result = useQuery({
-      queryKey: ["summary", q],
-      placeholderData: keepPreviousData,
-      enabled: visible,
-      queryFn: () => api.treatmentSummary(q),
-    }),
-    weather = useQuery({
-      queryKey: ["weather", weatherIds, s.from, s.to],
-      placeholderData: keepPreviousData,
-      enabled: visible && !!weatherIds.length,
-      queryFn: () =>
-        api.getSeries(weatherIds, q.from, q.to, 20000).then((series) =>
-          series.map((s) => {
-            const days = new Map<number, number[]>();
-            s.points.forEach((p) => {
-              const day = Math.floor(p.time / 86400000) * 86400000;
-              days.set(day, [...(days.get(day) ?? []), p.value]);
-            });
-            return {
-              id: s.id,
-              points: [...days].map(([time, v]) => ({
-                time,
-                value:
-                  s.id === rain?.id
-                    ? v.reduce((a, b) => a + b, 0)
-                    : v.reduce((a, b) => a + b, 0) / v.length,
-              })),
-            };
-          }),
-        ),
-    });
-  const fluxLookup = new Map(allFluxes.data?.rows.map((r) => [r.id, r]));
-  const d = result.data,
-    ts =
-      d?.treatments.filter(
-        (t) => (!s.focus || t.id === s.focus) && !hidden.includes(t.id),
-      ) ?? [],
-    ps =
-      d?.plots.filter(
-        (p) =>
-          (!s.focus || p.treatmentId === s.focus) &&
-          !hidden.includes(p.treatmentId),
-      ) ?? [];
-  const colour = (id: number) => d?.treatments.find((t) => t.id === id)?.colour;
-  const seriesTime = {
-    grid: { left: 65, right: 30, top: 25, bottom: 65 },
-    tooltip: { trigger: "axis" },
-    xAxis: { type: "time", min: q.from, max: q.to },
-    yAxis: { type: "value", scale: true },
-    dataZoom: [
-      {
-        type: "inside",
-        startValue: s.treatmentZoom?.[0],
-        endValue: s.treatmentZoom?.[1],
-        filterMode: "none",
-      },
-    ],
-  };
-  const distributions = ts.map((t) => {
-    const daily = ps
-        .filter((p) => p.treatmentId === t.id)
-        .flatMap((p) =>
-          p.daily.map((day) => ({
-            value: day.mean,
-            fluxId: p.points.find((v) => Math.abs(v.time - day.time) < 86400000)
-              ?.fluxId,
-          })),
-        )
-        .filter(
-          (v) =>
-            Number.isFinite(v.value) && (boxScale !== "log" || v.value > 0),
-        ),
-      values = daily.map((v) => v.value);
-    return {
-      box: [0.05, 0.25, 0.5, 0.75, 0.95].map((p) => quantile(values, p)),
-      daily,
-    };
+    queryKey: ["summary", q],
+    placeholderData: keepPreviousData,
+    enabled: visible,
+    queryFn: () => api.treatmentSummary(q),
   });
+  const summary = result.data;
+  const treatments = useMemo(
+    () =>
+      summary?.treatments.filter(
+        (t) =>
+          t.nPlots > 0 &&
+          (s.focus === null || t.id === s.focus) &&
+          !hidden.includes(t.id),
+      ) ?? [],
+    [summary, s.focus, hidden],
+  );
+  const colours = useMemo(
+    () => new Map(treatments.map((t) => [t.id, t.colour])),
+    [treatments],
+  );
+  const plots = useMemo(
+    () =>
+      summary?.plots.filter(
+        (plot) => plot.points.length > 0 && colours.has(plot.treatmentId),
+      ) ?? [],
+    [summary, colours],
+  );
+  const { min, max } = useMemo(() => {
+    let min = Number.POSITIVE_INFINITY,
+      max = Number.NEGATIVE_INFINITY;
+    for (const { time } of rows) {
+      min = Math.min(min, time);
+      max = Math.max(max, time);
+    }
+    for (const plot of summary?.plots ?? []) {
+      if (plot.daily.length) min = Math.min(min, plot.daily[0].time);
+    }
+    for (const {
+      timeRange: [start, end],
+    } of seriesMeta.data ?? []) {
+      min = Math.min(min, start);
+      max = Math.max(max, end);
+    }
+    // A single explicit endpoint can be outside the available data.
+    // Keep a valid shared domain for the empty portion of that range.
+    return {
+      min:
+        from ??
+        (Number.isFinite(min) || to !== undefined
+          ? Math.min(min, (to ?? Infinity) - dayMs)
+          : undefined),
+      max:
+        to ??
+        (Number.isFinite(max) || from !== undefined
+          ? Math.max(max, (from ?? -Infinity) + dayMs)
+          : undefined),
+    };
+  }, [from, to, rows, summary, seriesMeta.data]);
+  const bounds = useMemo(() => ({ min, max }), [min, max]);
+  const lineOption = useMemo(
+    () => ({
+      animation: false,
+      grid: timeGrid,
+      tooltip: { trigger: "axis", renderMode: "richText" },
+      xAxis: timeAxis(bounds),
+      yAxis: { type: "value", scale: true },
+      dataZoom: timeZoom(),
+      series: plots.map((p) => ({
+        type: "line",
+        name: p.label,
+        showSymbol: false,
+        lineStyle: { color: colours.get(p.treatmentId), width: 1.5 },
+        data: p.daily.map((v) => [v.time, v.cumulative]),
+      })),
+    }),
+    [bounds, plots, colours],
+  );
+  const fluxLookup = useMemo(() => new Map(rows.map((r) => [r.id, r])), [rows]);
+  const fluxOption = useMemo(() => {
+    const fluxKey = s.gas + "_flux";
+    const display = (v: number) => (fluxAsinh ? Math.asinh(v) : v);
+    const original = (v: number) => fmt(fluxAsinh ? Math.sinh(v) : v, 1);
+    const subset = s.subset ? new Set(s.subset) : null;
+    return {
+      animation: false,
+      grid: timeGrid,
+      xAxis: timeAxis(bounds),
+      yAxis: { type: "value", scale: true, axisLabel: { formatter: original } },
+      dataZoom: timeZoom([0], "filter"),
+      tooltip: {
+        trigger: "item",
+        renderMode: "richText",
+        formatter: ({
+          value,
+          seriesName,
+        }: {
+          value: number[];
+          seriesName: string;
+        }) =>
+          seriesName +
+          " · " +
+          dateTime(value[0]) +
+          "\nFlux #" +
+          value[2] +
+          ": " +
+          original(value[1]),
+      },
+      series: [
+        ...plots.map((p) => ({
+          name: p.label,
+          type: "scatter",
+          itemStyle: { color: colours.get(p.treatmentId), opacity: 0.65 },
+          data: p.points.flatMap((v) => {
+            const flux = fluxLookup.get(v.fluxId);
+            if (flux?.excluded) return [];
+            const attention = flux?.attention ?? 0;
+            return [
+              {
+                value: [v.time, display(v.value), v.fluxId],
+                itemStyle: {
+                  borderWidth: attention >= 30 ? 2 : 0,
+                  borderColor: attention >= 70 ? "#c94e48" : "#c58a2f",
+                },
+                symbolSize: attention >= 30 ? 7 : 4,
+              },
+            ];
+          }),
+        })),
+        {
+          name: "Excluded",
+          type: "scatter",
+          symbolSize: 5,
+          itemStyle: { color: "#8b969e", opacity: 0.25 },
+          data: showExcluded
+            ? rows.flatMap((r) => {
+                const value = r[fluxKey];
+                return r.excluded &&
+                  typeof value === "number" &&
+                  Number.isFinite(value) &&
+                  (s.focus === null || r.treatmentId === s.focus) &&
+                  !hidden.includes(r.treatmentId) &&
+                  s.sources.includes(r.source) &&
+                  (!subset || subset.has(r.id)) &&
+                  (from === undefined || r.time >= from) &&
+                  (to === undefined || r.time <= to)
+                  ? [[r.time, display(value), r.id]]
+                  : [];
+              })
+            : [],
+        },
+      ],
+    };
+  }, [
+    bounds,
+    colours,
+    fluxAsinh,
+    fluxLookup,
+    from,
+    hidden,
+    plots,
+    rows,
+    s.focus,
+    s.gas,
+    s.sources,
+    s.subset,
+    showExcluded,
+    to,
+  ]);
+  const hasManual = useMemo(
+    () => rows.some((r) => r.source === "manual"),
+    [rows],
+  );
+
   return (
     <div className="page">
       <div className="page-heading">
@@ -225,243 +306,63 @@ export function Treatments() {
       </div>
       <Status loading={result.isLoading} error={result.error} />
       <Status loading={allFluxes.isLoading} error={allFluxes.error} />
-      {!allFluxes.isLoading &&
-        !allFluxes.data?.rows.some((r) => r.source === "manual") &&
-        s.sources.includes("manual") && (
-          <p className="muted">
-            No manual fluxes in this project. Robot data remain available.
-          </p>
-        )}
-      {d && (
+      {allFluxes.data && !hasManual && s.sources.includes("manual") && (
+        <p className="muted">
+          No manual fluxes in this project. Robot data remain available.
+        </p>
+      )}
+      {summary && (
         <>
-          <TimeBrush rows={allFluxes.data?.rows ?? []} />{" "}
+          <Overview rows={rows} />
           <div className="treatment-legend">
-            {d.treatments.map((t) => (
-              <button
-                key={t.id}
-                className={
-                  hidden.includes(t.id) ? "hidden-treatment" : "active"
-                }
-                onDoubleClick={() => {
-                  s.set({ focus: null });
-                  setHidden(
-                    d.treatments.filter((v) => v.id !== t.id).map((v) => v.id),
-                  );
-                }}
-                onClick={() => {
-                  s.set({ focus: null });
-                  setHidden((v) =>
-                    v.includes(t.id)
-                      ? v.filter((id) => id !== t.id)
-                      : [...v, t.id],
-                  );
-                }}
-              >
-                <span className="dot" style={{ background: t.colour }} />
-                {t.name}
-              </button>
-            ))}
+            {summary.treatments
+              .filter((t) => t.nPlots > 0)
+              .map((t) => (
+                <button
+                  key={t.id}
+                  className={
+                    hidden.includes(t.id) ? "hidden-treatment" : "active"
+                  }
+                  onDoubleClick={() => {
+                    s.set({ focus: null });
+                    setHidden(
+                      summary.treatments
+                        .filter((v) => v.id !== t.id)
+                        .map((v) => v.id),
+                    );
+                  }}
+                  onClick={() => {
+                    s.set({ focus: null });
+                    setHidden((v) =>
+                      v.includes(t.id)
+                        ? v.filter((id) => id !== t.id)
+                        : [...v, t.id],
+                    );
+                  }}
+                >
+                  <span className="dot" style={{ background: t.colour }} />
+                  {t.name}
+                </button>
+              ))}
           </div>
           <div className="two charts">
-            <Panel
-              title="Cumulative total by treatment"
-              extra={
-                <small>{unit(d.cumulativeUnit)} · mean ± population SD</small>
-              }
-            >
-              <Chart
-                label="Treatment cumulative totals"
-                height={280}
-                onClick={(p) => {
-                  if (p.dataIndex != null)
-                    s.set({ focus: ts[p.dataIndex]?.id ?? null });
-                }}
-                option={
-                  {
-                    grid: { left: 65, right: 20, top: 25, bottom: 80 },
-                    tooltip: { trigger: "axis" },
-                    xAxis: {
-                      type: "category",
-                      data: ts.map((t) => t.name),
-                      axisLabel: { rotate: 40, fontSize: 10 },
-                    },
-                    yAxis: { type: "value", name: "kg ha⁻¹" },
-                    series: [
-                      {
-                        type: "bar",
-                        data: ts.map((t) => ({
-                          value: t.mean,
-                          itemStyle: { color: t.colour },
-                        })),
-                        barMaxWidth: 34,
-                      },
-                      {
-                        type: "custom",
-                        data: ts.map((t, i) => [
-                          i,
-                          t.mean - t.sd,
-                          t.mean + t.sd,
-                        ]),
-                        renderItem: (
-                          _p: unknown,
-                          a: {
-                            value: (i: number) => number;
-                            coord: (v: number[]) => number[];
-                          },
-                        ) => {
-                          const lo = a.coord([a.value(0), a.value(1)]),
-                            hi = a.coord([a.value(0), a.value(2)]);
-                          return {
-                            type: "group",
-                            children: [
-                              {
-                                type: "line",
-                                shape: {
-                                  x1: lo[0],
-                                  y1: lo[1],
-                                  x2: hi[0],
-                                  y2: hi[1],
-                                },
-                                style: { stroke: "#73838e" },
-                              },
-                              ...[lo, hi].map((v) => ({
-                                type: "line",
-                                shape: {
-                                  x1: v[0] - 5,
-                                  y1: v[1],
-                                  x2: v[0] + 5,
-                                  y2: v[1],
-                                },
-                                style: { stroke: "#73838e" },
-                              })),
-                            ],
-                          };
-                        },
-                      },
-                    ],
-                  } as EChartsCoreOption
-                }
-              />
-            </Panel>
-            <Panel
-              title="Daily means · whiskers 5th–95th percentile"
-              extra={
-                <label>
-                  <select
-                    aria-label="Distribution scale"
-                    value={boxScale}
-                    onChange={(e) => setBoxScale(e.target.value as AxisScale)}
-                  >
-                    <option value="asinh">Symmetric log</option>
-                    <option value="linear">Linear</option>
-                    <option value="log">Log (positive)</option>
-                  </select>
-                </label>
-              }
-            >
-              <Chart
-                label="Daily means box plot"
-                height={280}
-                onClick={(p) => {
-                  const value = p.value as number[];
-                  if (p.seriesType === "scatter" && value?.[2])
-                    s.openFlux(value[2]);
-                }}
-                option={
-                  {
-                    grid: { left: 65, right: 20, top: 25, bottom: 80 },
-                    tooltip: {
-                      trigger: "item",
-                      formatter: (p: {
-                        seriesType: string;
-                        value: number[];
-                        name: string;
-                      }) =>
-                        p.seriesType === "boxplot"
-                          ? p.name +
-                            "<br/>5%, Q1, median, Q3, 95%: " +
-                            p.value
-                              .slice(-5)
-                              .map((v) => fmt(inverse(v, boxScale), 1))
-                              .join(" / ")
-                          : "Flux #" +
-                            p.value[2] +
-                            ": " +
-                            fmt(inverse(p.value[1], boxScale), 1),
-                    },
-                    xAxis: {
-                      type: "category",
-                      data: ts.map((t) => t.name),
-                      axisLabel: { rotate: 40, fontSize: 10 },
-                    },
-                    yAxis: {
-                      type: "value",
-                      scale: true,
-                      axisLabel: {
-                        formatter: (v: number) => fmt(inverse(v, boxScale), 1),
-                      },
-                    },
-                    series: [
-                      {
-                        type: "boxplot",
-                        data: ts.map((t, i) => ({
-                          value: distributions[i].box.map((v) =>
-                            transformed(v, boxScale),
-                          ),
-                          itemStyle: {
-                            color: t.colour + "55",
-                            borderColor: t.colour,
-                          },
-                        })),
-                      },
-                      {
-                        type: "scatter",
-                        symbolSize: 4,
-                        data: distributions.flatMap((dist, i) =>
-                          dist.daily
-                            .filter(
-                              (v) =>
-                                v.value < dist.box[0] || v.value > dist.box[4],
-                            )
-                            .map((v) => ({
-                              value: [
-                                i,
-                                transformed(v.value, boxScale),
-                                v.fluxId,
-                              ],
-                              itemStyle: { color: ts[i].colour, opacity: 0.6 },
-                            })),
-                        ),
-                      },
-                    ],
-                  } as EChartsCoreOption
-                }
-              />
-            </Panel>
+            <TotalChart
+              treatments={treatments}
+              plots={plots}
+              cumulativeUnit={summary.cumulativeUnit}
+            />
+            <DistributionChart treatments={treatments} plots={plots} />
           </div>
           <Panel
             title="Cumulative curves by plot"
             extra={
               <small>
-                Trapezoid integration between measured days · kg ha⁻¹
+                Trapezoid integration between measured days ·{" "}
+                {unit(summary.cumulativeUnit)}
               </small>
             }
           >
-            <Chart
-              label="Cumulative plot curves"
-              option={
-                {
-                  ...seriesTime,
-                  series: ps.map((p) => ({
-                    type: "line",
-                    name: p.label,
-                    showSymbol: false,
-                    lineStyle: { color: colour(p.treatmentId), width: 1.5 },
-                    data: p.daily.map((v) => [v.time, v.cumulative]),
-                  })),
-                } as EChartsCoreOption
-              }
-            />
+            <TimeChart label="Cumulative plot curves" option={lineOption} />
           </Panel>
           <Panel
             title="Individual fluxes"
@@ -476,114 +377,11 @@ export function Treatments() {
               </label>
             }
           >
-            <Chart
+            <TimeChart
               label="Individual fluxes over time"
-              onReady={(c) => {
-                c.on("datazoom", () => {
-                  const z = (
-                    c.getOption() as {
-                      dataZoom: { startValue?: number; endValue?: number }[];
-                    }
-                  ).dataZoom[0];
-                  if (z.startValue !== undefined && z.endValue !== undefined)
-                    s.set({ treatmentZoom: [z.startValue, z.endValue] });
-                });
-              }}
               height={290}
-              onClick={(p) => {
-                const value = p.value as number[];
-                if (value?.[2]) s.openFlux(value[2]);
-              }}
-              option={
-                {
-                  ...seriesTime,
-                  yAxis: {
-                    type: "value",
-                    scale: true,
-                    axisLabel: {
-                      formatter: (v: number) =>
-                        fmt(fluxAsinh ? Math.sinh(v) : v, 1),
-                    },
-                  },
-                  tooltip: {
-                    trigger: "item",
-                    formatter: (p: { value: number[]; seriesName: string }) =>
-                      p.seriesName +
-                      " · " +
-                      dateTime(p.value[0]) +
-                      "<br/>Flux #" +
-                      p.value[2] +
-                      ": " +
-                      fmt(fluxAsinh ? Math.sinh(p.value[1]) : p.value[1], 1),
-                  },
-                  series: [
-                    ...ps.map((p) => ({
-                      name: p.label,
-                      type: "scatter",
-                      symbolSize: 5,
-                      itemStyle: {
-                        color: colour(p.treatmentId),
-                        opacity: 0.65,
-                      },
-                      data: p.points
-                        .filter(
-                          (v) =>
-                            showExcluded || !fluxLookup.get(v.fluxId)?.excluded,
-                        )
-                        .map((v) => ({
-                          value: [
-                            v.time,
-                            fluxAsinh ? Math.asinh(v.value) : v.value,
-                            v.fluxId,
-                          ],
-                          itemStyle: {
-                            color: colour(p.treatmentId),
-                            borderWidth:
-                              (fluxLookup.get(v.fluxId)?.attention ?? 0) >= 30
-                                ? 2
-                                : 0,
-                            borderColor:
-                              (fluxLookup.get(v.fluxId)?.attention ?? 0) >= 70
-                                ? "#c94e48"
-                                : "#c58a2f",
-                          },
-                          symbol:
-                            (fluxLookup.get(v.fluxId)?.attention ?? 0) >= 30
-                              ? "circle"
-                              : "circle",
-                          symbolSize:
-                            (fluxLookup.get(v.fluxId)?.attention ?? 0) >= 30
-                              ? 7
-                              : 4,
-                        })),
-                    })),
-                    {
-                      name: "Excluded",
-                      type: "scatter",
-                      symbolSize: 5,
-                      itemStyle: { color: "#8b969e", opacity: 0.25 },
-                      data:
-                        allFluxes.data?.rows
-                          .filter(
-                            (r) =>
-                              showExcluded &&
-                              r.excluded &&
-                              (!s.focus || r.treatmentId === s.focus) &&
-                              s.sources.includes(r.source) &&
-                              (!q.from || r.time >= q.from) &&
-                              (!q.to || r.time <= q.to),
-                          )
-                          .map((r) => [
-                            r.time,
-                            fluxAsinh
-                              ? Math.asinh(Number(r[s.gas + "_flux"]))
-                              : r[s.gas + "_flux"],
-                            r.id,
-                          ]) ?? [],
-                    },
-                  ],
-                } as EChartsCoreOption
-              }
+              onClick={openFluxPoint}
+              option={fluxOption}
             />
             <details className="accessible-points">
               <summary>Open a flux by keyboard</summary>
@@ -595,56 +393,30 @@ export function Treatments() {
                 onKeyDown={(e) => {
                   if (e.key === "Enter") {
                     const id = Number(e.currentTarget.value);
-                    if (ps.some((p) => p.points.some((v) => v.fluxId === id)))
+                    if (
+                      plots.some((p) => p.points.some((v) => v.fluxId === id))
+                    )
                       s.openFlux(id);
                   }
                 }}
               />
             </details>
           </Panel>
-          <Panel
-            title="Weather context"
-            extra={
-              <small>
-                Daily temperature and precipitation · shared date range above
-              </small>
-            }
-          >
-            <Status
-              loading={seriesMeta.isLoading || weather.isLoading}
-              error={seriesMeta.error ?? weather.error}
-            />
-            {!seriesMeta.isLoading && !weatherIds.length && (
-              <Empty>
-                No weather series. Import weather in External data to add
-                context.
-              </Empty>
-            )}
-            <Chart
-              label="Weather precipitation and temperature"
-              height={190}
-              option={
-                {
-                  ...seriesTime,
-                  yAxis: [
-                    { type: "value", name: "°C" },
-                    { type: "value", name: "mm", splitLine: { show: false } },
-                  ],
-                  series: weather.data?.map((w, i) => ({
-                    name: i ? "Precipitation" : "Temperature",
-                    type: w.id === rain?.id ? "bar" : "line",
-                    yAxisIndex: w.id === rain?.id ? 1 : 0,
-                    showSymbol: false,
-                    itemStyle: { color: i ? "#708ebd" : "#bd7d3e" },
-                    areaStyle: i ? undefined : { opacity: 0.1 },
-                    data: w.points.map((p) => [p.time, p.value]),
-                  })),
-                } as EChartsCoreOption
-              }
-            />
-          </Panel>
-          {!ps.some((p) => p.points.length) && (
-            <Empty>No fluxes match this date range and source selection.</Empty>
+          <EnvironmentalContext
+            meta={seriesMeta.data}
+            loading={seriesMeta.isLoading}
+            error={seriesMeta.error}
+            visible={visible}
+            bounds={bounds}
+          />
+          <EmissionMap
+            summary={summary}
+            rows={rows}
+            updating={result.isPlaceholderData}
+            visible={visible}
+          />
+          {!plots.length && (
+            <Empty>No fluxes match the current selection.</Empty>
           )}
         </>
       )}

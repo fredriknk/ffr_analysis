@@ -721,6 +721,54 @@ kbd {
   border-color: var(--accent);
   background: var(--active);
 }
+.treatments-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+}
+.treatments-controls label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.field-map.treatments-map {
+  height: 360px;
+  margin-bottom: 8px;
+}
+.treatments-map [data-plot-id] {
+  cursor: pointer;
+}
+.treatments-map [data-plot-id] :is(polygon, circle) {
+  fill-opacity: 0.82;
+  stroke: #fff;
+  stroke-width: 1.5px;
+}
+.treatments-map [data-plot-id]:is(.selected, :hover) :is(polygon, circle) {
+  fill-opacity: 1;
+  stroke: #172128;
+  stroke-width: 2.5px;
+}
+.treatments-map .plot-label {
+  fill: #172128;
+  stroke: #fff;
+  stroke-width: 2.5px;
+  paint-order: stroke;
+  pointer-events: none;
+}
+.treatments-map-legend {
+  margin-bottom: 8px;
+}
+.treatments-map-scale {
+  display: inline-flex;
+  width: 110px;
+  height: 12px;
+  overflow: hidden;
+  border-radius: 2px;
+}
+.treatments-map-scale > span {
+  flex: 1;
+}
 .charts {
   gap: 16px;
 }

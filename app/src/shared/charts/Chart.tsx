@@ -45,6 +45,7 @@ export function Chart({
   onReady,
   label,
   group,
+  replaceMerge,
 }: {
   option: EChartsCoreOption;
   height?: number | string;
@@ -52,6 +53,7 @@ export function Chart({
   onReady?: (c: echarts.ECharts) => void;
   label: string;
   group?: string;
+  replaceMerge?: string[];
 }) {
   const ref = useRef<HTMLDivElement>(null),
     instance = useRef<echarts.ECharts>(),
@@ -98,13 +100,13 @@ export function Chart({
         backgroundColor: "transparent",
         ...option,
       },
-      { replaceMerge: ["series"] },
+      { replaceMerge: replaceMerge ?? ["series"] },
     );
     c.off("brushselected");
     c.off("brushEnd");
     c.off("datazoom");
     onReady?.(c);
-  }, [option, onReady, theme, group]);
+  }, [option, onReady, theme, group, replaceMerge]);
   return (
     <div
       ref={ref}

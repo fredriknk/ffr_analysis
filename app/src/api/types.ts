@@ -334,6 +334,7 @@ export interface TreatmentSummary {
   }[];
 }
 export interface SeriesMeta {
+  key?: string;
   displayName?: string;
   id: number;
   name: string;

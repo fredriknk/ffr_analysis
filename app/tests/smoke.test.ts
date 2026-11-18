@@ -314,7 +314,9 @@ test("empty project and API error states stay usable", async ({ page }) => {
     ),
   ).toBeVisible();
   await nav("Treatments");
-  await expect(page.getByText(/No weather series/)).toBeVisible();
+  await expect(
+    page.getByText(/Import environmental series in External data/),
+  ).toBeVisible();
   await nav("Data");
   await expect(
     page.getByText("No rows match. Clear filters to see all measurements."),

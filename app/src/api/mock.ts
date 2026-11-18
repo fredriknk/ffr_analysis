@@ -611,12 +611,13 @@ export function createMock(seed = 42): T.FfrApi {
     gasChoices?: [number, Record<string, boolean>][];
   };
   let series: T.SeriesMeta[] = [
-    ["Air temperature", "°C", "Weather"],
-    ["Precipitation", "mm", "Weather"],
-    ["Soil moisture", "m³ m⁻³", "Logger"],
-    ["Soil temperature", "°C", "Logger"],
-  ].map(([name, unit, source], i) => ({
+    ["air_temperature", "Air temperature", "°C", "Weather"],
+    ["sum(precipitation_amount PT1H)", "Precipitation", "mm", "Weather"],
+    ["VWC_GROUND", "Soil moisture", "m³ m⁻³", "Logger"],
+    ["TEMPC_GROUND", "Soil temperature", "°C", "Logger"],
+  ].map(([key, name, unit, source], i) => ({
     id: i + 1,
+    key,
     name,
     unit,
     source,
@@ -1225,16 +1226,21 @@ export function createMock(seed = 42): T.FfrApi {
     listSeries: async () => structuredClone(series),
     getSeries: async (ids, from = start, to = end, maxPoints = 2000) =>
       ids.map((id) => {
-        const step = Math.max(
-          3600000,
-          Math.ceil((to - from) / maxPoints / 3600000) * 3600000,
-        );
+        const hour = 3600000;
+        const first =
+          start + Math.max(0, Math.ceil((from - start) / hour)) * hour;
+        const last = Math.min(to, end);
+        const hours = Math.floor((last - first) / hour) + 1;
+        const stride = Math.max(1, Math.ceil(hours / maxPoints));
         return {
           id,
           points: Array.from(
-            { length: Math.max(0, Math.floor((to - from) / step) + 1) },
+            {
+              length:
+                maxPoints > 0 ? Math.max(0, Math.ceil(hours / stride)) : 0,
+            },
             (_, i) => {
-              const time = from + i * step,
+              const time = first + i * stride * hour,
                 d = (time - start) / 86400000;
               return {
                 time,
