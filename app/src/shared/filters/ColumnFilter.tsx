@@ -11,6 +11,17 @@ export function ColumnFilter({
   onChange: (value: unknown) => void;
 }) {
   const label = meta.label;
+  if (meta.key === "id")
+    return (
+      <input
+        className="id-filter"
+        aria-label="Filter flux IDs"
+        title="Flux IDs to show: single IDs and ranges, separated by commas, e.g. 59, 61-70"
+        placeholder="59, 61-70"
+        value={typeof value === "string" ? value : ""}
+        onChange={(e) => onChange(e.target.value)}
+      />
+    );
   if (meta.type === "category" || meta.type === "boolean") {
     const values =
         meta.type === "boolean"

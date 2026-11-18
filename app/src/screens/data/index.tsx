@@ -24,6 +24,7 @@ import { codes, DiagnosticPicker } from "../../shared/diagnostics";
 import { attention, dateTime, significant } from "../../shared/format";
 import { useDiagnostics } from "../../shared/hooks/useDiagnostics";
 import { FluxTableView } from "../../shared/table/FluxTableView";
+import { parseIdSpec } from "../../shared/filters/idSpec";
 import { useStore } from "../../store";
 export function Data() {
   const active = useStore((s) => s.screen === "Data");
@@ -101,7 +102,7 @@ export function Data() {
           accessorKey: c.key,
           size:
             c.key === "id"
-              ? 60
+              ? 110
               : c.key === "time"
                 ? 175
                 : c.key === "diag"
@@ -116,6 +117,10 @@ export function Data() {
           ),
           filterFn: (row, id, value: unknown) => {
             const cell = row.getValue<Cell>(id);
+            if (c.key === "id") {
+              const test = parseIdSpec(String(value ?? ""));
+              return !test || test(Number(cell));
+            }
             if (c.type === "number" || c.type === "time") {
               const [a, b] = String(value ?? "").split("..");
               const parse = (v: string) =>

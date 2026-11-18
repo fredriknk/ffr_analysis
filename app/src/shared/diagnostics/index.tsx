@@ -47,33 +47,41 @@ export function DiagnosticPicker({
   onChange: (v: string[]) => void;
   label?: string;
 }) {
+  const toggle = (code: string) =>
+    onChange(
+      value.includes(code) ? value.filter((v) => v !== code) : [...value, code],
+    );
   return (
     <div className="field diagnostic-picker" role="group" aria-label={label}>
-      <span>{label}</span>
-      {counts.map((c) => (
-        <label key={c.code}>
-          <input
-            type="checkbox"
-            checked={value.includes(c.code)}
-            onChange={(e) =>
-              onChange(
-                e.target.checked
-                  ? [...value, c.code]
-                  : value.filter((v) => v !== c.code),
-              )
+      <span>
+        {label}
+        <small className="muted">
+          {" "}
+          · warn/bad count, info count · any selected code matches
+        </small>
+      </span>
+      <div className="diagnostic-chips">
+        {counts.map((c) => (
+          <button
+            key={c.code}
+            type="button"
+            className={
+              "diagnostic-chip" + (value.includes(c.code) ? " on" : "")
             }
-          />
-          <span>
-            {c.label} <b>{(c.warnBad ?? 0).toLocaleString()}</b>
-            <small className="muted">
-              {" "}
-              · {(c.info ?? 0).toLocaleString()} info
-            </small>
-          </span>
-        </label>
-      ))}
+            aria-pressed={value.includes(c.code)}
+            title={c.description}
+            onClick={() => toggle(c.code)}
+          >
+            <span>{c.label}</span>
+            <b>{(c.warnBad ?? 0).toLocaleString()}</b>
+            <small>{(c.info ?? 0).toLocaleString()} info</small>
+          </button>
+        ))}
+      </div>
       {!!value.length && (
-        <button onClick={() => onChange([])}>Clear diagnostic filter</button>
+        <button type="button" onClick={() => onChange([])}>
+          Clear diagnostic filter
+        </button>
       )}
     </div>
   );
