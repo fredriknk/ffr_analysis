@@ -32,13 +32,7 @@ impl Session {
                 .unwrap_or(0.)),
         );
         let side = if row["side"] == "left" { 1 } else { 2 };
-        let results = regression::compute(
-            &raw,
-            side,
-            &json!({}),
-            &regression::legacy_options(&opts),
-            temp,
-        )?;
+        let results = regression::compute_with(&raw, side, &opts, temp)?;
         self.persist_result(id, row, &raw, &cfg, overridden, (results, None))
     }
 
@@ -221,13 +215,7 @@ impl Session {
         let results: Vec<_> = jobs
             .par_iter()
             .map(|(_, _, raw, side, opts, _, temp)| {
-                let results = regression::compute(
-                    raw,
-                    *side,
-                    &json!({}),
-                    &regression::legacy_options(opts),
-                    *temp,
-                )?;
+                let results = regression::compute_with(raw, *side, opts, *temp)?;
                 let lag = crate::diagnostics::valve_lag(raw, opts, &cfg.diagnostics);
                 let diagnostics =
                     crate::diagnostics::analyse(raw, *side, opts, &results, &cfg.diagnostics, lag);

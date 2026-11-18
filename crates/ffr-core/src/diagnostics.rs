@@ -878,8 +878,7 @@ mod tests {
         raw
     }
     fn run(raw: &Raw, o: &AnalysisOptions) -> Findings {
-        let results = regression::compute(raw, 1, &json!({}), &regression::legacy_options(o), 20.)
-            .expect("fit");
+        let results = regression::compute_with(raw, 1, o, 20.).expect("fit");
         let c = DiagnosticsConfig::default();
         let mut f = analyse(raw, 1, o, &results, &c, valve_lag(raw, o, &c));
         let mut row: FluxRow = serde_json::from_value(json!({
@@ -1136,9 +1135,7 @@ mod tests {
         let r = trace(0., false, false, true);
         let mut o = AnalysisOptions::default();
         let c = DiagnosticsConfig::default();
-        let mut results =
-            regression::compute(&r, 1, &json!({}), &regression::legacy_options(&o), 20.)
-                .expect("fit");
+        let mut results = regression::compute_with(&r, 1, &o, 20.).expect("fit");
         let ordinary = results["CO2"].clone();
         assert!(apply_fit_method(&r, 1, &o, &mut results, &c).is_empty());
         o.fit = "robust".into();

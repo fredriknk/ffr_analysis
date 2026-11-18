@@ -191,16 +191,18 @@ export function TraceChart({
       data: [{ yAxis: 0 }],
     },
   });
+  /** Edits this gas's own value when it has one, else the common value. */
   function update(key: "start" | "stop" | "valveOffset", value: number) {
-    const next = options.perGas?.[gas]
-      ? {
-          ...drag.current,
-          perGas: {
-            ...drag.current.perGas,
-            [gas]: { ...drag.current.perGas?.[gas], [key]: value },
-          },
-        }
-      : { ...drag.current, [key]: value };
+    const next =
+      options.perGas?.[gas]?.[key] !== undefined
+        ? {
+            ...drag.current,
+            perGas: {
+              ...drag.current.perGas,
+              [gas]: { ...drag.current.perGas?.[gas], [key]: value },
+            },
+          }
+        : { ...drag.current, [key]: value };
     drag.current = next;
     return next;
   }

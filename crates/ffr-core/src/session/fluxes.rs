@@ -263,13 +263,7 @@ impl Session {
         };
         let side = if row["side"] == "left" { 1 } else { 2 };
         let temp = row["airTemp"].as_f64().unwrap_or(20.);
-        let mut results = regression::compute(
-            &raw,
-            side,
-            &json!({}),
-            &regression::legacy_options(&options),
-            temp,
-        )?;
+        let mut results = regression::compute_with(&raw, side, &options, temp)?;
         let cfg = self.get_config()?;
         for r in results.values_mut() {
             r.flux *= cfg.pressure / 101000. * cfg.chamber_height / 0.5;
@@ -424,6 +418,7 @@ impl Session {
     }
 
     pub fn preview_flux(&self, id: i64, options: AnalysisOptions) -> Result<FluxDetail> {
+        let options = options.normalised();
         options.validate()?;
         Ok(serde_json::from_value(self.detail(id, Some(options))?)?)
     }
@@ -433,6 +428,7 @@ impl Session {
         ids: &[i64],
         options: Option<AnalysisOptions>,
     ) -> Result<Vec<FluxRow>> {
+        let options = options.map(AnalysisOptions::normalised);
         if let Some(o) = &options {
             o.validate()?;
         }
@@ -656,7 +652,7 @@ impl Session {
                     value[key] = v.clone();
                 }
             }
-            let opts: AnalysisOptions = serde_json::from_value(value)?;
+            let opts = serde_json::from_value::<AnalysisOptions>(value)?.normalised();
             opts.validate()?;
             let old: Option<String> =
                 self.db()?

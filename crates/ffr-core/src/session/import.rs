@@ -334,6 +334,7 @@ bytes])?;
                             .per_gas
                             .insert(gas.into(), regression::resolve(side, gas, o, &all["ALL"]));
                     }
+                    let options = options.normalised();
                     let id = row["id"].as_i64().unwrap_or(0);
                     self.db()?.execute(
                         "UPDATE fluxes SET options=?2 WHERE id=?1",

@@ -26,9 +26,13 @@ interface Props {
   scale: AxisScale;
   full: boolean;
   colour: "severity" | "treatment";
+  /** The combined selection of every chart (union or intersection). */
   selected: number[];
-  onSelect: (ids: number[]) => void;
+  /** This chart's own brush selection changed (empty when cleared). */
+  onSelect: (chart: string, ids: number[]) => void;
   onOpen: (id: number) => void;
+  /** Incremented to clear this chart's brush areas. */
+  clearToken: number;
 }
 export const ScatterPlot = memo(function ScatterPlot({
   spec,
@@ -40,6 +44,7 @@ export const ScatterPlot = memo(function ScatterPlot({
   selected,
   onSelect,
   onOpen,
+  clearToken,
 }: Props) {
   const theme = useStore((s) => s.theme);
   const instance = useRef<ECharts>(),
@@ -68,7 +73,14 @@ export const ScatterPlot = memo(function ScatterPlot({
       ),
       ys = visible.map((r) => transformed(Number(r[spec.y]), sy)),
       xb = spec.time ? robustBounds(xs, true) : robustBounds(xs, full),
-      yb = robustBounds(ys, full);
+      yb = robustBounds(ys, full),
+      // Axes reach a little past the data so a brush can enclose edge points.
+      pad = (b: [number, number]): [number, number] => {
+        const m = (b[1] - b[0]) * 0.04 || 1;
+        return [b[0] - m, b[1] + m];
+      },
+      xa = pad(xb),
+      ya = pad(yb);
     const groups = new Map<
       string,
       { severity: string; colour: string; points: number[][] }
@@ -107,7 +119,7 @@ export const ScatterPlot = memo(function ScatterPlot({
         ({ info: 0, warn: 1, bad: 2 })[a.severity as "info"] -
         { info: 0, warn: 1, bad: 2 }[b.severity as "info"],
     );
-    return { visible, sx, sy, xb, yb, series };
+    return { visible, sx, sy, xb, yb, xa, ya, series };
   }, [rows, spec, scale, full, colour, layout]);
   const option = useMemo(
     () =>
@@ -132,15 +144,15 @@ export const ScatterPlot = memo(function ScatterPlot({
         brush: {
           toolbox: ["rect", "polygon", "clear"],
           brushMode: "multiple",
-          xAxisIndex: 0,
-          yAxisIndex: 0,
+          // Not bound to the axes: a brush may start or end outside the plot
+          // area, so points on its edges can be enclosed.
           throttleType: "debounce",
           throttleDelay: 80,
         },
         xAxis: {
           type: spec.time ? "time" : "value",
-          min: dataset.xb[0],
-          max: dataset.xb[1],
+          min: dataset.xa[0],
+          max: dataset.xa[1],
           name: spec.xLabel,
           nameLocation: "middle",
           nameGap: 29,
@@ -158,8 +170,8 @@ export const ScatterPlot = memo(function ScatterPlot({
         },
         yAxis: {
           type: "value",
-          min: dataset.yb[0],
-          max: dataset.yb[1],
+          min: dataset.ya[0],
+          max: dataset.ya[1],
           scale: true,
           splitNumber: 3,
           name: spec.yLabel,
@@ -223,12 +235,8 @@ export const ScatterPlot = memo(function ScatterPlot({
             type: "scatter",
             z: 9,
             symbol: "circle",
-            symbolSize: 7,
-            itemStyle: {
-              color: "transparent",
-              borderColor: "#d55e00",
-              borderWidth: 1.5,
-            },
+            symbolSize: 6,
+            itemStyle: { borderColor: "#1d2b33", borderWidth: 0.8 },
             data: [],
           },
         ],
@@ -258,14 +266,18 @@ export const ScatterPlot = memo(function ScatterPlot({
             ) ?? [],
           ),
         ];
-        if (ids.length) {
-          if (!brushStarted.current) brushStarted.current = performance.now();
-          select.current(ids);
-        }
+        if (ids.length && !brushStarted.current)
+          brushStarted.current = performance.now();
+        select.current(spec.label, ids);
       });
     },
-    [dataset],
+    [dataset, spec.label],
   );
+  useEffect(() => {
+    const c = instance.current;
+    if (clearToken && c && !c.isDisposed())
+      c.dispatchAction({ type: "brush", areas: [] });
+  }, [clearToken]);
   const click = useCallback((p: { value: unknown }) => {
     const v = p.value as number[];
     if (v?.[2]) open.current(v[2]);
@@ -273,13 +285,25 @@ export const ScatterPlot = memo(function ScatterPlot({
   useEffect(() => {
     const c = instance.current;
     if (!c || c.isDisposed()) return;
-    const ids = new Set(selected);
+    // Linked selection: the selected fluxes keep their colour in every
+    // chart, everything else is dimmed.
+    const ids = new Set(selected),
+      dim = selected.length > 0;
     c.setOption({
       series: [
+        ...dataset.series.map((g, i) => ({
+          id: "points-" + i,
+          itemStyle: {
+            color: g.colour,
+            opacity: dim ? 0.07 : g.severity === "info" ? 0.22 : 0.8,
+          },
+        })),
         {
           id: "selection",
           data: dataset.series.flatMap((g) =>
-            g.points.filter((p) => ids.has(p[2])),
+            g.points
+              .filter((p) => ids.has(p[2]))
+              .map((p) => ({ value: p, itemStyle: { color: g.colour } })),
           ),
         },
       ],
@@ -307,6 +331,7 @@ export const ScatterPlot = memo(function ScatterPlot({
         <h3>{spec.label}</h3>
         <small>
           {full ? "Full range" : "1st–99th percentile · edge points clamped"}
+          {selected.length > 0 && " · selected fluxes highlighted"}
         </small>
       </div>
       <Chart

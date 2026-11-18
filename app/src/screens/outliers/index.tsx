@@ -9,6 +9,7 @@ import { useDiagnostics } from "../../shared/hooks/useDiagnostics";
 import { useStore } from "../../store";
 import { ScatterPlot, type ScatterSpec } from "./ScatterPlot";
 import { quantile, type AxisScale } from "./axes";
+import { combineSelections } from "./combine";
 export function Outliers() {
   const visible = useStore((s) => s.screen === "Outliers");
   const s = useStore(
@@ -16,14 +17,17 @@ export function Outliers() {
     ),
     data = useRows(),
     action = useAction(),
-    [selected, setSelected] = useState<number[]>([]),
+    // Each chart's own brush selection, by chart label.
+    [selections, setSelections] = useState<Record<string, number[]>>({}),
+    [combine, setCombine] = useState<"union" | "intersection">("union"),
+    [clearToken, setClearToken] = useState(0),
     [includeInfo, setIncludeInfo] = useState(false),
     [diagnostic, setDiagnostic] = useState<string | null>(null),
     [excluded, setExcluded] = useState(false),
     [gas, setGas] = useState<Gas>("N2O"),
     [lagGas, setLagGas] = useState<"N2O" | "CO2">("CO2"),
     [scale, setScale] = useState<AxisScale>("asinh"),
-    [full, setFull] = useState(false),
+    [full, setFull] = useState(true),
     [colour, setColour] = useState<"severity" | "treatment">("severity");
   const counts = useDiagnostics(visible),
     layout = useQuery({
@@ -110,12 +114,26 @@ export function Outliers() {
     [gas, lagGas],
   );
   const onSelect = useCallback(
-    (ids: number[]) =>
-      setSelected((prev) => (prev.join(",") === ids.join(",") ? prev : ids)),
+    (chart: string, ids: number[]) =>
+      setSelections((prev) =>
+        (prev[chart] ?? []).join(",") === ids.join(",")
+          ? prev
+          : { ...prev, [chart]: ids },
+      ),
     [],
   );
-  const available = new Set(rows.map((r) => r.id)),
-    selectedIds = selected.filter((id) => available.has(id));
+  const clearAll = () => {
+    setSelections({});
+    setClearToken((t) => t + 1);
+  };
+  const active = Object.values(selections).filter((ids) => ids.length),
+    selectedIds = useMemo(() => {
+      const available = new Set(rows.map((r) => r.id));
+      return combineSelections(
+        Object.values(selections).filter((ids) => ids.length),
+        combine,
+      ).filter((id) => available.has(id));
+    }, [selections, combine, rows]);
   return (
     <div className="page outliers-page">
       <div className="page-heading">
@@ -195,7 +213,34 @@ export function Outliers() {
         <strong data-testid="outlier-selection">
           {selectedIds.length} selected
         </strong>
-        <button onClick={() => setSelected(rows.map((r) => r.id))}>
+        <span
+          className="segmented"
+          role="group"
+          aria-label="Combine chart selections"
+          title="How selections in several charts combine: fluxes selected in any chart, or in every chart that has a selection"
+        >
+          {(["union", "intersection"] as const).map((m) => (
+            <button
+              key={m}
+              aria-pressed={combine === m}
+              className={combine === m ? "on" : ""}
+              onClick={() => setCombine(m)}
+            >
+              {m === "union" ? "Union (any)" : "Intersection (all)"}
+            </button>
+          ))}
+        </span>
+        <small className="muted">
+          {active.length
+            ? active.length + (active.length === 1 ? " chart" : " charts")
+            : "Brush points in any chart"}
+        </small>
+        <button
+          onClick={() => {
+            clearAll();
+            setSelections({ "All visible": rows.map((r) => r.id) });
+          }}
+        >
           Select all visible
         </button>
         <button
@@ -223,11 +268,13 @@ export function Outliers() {
         </button>
         <button
           onClick={() => {
-            setSelected([]);
+            clearAll();
             setDiagnostic(null);
+            setIncludeInfo(false);
+            setExcluded(false);
           }}
         >
-          Clear selection & filter
+          Clear selections & filters
         </button>
       </div>
       <Status loading={data.isLoading} error={data.error} />
@@ -253,7 +300,7 @@ export function Outliers() {
                 title={c.description}
                 onClick={() => {
                   setDiagnostic(diagnostic === c.code ? null : c.code);
-                  setSelected([]);
+                  clearAll();
                 }}
               >
                 <span>{c.label}</span>
@@ -293,6 +340,7 @@ export function Outliers() {
               selected={selectedIds}
               onSelect={onSelect}
               onOpen={s.openFlux}
+              clearToken={clearToken}
             />
           ))}
         </div>

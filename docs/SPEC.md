@@ -283,6 +283,10 @@ owner may refine, but keep these concepts):
 }
 ```
 
+Per-gas values apply to that gas's regression and diagnostics alike. Stored options are
+normalised: a per-gas entry keeps only the fields above that differ from the flux-level
+value (legacy imports are normalised the same way).
+
 `excluded` is a property of the flux, not an option; so is the per-gas exclusion
 (`gasExcluded`, 4.9). Legacy per-file options apply to both
 sides of the file.
@@ -438,8 +442,11 @@ Screens:
      exclude / mark reviewed.
 4. **Outliers** — linked scatter plots for hunting bad fluxes: N2O flux vs CO2 flux, r² vs
    flux, valve lag vs date, flux vs date per treatment with flagged points marked, counts per
-   diagnostic code. Box-select points → open as a Review queue, bulk exclude, bulk mark
-   reviewed.
+   diagnostic code (full data range by default). Box- or lasso-select points in any chart
+   (a brush may extend past the plot area); each chart keeps its own selection and they
+   combine as a union or an intersection, which every chart highlights while dimming the
+   rest; one button clears all selections and filters. Selected → open as a Review queue,
+   bulk exclude, bulk mark reviewed.
 5. **Data** — the full flux table: column chooser, per-column filters (numeric range,
    category set, date range, text), sorting, saved filter presets, row click opens Review,
    "show these in Treatments", export to Excel/CSV with the three modes.

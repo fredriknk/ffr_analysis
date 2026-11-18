@@ -61,6 +61,32 @@ impl AnalysisOptions {
     pub fn robust(&self) -> bool {
         self.fit == "robust"
     }
+    /// Per-gas entries keep only the five per-gas fields, and only where they
+    /// differ from the flux-level value; empty entries are dropped. (Legacy
+    /// imports copied every resolved legacy option into every gas.)
+    pub fn normalised(mut self) -> Self {
+        let top = [
+            ("start", self.start),
+            ("stop", self.stop),
+            ("cutBeginnings", self.cut_beginnings),
+            ("cutEnds", self.cut_ends),
+            ("valveOffset", self.valve_offset),
+        ];
+        self.per_gas = std::mem::take(&mut self.per_gas)
+            .into_iter()
+            .filter_map(|(gas, v)| {
+                let kept: serde_json::Map<String, Value> = top
+                    .iter()
+                    .filter_map(|(key, value)| {
+                        let own = v.get(*key)?.as_f64()?;
+                        (own != *value).then(|| (key.to_string(), serde_json::json!(own)))
+                    })
+                    .collect();
+                (!kept.is_empty()).then_some((gas, Value::Object(kept)))
+            })
+            .collect();
+        self
+    }
     pub fn for_gas(&self, gas: &str) -> Self {
         let mut o = self.clone();
         if let Some(v) = self.per_gas.get(gas) {

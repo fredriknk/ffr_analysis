@@ -586,6 +586,43 @@ fn instrument_dropout_excludes_that_gas_until_included() {
 }
 
 #[test]
+fn per_gas_window_reaches_the_regression_and_options_are_normalised() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let s = multi_file_project(dir.path());
+    let base = s.get_flux_detail(1).expect("detail").options;
+    let co2 = |d: &ffr_core::FluxDetail| {
+        d.regressions
+            .iter()
+            .find(|r| r.gas == "CO2")
+            .expect("CO2")
+            .clone()
+    };
+    let mut own = base.clone();
+    own.per_gas
+        .insert("CO2".into(), json!({"start": 60., "crit": "mse"}));
+    let fit = co2(&s.preview_flux(1, own.clone()).expect("preview"));
+    // The window starts at the point nearest 60 s (legacy `nearest`).
+    assert!(fit.start > 50., "per-gas start ignored: {}", fit.start);
+    // Stored options keep only per-gas fields that differ from the flux's.
+    let mut same = base.clone();
+    same.per_gas.insert(
+        "CO2".into(),
+        json!({"start": base.start, "stop": base.stop, "interval": 5}),
+    );
+    s.set_flux_options(&[1], Some(same)).expect("same");
+    assert!(s
+        .get_flux_detail(1)
+        .expect("detail")
+        .options
+        .per_gas
+        .is_empty());
+    s.set_flux_options(&[1], Some(own)).expect("own");
+    let stored = s.get_flux_detail(1).expect("detail");
+    assert_eq!(stored.options.per_gas["CO2"], json!({"start": 60.}));
+    assert_eq!(co2(&stored).start, fit.start);
+}
+
+#[test]
 fn used_points_follow_the_valve_offset() {
     let dir = tempfile::tempdir().expect("tempdir");
     let s = multi_file_project(dir.path());

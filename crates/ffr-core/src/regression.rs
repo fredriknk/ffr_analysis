@@ -229,9 +229,32 @@ pub fn resolve(side: &str, gas: &str, pref: &Value, alt: &Value) -> Value {
     }
     r
 }
+/// Legacy-style options for `compute` (as its `specific` argument): the flux
+/// options, plus under each gas key the complete options for that gas
+/// (`AnalysisOptions::for_gas`), so per-gas start, stop, cuts and valve offset
+/// apply to that gas's regression exactly as they do to its diagnostics.
 pub fn legacy_options(o: &AnalysisOptions) -> Value {
+    let mut v = flat_options(o);
+    if let Some(m) = v.as_object_mut() {
+        for g in o.per_gas.keys() {
+            m.insert(g.clone(), flat_options(&o.for_gas(g)));
+        }
+    }
+    v
+}
+/// Regressions of one chamber with the project's analysis options.
+pub fn compute_with(
+    raw: &Raw,
+    side: u8,
+    o: &AnalysisOptions,
+    temp: f64,
+) -> Result<BTreeMap<String, Regression>> {
+    compute(raw, side, &legacy_options(o), &json!({}), temp)
+}
+fn flat_options(o: &AnalysisOptions) -> Value {
     let mut v = serde_json::to_value(o).unwrap_or_default();
     if let Some(m) = v.as_object_mut() {
+        m.remove("perGas");
         m.insert("co2_guides".into(), json!(o.co2_guides));
         m.insert("cut_beginnings".into(), json!(o.cut_beginnings));
         m.insert("cut_ends".into(), json!(o.cut_ends));
@@ -244,9 +267,6 @@ pub fn legacy_options(o: &AnalysisOptions) -> Value {
         }
         if o.slope.is_none() {
             m.remove("slope");
-        }
-        for (g, p) in &o.per_gas {
-            m.insert(g.clone(), p.clone());
         }
     }
     v

@@ -122,8 +122,11 @@ original INTEGER);
             .optional()?;
         if analysed.and_then(|v| v.parse::<i64>().ok()).unwrap_or(1) < ANALYSIS_VERSION {
             // Same file format; the stored results predate checks such as
-            // instrument dropouts, so refresh them once.
+            // instrument dropouts and per-gas windows, so refresh them once.
+            let tx = self.db()?.unchecked_transaction()?;
+            self.normalise_stored_options()?;
             self.recompute_all(|_| {})?;
+            tx.commit()?;
         }
         let info = self
             .project_info()?
@@ -134,6 +137,26 @@ original INTEGER);
             json!({"path":path,"name":info.name,"openedAt":chrono::Utc::now().timestamp_millis()}),
         );
         Ok(info)
+    }
+
+    /// Rewrites stored per-flux options with `AnalysisOptions::normalised`.
+    fn normalise_stored_options(&self) -> Result<()> {
+        let stored: Vec<(i64, String)> = self
+            .db()?
+            .prepare("SELECT id,options FROM fluxes WHERE options IS NOT NULL")?
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<std::result::Result<_, _>>()?;
+        for (id, text) in stored {
+            let options: AnalysisOptions = serde_json::from_str(&text)?;
+            let normalised = serde_json::to_string(&options.normalised())?;
+            if normalised != text {
+                self.db()?.execute(
+                    "UPDATE fluxes SET options=?2 WHERE id=?1",
+                    params![id, normalised],
+                )?;
+            }
+        }
+        Ok(())
     }
 
     pub fn project_close(&mut self) {
