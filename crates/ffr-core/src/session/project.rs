@@ -125,6 +125,7 @@ original INTEGER);
             // instrument dropouts and per-gas windows, so refresh them once.
             let tx = self.db()?.unchecked_transaction()?;
             self.normalise_stored_options()?;
+            self.remove_non_robot_measurements()?;
             self.recompute_all(|_| {})?;
             tx.commit()?;
         }
@@ -137,6 +138,23 @@ original INTEGER);
             json!({"path":path,"name":info.name,"openedAt":chrono::Utc::now().timestamp_millis()}),
         );
         Ok(info)
+    }
+
+    /// Failed "measurements" whose file name is not a robot file name (e.g. a
+    /// route CSV added by mistake) are not measurements: remove them.
+    fn remove_non_robot_measurements(&self) -> Result<()> {
+        let zone = self.get_config()?.time_zone;
+        let failed: Vec<(i64, String)> = self
+            .db()?
+            .prepare("SELECT id,filename FROM measurements WHERE status='error'")?
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<std::result::Result<_, _>>()?;
+        for (id, name) in failed {
+            if raw::filename(&name, &zone).is_err() {
+                self.delete_measurement(id)?;
+            }
+        }
+        Ok(())
     }
 
     /// Rewrites stored per-flux options with `AnalysisOptions::normalised`.

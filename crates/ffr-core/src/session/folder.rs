@@ -87,7 +87,7 @@ impl Session {
         files.dedup_by(|a, b| a.0 == b.0);
         let known: BTreeSet<String> = self
             .db()?
-            .prepare("SELECT filename FROM measurements")?
+            .prepare("SELECT filename FROM measurements WHERE status='ok'")?
             .query_map([], |r| r.get(0))?
             .collect::<std::result::Result<_, _>>()?;
         let mut report = FolderReport {
@@ -110,6 +110,8 @@ impl Session {
         if !paths.is_empty() {
             let imported = self.import_raw_files(&paths, progress)?;
             report.imported = imported.imported;
+            // Files that failed before and still fail are known, not new.
+            report.known += imported.skipped;
             report.errors = imported.errors;
         }
         folder.last_scan = Some(chrono::Utc::now().timestamp_millis());

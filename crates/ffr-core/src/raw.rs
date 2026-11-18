@@ -152,6 +152,11 @@ pub fn from_value(metadata: Metadata, mut original: Value) -> Result<Raw> {
         for (i, p) in times.chunks(2).enumerate() {
             switches.push(((p[0] + p[1]) / 2., if i.is_multiple_of(2) { 2 } else { 1 }));
         }
+    } else if events
+        .iter()
+        .any(|e| e[1][0].as_u64().is_some_and(|v| v > 2))
+    {
+        switches = multi_valve_switches(&events, epoch)?;
     } else {
         if events.len() < 2 || !events.len().is_multiple_of(2) {
             return Err(Error::Invalid("unpaired valve events".into()));
@@ -193,6 +198,56 @@ pub fn from_value(metadata: Metadata, mut original: Value) -> Result<Raw> {
         channels,
         switches,
     })
+}
+/// Switches of robots that log more than the two chamber valves (NitroScope,
+/// 2026: valve 3 is closed at every chamber switch, and valves 4, 5 and 3 open
+/// after the measurement). Each switch is one valve opening followed, within
+/// 2 s, by others closing; its time is the midpoint of the opening and the
+/// first closing, as for the legacy two-valve pairs. Valve 1 opening starts
+/// a left segment, valve 2 a right one; any other valve (or a burst that only
+/// closes valves) starts a segment that belongs to no chamber (side 0), so it
+/// ends the chamber segment before it. A repeated switch to the same side is
+/// the same segment.
+fn multi_valve_switches(events: &[&Value], epoch: f64) -> Result<Vec<(f64, u8)>> {
+    let mut bursts: Vec<Vec<(f64, u64, u64)>> = vec![];
+    for e in events {
+        let (Some(t), Some(valve), Some(state)) =
+            (e[0].as_f64(), e[1][0].as_u64(), e[1][1].as_u64())
+        else {
+            return Err(Error::Invalid("invalid valve event".into()));
+        };
+        if state > 1 {
+            return Err(Error::Invalid("invalid valve state".into()));
+        }
+        // An opening valve starts a switch; the closings just after it
+        // (within 2 s) belong to it.
+        match bursts.last_mut() {
+            Some(b) if state == 0 && t - b[0].0 < 2. => b.push((t, valve, state)),
+            _ => bursts.push(vec![(t, valve, state)]),
+        }
+    }
+    let mut switches: Vec<(f64, u8)> = vec![];
+    for b in bursts {
+        let opened = (b[0].2 == 1).then_some(b[0].1);
+        let side = match opened {
+            Some(1) => 1,
+            Some(2) => 2,
+            _ => 0,
+        };
+        if switches.last().is_some_and(|s| s.1 == side) {
+            continue;
+        }
+        let t = if b.len() > 1 {
+            (b[0].0 + b[1].0) / 2.
+        } else {
+            b[0].0
+        };
+        switches.push((t - epoch, side));
+    }
+    if !switches.iter().any(|s| s.1 != 0) {
+        return Err(Error::Invalid("no chamber valve switches".into()));
+    }
+    Ok(switches)
 }
 /// Legacy search_sorted is deliberately a ceiling, not nearest to either neighbour.
 pub fn group_indices(t: &[f64], switches: &[(f64, u8)], beg: f64, end: f64) -> Vec<u8> {

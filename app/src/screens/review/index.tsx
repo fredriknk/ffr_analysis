@@ -384,7 +384,7 @@ export function Review() {
                 ? gas + " excluded · not in summaries"
                 : "Instrument dropout · " +
                   (zeros
-                    ? zeros + " zero reading" + (zeros === 1 ? "" : "s")
+                    ? zeros + " zero/error reading" + (zeros === 1 ? "" : "s")
                     : "missing readings") +
                   " left out of the fit"}
             </span>

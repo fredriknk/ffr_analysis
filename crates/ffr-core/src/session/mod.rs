@@ -49,7 +49,10 @@ impl Session {
 /// Version of the stored per-flux analysis. Opening a project analysed by an older
 /// version recomputes every flux once (results, findings, derived columns).
 /// 3: instrument dropouts no longer exclude a gas automatically.
-pub(crate) const ANALYSIS_VERSION: i64 = 3;
+/// 4: analyser error codes (about 1.8e304) are dropped like zeros; files
+///    that are not robot files are removed (failed robot files are re-read by
+///    the next import or folder scan).
+pub(crate) const ANALYSIS_VERSION: i64 = 4;
 /// Sets `<gas>_excluded` for every gas from the user's per-gas choice in
 /// `gasExcluded` (`{gas: bool}`; default included). Whole-flux `excluded` is
 /// separate and wins everywhere. Drops the 2.1.0 `autoExcludedGases` field.

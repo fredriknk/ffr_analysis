@@ -299,6 +299,9 @@ pub struct LegacyImportArgs {
 pub struct ImportReport {
     pub imported: usize,
     pub skipped: usize,
+    /// Of `imported`: files that had failed before and now load.
+    #[serde(default)]
+    pub retried: usize,
     pub errors: Vec<ImportError>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]

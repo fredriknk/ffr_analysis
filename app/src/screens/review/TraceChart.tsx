@@ -4,7 +4,7 @@ import type { AnalysisOptions, FluxDetail, Gas } from "../../api/types";
 import { Chart } from "../../shared/charts/Chart";
 import { Empty, unit } from "../../shared/common";
 import { useStore } from "../../store";
-import { anchorSwitch, usedRuns } from "./traceGeometry";
+import { anchorSwitch, usedRuns, validReading } from "./traceGeometry";
 
 const chamberColour = ["#98a5af", "#0072b2", "#d55e00"],
   // Faint: this chamber's valve segments. Stronger: the points the fit uses,
@@ -84,7 +84,7 @@ export function TraceChart({
           [fit.stop, fit.intercept + fit.slope * fit.stop],
         ]
       : [];
-  const zeroReadings = tr.y.filter((y) => y === 0).length;
+  const zeroReadings = tr.y.filter((y) => !validReading(y)).length;
   const series: object[] = [0, 1, 2].map((s) => ({
     name: s === 0 ? "Cut" : s === 1 ? "Left" : "Right",
     type: "scatter",
@@ -96,7 +96,7 @@ export function TraceChart({
     // Zero readings are instrument dropouts: never fitted, and hidden so they
     // do not stretch the concentration axis.
     data: tr.t.flatMap((t, i) =>
-      tr.side[i] === s && tr.y[i] !== 0 ? [[t, tr.y[i]]] : [],
+      tr.side[i] === s && validReading(tr.y[i]) ? [[t, tr.y[i]]] : [],
     ),
     xAxisIndex: 0,
     yAxisIndex: 0,
@@ -270,7 +270,7 @@ export function TraceChart({
           {zeroReadings > 0 &&
             " · " +
               zeroReadings +
-              " zero reading" +
+              " zero/error reading" +
               (zeroReadings === 1 ? "" : "s") +
               " hidden"}
         </small>

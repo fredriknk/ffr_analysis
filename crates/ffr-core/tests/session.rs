@@ -694,6 +694,125 @@ fn per_gas_window_reaches_the_regression_and_options_are_normalised() {
     assert_eq!(co2(&stored).start, fit.start);
 }
 
+/// A NitroScope-style file: five valves (1 left, 2 right, 3 closed at every
+/// switch; 4, 5, 3 open after the measurement), a repeated last left switch,
+/// an absent LI-COR (-1) and one N2O analyser error code.
+fn write_multi_valve_file(dir: &std::path::Path) -> std::path::PathBuf {
+    let name =
+        "2026-10-01-12-38-33-x599179_651278-y6615295_09211-z0_0-h-1_18624457125_both_Plot_1_";
+    let meta = ffr_core::raw::filename(name, "Europe/Oslo").expect("meta");
+    let epoch = meta.time as f64 / 1000.;
+    let mut aux = vec![];
+    let mut burst = |t: f64, open: u8, closed: [u8; 2]| {
+        aux.push(json!([epoch + t, [open, 1]]));
+        aux.push(json!(""));
+        aux.push(json!([epoch + t + 0.15, [closed[0], 0]]));
+        aux.push(json!([epoch + t + 0.3, [closed[1], 0]]));
+    };
+    for i in 0..10 {
+        let open = if i % 2 == 0 { 2 } else { 1 };
+        burst(i as f64 * 20.5, open, [3 - open, 3]);
+    }
+    burst(185.1, 1, [2, 3]);
+    burst(187.1, 4, [2, 3]);
+    burst(217.6, 5, [1, 3]);
+    burst(248.1, 3, [1, 2]);
+    let dlt: Vec<_> = (0..250)
+        .map(|i| {
+            let t = i as f64;
+            let left = ((t / 20.5).floor() as i64) % 2 == 1;
+            let mut v = vec![0.; 29];
+            v[10] = if i == 100 {
+                1.797_693_1e304
+            } else {
+                0.33 + if left { 0.0002 } else { 0.0001 } * t
+            };
+            json!([t, v])
+        })
+        .collect();
+    let licor: Vec<_> = (0..250)
+        .map(|i| json!([i as f64, [-1., -1., -1., -1.]]))
+        .collect();
+    let path = dir.join(name);
+    std::fs::write(
+        &path,
+        serde_pickle::to_vec(
+            &json!({"aux":aux,"dlt":{"ty":dlt},"li-cor":{"ty":licor}}),
+            serde_pickle::SerOptions::new(),
+        )
+        .expect("pickle"),
+    )
+    .expect("write");
+    path
+}
+
+#[test]
+fn multi_valve_files_split_into_chambers() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = write_multi_valve_file(dir.path());
+    let mut s = Session::default();
+    s.project_create(dir.path().join("ns.ffr").to_str().expect("path"), "NS")
+        .expect("create");
+    let report = s
+        .import_raw_files(&[path.to_string_lossy().into()], |_| {})
+        .expect("import");
+    assert_eq!((report.imported, report.errors.len()), (1, 0));
+    let table = s.list_fluxes().expect("table");
+    assert_eq!(table.rows, 2);
+    let xs: Vec<f64> = table.data["x"].iter().filter_map(|v| v.as_f64()).collect();
+    assert!((xs[0] - xs[1]).abs() > 1., "chambers sit on either side");
+    let d = s
+        .get_flux_detail(table.data["id"][0].as_i64().expect("id"))
+        .expect("detail");
+    let sides: Vec<&str> = d.switches.iter().map(|s| s.side.as_str()).collect();
+    assert_eq!(
+        sides.len(),
+        11,
+        "10 chamber switches and the end: {sides:?}"
+    );
+    assert_eq!(sides[..2], ["right", "left"]);
+    assert_eq!(sides[10], "none");
+    assert!(!d.diagnostics.iter().any(|f| f.code == "valves_irregular"));
+    assert!(!d.diagnostics.iter().any(|f| f.code == "error"));
+    let n2o = d.traces.iter().find(|t| t.gas == "N2O").expect("trace");
+    assert!(!n2o.used[100], "the analyser error code is never fitted");
+    let fit = d.regressions.iter().find(|r| r.gas == "N2O").expect("fit");
+    assert!(fit.flux.is_finite() && fit.n > 20);
+}
+
+#[test]
+fn non_robot_files_are_refused_and_failed_files_retried() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut s = Session::default();
+    s.project_create(dir.path().join("p.ffr").to_str().expect("path"), "P")
+        .expect("create");
+    let csv = dir.path().join("route.csv");
+    std::fs::write(&csv, "1,2,3\n").expect("write");
+    let r = s
+        .import_raw_files(&[csv.to_string_lossy().into()], |_| {})
+        .expect("import");
+    assert_eq!((r.imported, r.errors.len()), (0, 1));
+    assert_eq!(s.list_fluxes().expect("table").rows, 0);
+    // A robot file that cannot be read becomes a failed measurement ...
+    let path = write_multi_valve_file(dir.path());
+    let good = std::fs::read(&path).expect("read");
+    std::fs::write(&path, b"broken").expect("write");
+    let file = vec![path.to_string_lossy().into_owned()];
+    s.import_raw_files(&file, |_| {}).expect("import");
+    assert_eq!(s.list_fluxes().expect("table").data["diag"][0], "error");
+    // ... is skipped while it still fails, and read again once it loads.
+    let r = s.import_raw_files(&file, |_| {}).expect("import");
+    assert_eq!((r.imported, r.skipped), (0, 1));
+    std::fs::write(&path, good).expect("write");
+    let r = s.import_raw_files(&file, |_| {}).expect("import");
+    assert_eq!((r.imported, r.retried), (1, 1));
+    let table = s.list_fluxes().expect("table");
+    assert_eq!(table.rows, 2);
+    assert!(table.data["diag"]
+        .iter()
+        .all(|d| !d.as_str().unwrap_or("").contains("error")));
+}
+
 #[test]
 fn used_points_follow_the_valve_offset() {
     let dir = tempfile::tempdir().expect("tempdir");

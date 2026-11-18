@@ -23,3 +23,10 @@ export function anchorSwitch(times: number[], centre: number) {
     0,
   );
 }
+/**
+ * A usable reading, as in the core: zeros (dropouts) and analyser error codes
+ * (about 1.8e304) are neither fitted nor drawn.
+ */
+export function validReading(y: number) {
+  return y !== 0 && Number.isFinite(y) && Math.abs(y) < 1e30;
+}

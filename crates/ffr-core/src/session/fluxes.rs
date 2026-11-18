@@ -392,15 +392,7 @@ impl Session {
         "options":options,
         "isOverridden":overridden,
         "siblingFluxId":sibling.as_ref().map(|s|s.0),
-        "switches":raw.switches.iter().map(|(t,
-        s)|json!({
-        "t":t,
-        "side":if *s==1{
-        "left"}
-        else{
-        "right"}
-        }
-        )).collect::<Vec<_>>(),
+        "switches":raw.switches.iter().map(|(t,s)|json!({"t":t,"side":match s{1=>"left",2=>"right",_=>"none"}})).collect::<Vec<_>>(),
         "traces":traces,
         "regressions":results.values().collect::<Vec<_>>(),
         "sibling":sibling_results.as_object().map(|m|m.values().collect::<Vec<_>>()).unwrap_or_default()}
@@ -731,7 +723,7 @@ impl Session {
             .filter(|r| r.2 == side)
             .flat_map(|(a, b, _)| a..b)
             // Zero readings are dropouts: not fitted and not drawn.
-            .filter(|i| y[*i] != 0.)
+            .filter(|i| regression::valid(y[*i]))
             .collect();
             let n = all.len().min(max_points);
             let indices: Vec<usize> = (0..n)

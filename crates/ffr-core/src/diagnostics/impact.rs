@@ -73,7 +73,7 @@ pub fn robust_fits(
                     .iter()
                     .filter(|p| p.2 == chamber)
                     .flat_map(|p| p.0..p.1)
-                    .filter(|i| y[*i] != 0.)
+                    .filter(|i| regression::valid(y[*i]))
                     .map(|i| (t[i], y[i]))
                     .unzip();
                 if let Ok(f) = regression::fit(&x, &v) {
@@ -121,7 +121,7 @@ pub fn robust_fits(
             .into_iter()
             .filter(|p| p.2 == side)
             .flat_map(|p| p.0..p.1)
-            .filter(|i| y[*i] != 0. && t[*i] >= r.start && t[*i] < r.stop)
+            .filter(|i| regression::valid(y[*i]) && t[*i] >= r.start && t[*i] < r.stop)
             .collect();
         for _ in 0..2 {
             let x: Vec<_> = indices.iter().map(|i| t[*i]).collect();

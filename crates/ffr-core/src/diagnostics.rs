@@ -297,7 +297,7 @@ pub fn dropouts(
                     continue;
                 }
                 total += 1;
-                if y[i] == 0. || !y[i].is_finite() {
+                if !regression::valid(y[i]) {
                     zeros += 1;
                 } else {
                     if let Some(p) = last {
@@ -313,7 +313,9 @@ pub fn dropouts(
         }
         let mut what = vec![];
         if zeros > 0 {
-            what.push(format!("returned 0 for {zeros} of {total} readings"));
+            what.push(format!(
+                "returned 0 or an error code for {zeros} of {total} readings"
+            ));
         }
         if long_gap {
             what.push(format!("sent no readings for {gap:.0} s"));
@@ -325,7 +327,7 @@ pub fn dropouts(
             zeros as f64,
             format!(
                 "The {gas} analyser {} in this chamber's window (instrument dropout). \
-                 Zero readings are left out of the fit and hidden from the trace; check \
+                 Those readings are left out of the fit and hidden from the trace; check \
                  that enough points remain, or exclude {gas} for this flux.",
                 what.join(" and ")
             ),
@@ -359,7 +361,7 @@ pub fn used_indices(
     .into_iter()
     .filter(|p| p.2 == side)
     .flat_map(|(a, b, _)| a..b)
-    .filter(|i| y[*i] != 0.)
+    .filter(|i| regression::valid(y[*i]))
     .collect();
     if all.is_empty() || r.n == 0 {
         return vec![];
@@ -421,7 +423,7 @@ pub fn valve_lag_for(
                 .iter()
                 .filter(|p| p.2 == side)
                 .flat_map(|p| p.0..p.1)
-                .filter(|i| y[*i] != 0.)
+                .filter(|i| regression::valid(y[*i]))
                 .map(|i| (t[i], y[i]))
                 .unzip();
             if x.len() < 15 {
@@ -492,15 +494,38 @@ pub fn analyse(
         }
     }
     d.extend(dropouts(raw, side, o, c));
-    let times: Vec<f64> = raw.switches.iter().map(|s| s.0).collect();
+    // Chamber switches only: segments that belong to no chamber (side 0,
+    // multi-valve robots) are not part of the left/right alternation.
+    let chamber: Vec<(f64, u8)> = raw.switches.iter().copied().filter(|s| s.1 != 0).collect();
+    let times: Vec<f64> = chamber.iter().map(|s| s.0).collect();
     let durations: Vec<f64> = times.windows(2).map(|p| p[1] - p[0]).collect();
-    let sides: BTreeSet<u8> = raw.switches.iter().map(|p| p.1).collect();
-    let irregular = times.len() != c.normal_switches
+    let sides: BTreeSet<u8> = chamber.iter().map(|p| p.1).collect();
+    // Multi-valve robots log the end of the measurement (a valve that belongs
+    // to no chamber opens), with or without a short last chamber switch just
+    // before it. Count the full-length chamber segments plus that end, which
+    // matches the two-valve count of switches (whose last one is such a tail).
+    let count = if raw.switches.iter().any(|s| s.1 == 0) {
+        let full = raw
+            .switches
+            .iter()
+            .enumerate()
+            .filter(|(i, s)| {
+                s.1 != 0
+                    && raw.switches.get(i + 1).is_some_and(|n| {
+                        n.0 - s.0 >= c.normal_segment_s * (1. - c.irregular_fraction)
+                    })
+            })
+            .count();
+        full + 1
+    } else {
+        times.len()
+    };
+    let irregular = count != c.normal_switches
         || sides.len() != 2
         || durations
             .iter()
             .any(|v| (v - c.normal_segment_s).abs() > c.normal_segment_s * c.irregular_fraction)
-        || raw.switches.windows(2).any(|p| p[0].1 == p[1].1);
+        || chamber.windows(2).any(|p| p[0].1 == p[1].1);
     if irregular {
         let message = "Valve segments are missing, repeated, or differ from the \
                        normal duration by over the configured fraction.";
@@ -731,8 +756,9 @@ pub const RULES: [(&str, &str, &str); 16] = [
     (
         "zero_readings",
         "Instrument dropout",
-        "The analyser returned zeros or stopped reporting inside the chamber's window. \
-         Zero readings are left out of the fit and hidden from the trace.",
+        "The analyser returned zeros or error codes, or stopped reporting inside the \
+         chamber's window. Those readings are left out of the fit and hidden from the \
+         trace.",
     ),
     (
         "legacy_qc",

@@ -5,7 +5,7 @@ use crate::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use statrs::function::beta::beta_reg;
+use statrs::function::beta::checked_beta_reg;
 use std::collections::BTreeMap;
 pub const GASES: [&str; 5] = ["CO2", "N2O", "CO", "H2O", "licor_H2O"];
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -35,6 +35,12 @@ pub struct Regression {
 }
 fn null_float<'de, D: serde::Deserializer<'de>>(d: D) -> std::result::Result<f64, D::Error> {
     Ok(Option::<f64>::deserialize(d)?.unwrap_or(f64::NAN))
+}
+/// A usable concentration reading. Legacy drops zeros (analyser dropouts);
+/// the huge error codes newer analysers write (about 1.8e304, which overflow
+/// any fit) are not readings either. Negative values stay, as in legacy.
+pub fn valid(y: f64) -> bool {
+    y != 0. && y.is_finite() && y.abs() < 1e30
 }
 pub fn nearest(x: &[f64], v: f64) -> usize {
     let (mut lo, mut hi) = (0, x.len());
@@ -81,10 +87,11 @@ pub fn fit(x: &[f64], y: &[f64]) -> Result<Regression> {
         .sum::<f64>()
         / (n - 2) as f64;
     let rsq = (xy * xy / (xx * yy)).clamp(0., 1.);
-    let pval = if yy == 0. {
+    // Never panic on a degenerate fit (flat or overflowing data): no p-value.
+    let pval = if yy == 0. || !rsq.is_finite() {
         f64::NAN
     } else {
-        beta_reg((n - 2) as f64 / 2., 0.5, 1. - rsq)
+        checked_beta_reg((n - 2) as f64 / 2., 0.5, 1. - rsq).unwrap_or(f64::NAN)
     };
     Ok(Regression {
         flux_factor: 0.,
@@ -316,7 +323,7 @@ pub fn compute(
             .into_iter()
             .filter(|(_, _, s)| *s == side)
             .flat_map(|(a, b, _)| a..b)
-            .filter(|i| y[*i] != 0.)
+            .filter(|i| valid(y[*i]))
             .map(|i| (t[i], y[i]))
             .unzip();
         if x.len() < 3 {

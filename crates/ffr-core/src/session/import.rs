@@ -9,6 +9,20 @@ impl Session {
         self.import_raw_impl(paths, progress, true)
     }
 
+    /// Removes a measurement with its fluxes and their findings.
+    pub(super) fn delete_measurement(&self, mid: i64) -> Result<()> {
+        let db = self.db()?;
+        db.execute(
+            "DELETE FROM diagnostics WHERE flux_id IN \
+             (SELECT id FROM fluxes WHERE measurement_id=?1)",
+            [mid],
+        )?;
+        db.execute("DELETE FROM fluxes WHERE measurement_id=?1", [mid])?;
+        db.execute("DELETE FROM measurements WHERE id=?1", [mid])?;
+        self.lag_cache.borrow_mut().clear();
+        Ok(())
+    }
+
     pub(super) fn import_raw_impl(
         &self,
         paths: &[String],
@@ -36,17 +50,34 @@ impl Session {
                 .to_string_lossy()
                 .trim_end_matches(".gz")
                 .to_string();
-            if db
-                .query_row(
-                    "SELECT id FROM measurements WHERE filename=?1",
-                    [&name],
-                    |r| r.get::<_, i64>(0),
-                )
-                .optional()?
-                .is_some()
-            {
-                report.skipped += 1;
+            // Only robot files: anything else (a route CSV, say) is reported,
+            // not stored as a failed measurement.
+            if raw::filename(&name, &cfg.time_zone).is_err() {
+                report.errors.push(ImportError {
+                    path: path.clone(),
+                    message: "not a robot raw file (the name does not start with its \
+                              date, time and position)"
+                        .into(),
+                });
                 continue;
+            }
+            let existing: Option<(i64, String)> = db
+                .query_row(
+                    "SELECT id,status FROM measurements WHERE filename=?1",
+                    [&name],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .optional()?;
+            if let Some((mid, status)) = existing {
+                // A file that failed before (and was stored without its data) is
+                // read again when it now loads, e.g. after a parser update.
+                if status == "error" && raw.is_ok() {
+                    self.delete_measurement(mid)?;
+                    report.retried += 1;
+                } else {
+                    report.skipped += 1;
+                    continue;
+                }
             }
             match raw {
                 Err(e) => {

@@ -71,6 +71,8 @@ Python pickle (protocol 0 ASCII in older files; any protocol must load) of a dic
 ```
 'aux'    : [(epoch_s, [side_nr, state]), '', (epoch_s, [side_nr, state]), '', ...]
            valve events. side_nr 1 = left, 2 = right; state 1 = on, 0 = off. '' entries are noise.
+           Newer robots (NitroScope, 2026) log more valves: 3 is closed at every switch,
+           and 4, 5, 3 open after the measurement (see 4.3).
            (very old files: (epoch_s, int) — see prog/divide_left_and_right.py)
 'li-cor' : {'dt', 't0': epoch_s, 'ty': [(t_rel_s, [CO2, H2O, P, Temp]), ...]}
 'dlt'    : {'dt', 't0', 'ty': [(t_rel_s, [.. 30 values ..]), ...]}
@@ -97,16 +99,25 @@ negative, may be missing), sides used (`left|right|both`), waypoint name. See
 
 ### 4.3 Attributing points to chambers
 
-Port `prog/divide_left_and_right.py` exactly, including `search_sorted`'s nearest-index
+Files that log only valves 1 and 2: port `prog/divide_left_and_right.py` exactly, including `search_sorted`'s nearest-index
 behaviour and the validation errors (a file that fails validation becomes a measurement with
 an error status, not a crash). Defaults: `cut_beginnings = 4 s`, `cut_ends = 3 s` (these are
 the values `Regressor._get_divide_cut_param` uses, not the function defaults).
+
+Files that log other valves (legacy cannot read them): a switch is one valve opening
+followed within 2 s by others closing, timed at the midpoint of the opening and the first
+closing. Valve 1 starts a left segment, 2 a right one, any other valve (or closings alone)
+a segment of no chamber (side 0, `"none"` in the API) that ends the chamber segment before
+it; a repeated switch to the same side is the same segment. `valves_irregular` counts the
+full-length chamber segments plus that end.
 
 ### 4.4 Regression
 
 Port `prog/regression.py` and `Regressor._regress1` in `prog/find_regressions.py`:
 
-- Points with `y == 0` are dropped first.
+- Points with `y == 0` are dropped first, and so are analyser error codes (non-finite or
+  |y| ≥ 1e30, e.g. 1.8e304); legacy could not fit those at all. Negative values stay.
+  A fit never fails on degenerate data: its p-value is then null.
 - **Fixed window** (`start`, `stop` seconds): `regress_within`. Note the half-open slice
   `x[i:j]` (the point at `stop` is not included) and the `bisect_find(..., nearest=True)`
   index rules. This is the mode every legacy project actually uses, because the default
@@ -308,7 +319,11 @@ field lists may grow, but do not rename.
 - `legacyScan(dir) → LegacyScan` — what was found in a `Users/<Name>` folder (config.yml
   paths, counts, which inputs exist)
 - `legacyImport(args: {legacyDir, rawDir, manualPath?, loggerPath?, metnoPicklePath?, outPath}) → ProjectInfo`
-- `importRawFiles(paths: string[]) → ImportReport` — add new robot files to an open project
+- `importRawFiles(paths: string[]) → ImportReport` — add new robot files to an open project.
+  Files whose name is not a robot file name are reported, not stored. A file that failed
+  before (stored as an error measurement without data) is read again when it now loads
+  (`retried`); the folder scan below retries failed files the same way. Opening a project
+  removes stored "measurements" whose name is not a robot file name.
 - `rawFolderGet() → RawFolder | null`, `rawFolderSet(folder | null)`,
   `rawFolderScan() → FolderReport` — the project's robot data folder
   `{ path, fieldOnly, auto, lastScan?, lastReport? }`. A scan imports robot files in the

@@ -276,7 +276,8 @@ export interface FluxDetail {
   options: AnalysisOptions;
   isOverridden: boolean;
   siblingFluxId: number | null;
-  switches: { t: number; side: "left" | "right" }[];
+  /** "none": a valve that belongs to no chamber (multi-valve robots). */
+  switches: { t: number; side: "left" | "right" | "none" }[];
   traces: Trace[];
   regressions: Regression[];
   sibling: Regression[];
@@ -379,6 +380,8 @@ export interface ImportManualArgs {
 export interface ImportReport {
   imported: number;
   skipped: number;
+  /** Of `imported`: files that had failed before and now load. */
+  retried?: number;
   errors: { path: string; message: string }[];
 }
 /** A folder of robot raw files the project imports new files from. */

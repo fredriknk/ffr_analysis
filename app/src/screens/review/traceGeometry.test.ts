@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { anchorSwitch, usedRuns } from "./traceGeometry";
+import { anchorSwitch, usedRuns, validReading } from "./traceGeometry";
 
 describe("usedRuns", () => {
   it("shades each run of fitted points, so cuts shrink the window", () => {
@@ -28,5 +28,17 @@ describe("anchorSwitch", () => {
   });
   it("picks the switch nearest the middle of the view", () => {
     expect(anchorSwitch([0, 20, 40, 60], 45)).toBe(2);
+  });
+});
+
+describe("validReading", () => {
+  it("drops dropouts and analyser error codes, keeps negatives", () => {
+    expect([0.33, -14.7, 0, 1.7976931e304, NaN].map(validReading)).toEqual([
+      true,
+      true,
+      false,
+      false,
+      false,
+    ]);
   });
 });
