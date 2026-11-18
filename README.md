@@ -1,5 +1,5 @@
 # FFR Analyzer 2
-All credit for methodology and the methods in this should go to [Lars Molstad](https://github.com/larsmolstad) as he developed the original [ffr_analysis](https://github.com/larsmolstad/ffr_analysis) program ive based this on.
+All credit for methodology and the idea of this project should go to [Lars Molstad](https://github.com/larsmolstad) as he developed the original [ffr_analysis](https://github.com/larsmolstad/ffr_analysis) program i've based this on.
 
 Desktop program for reviewing gas fluxes measured by the Field Flux Robot: check every
 chamber measurement, find the ones that look wrong, compare treatments over time, bring in
