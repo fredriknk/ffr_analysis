@@ -524,7 +524,7 @@ export interface FfrApi {
   importSeries(args: ImportSeriesArgs): Promise<void>;
   deleteSeries(id: number): Promise<void>;
   importManualFluxes(args: ImportManualArgs): Promise<ImportReport>;
-  metnoGetClientId(): Promise<string | null>;
+  metnoGetClientId(): Promise<boolean>;
   metnoSetClientId(id: string): Promise<void>;
   metnoFetch(args: {
     station: string;

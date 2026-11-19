@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { EChartsCoreOption } from "echarts/core";
 import { useEffect, useState } from "react";
 import { api, mockMode } from "../../api";
@@ -43,6 +43,12 @@ function ColumnSelect({
 
 export function External() {
   const visible = useStore((s) => s.screen === "External data");
+  const queryClient = useQueryClient();
+  const frostClient = useQuery({
+    queryKey: ["frost-client-id-saved"],
+    queryFn: () => api.metnoGetClientId(),
+    enabled: visible,
+  });
   const action = useAction(),
     series = useQuery({
       queryKey: ["series"],
@@ -69,6 +75,8 @@ export function External() {
     }>(),
     [station, setStation] = useState("SN17850"),
     [client, setClient] = useState(""),
+    [editingClient, setEditingClient] = useState(false),
+    [fetchingWeather, setFetchingWeather] = useState(false),
     [from, setFrom] = useState("2023-01-01"),
     [to, setTo] = useState("2024-12-31");
   useEffect(() => {
@@ -115,6 +123,24 @@ export function External() {
   function changePath(next: string) {
     setPath(next);
     resetPreview();
+  }
+
+  function fetchWeather() {
+    setFetchingWeather(true);
+    void action(async () => {
+      const replacement = client.trim();
+      if (replacement) {
+        await api.metnoSetClientId(replacement);
+        queryClient.setQueryData(["frost-client-id-saved"], true);
+        setClient("");
+        setEditingClient(false);
+      }
+      await api.metnoFetch({
+        station,
+        from: Date.parse(from),
+        to: Date.parse(to),
+      });
+    }, "Weather updated").finally(() => setFetchingWeather(false));
   }
 
   return (
@@ -418,6 +444,20 @@ export function External() {
           Hourly temperature and precipitation. Client ID stays outside the
           project.
         </p>
+        <Status loading={frostClient.isLoading} error={frostClient.error} />
+        {frostClient.data && (
+          <div className="button-group">
+            <span>Client ID saved for this user</span>
+            {!editingClient && (
+              <button
+                disabled={fetchingWeather}
+                onClick={() => setEditingClient(true)}
+              >
+                Change client ID
+              </button>
+            )}
+          </div>
+        )}
         <div className="form-grid">
           <Field label="Station">
             <input
@@ -425,14 +465,17 @@ export function External() {
               onChange={(e) => setStation(e.target.value)}
             />
           </Field>
-          <Field label="Frost client ID">
-            <input
-              type="password"
-              autoComplete="off"
-              value={client}
-              onChange={(e) => setClient(e.target.value)}
-            />
-          </Field>
+          {(!frostClient.data || editingClient) && (
+            <Field label="Frost client ID">
+              <input
+                type="password"
+                autoComplete="off"
+                value={client}
+                disabled={fetchingWeather}
+                onChange={(e) => setClient(e.target.value)}
+              />
+            </Field>
+          )}
           <Field label="From">
             <input
               type="date"
@@ -449,17 +492,11 @@ export function External() {
           </Field>
         </div>
         <button
-          onClick={() =>
-            void action(async () => {
-              await api.metnoSetClientId(client);
-              setClient("");
-              await api.metnoFetch({
-                station,
-                from: Date.parse(from),
-                to: Date.parse(to),
-              });
-            }, "Weather updated")
+          disabled={
+            fetchingWeather ||
+            (!mockMode && !frostClient.data && !client.trim())
           }
+          onClick={fetchWeather}
         >
           {mockMode ? "Simulate weather fetch" : "Fetch weather"}
         </button>

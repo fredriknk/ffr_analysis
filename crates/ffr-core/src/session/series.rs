@@ -135,12 +135,15 @@ impl Session {
         self.recompute_all(|_| {})
     }
 
-    pub fn metno_get_client_id(&self) -> Option<String> {
-        self.client_id.clone()
+    pub fn metno_get_client_id(&self) -> bool {
+        self.client_id.is_some()
     }
 
     pub fn metno_set_client_id(&mut self, id: String) {
-        self.client_id = Some(id);
+        let id = id.trim();
+        if !id.is_empty() {
+            self.client_id = Some(id.to_owned());
+        }
     }
 
     pub fn metno_fetch(&self, args: Value, progress: impl Fn(Progress)) -> Result<()> {
@@ -223,5 +226,43 @@ args["station"].as_str().unwrap_or("SN17850")),
         Ok(serde_json::from_value(json!(
             self.series_data_value(ids, from, to, max_points)?
         ))?)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn frost_client_id_ignores_empty_entries_and_stays_out_of_project() {
+        let mut session = Session::default();
+        session.metno_set_client_id(String::new());
+        assert!(!session.metno_get_client_id());
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("weather.ffr");
+        session
+            .project_create(path.to_str().unwrap(), "Weather")
+            .unwrap();
+        session.metno_set_client_id("  synthetic-frost-id  ".into());
+        session.metno_set_client_id(" \t".into());
+        assert!(session.metno_get_client_id());
+        assert_eq!(session.client_id.as_deref(), Some("synthetic-frost-id"));
+        session.metno_set_client_id("synthetic-replacement-id".into());
+        assert_eq!(
+            session.client_id.as_deref(),
+            Some("synthetic-replacement-id")
+        );
+        session.project_close();
+
+        let bytes = std::fs::read(&path).unwrap();
+        for id in ["synthetic-frost-id", "synthetic-replacement-id"] {
+            assert!(!bytes
+                .windows(id.len())
+                .any(|window| window == id.as_bytes()));
+        }
+        let mut reopened = Session::default();
+        reopened.project_open(path.to_str().unwrap()).unwrap();
+        assert!(!reopened.metno_get_client_id());
     }
 }

@@ -111,7 +111,7 @@ export function createMock(seed = 42): T.FfrApi {
   let rawFolder: T.RawFolder | null = null;
   let open = false,
     path = "demo.ffr",
-    clientId: string | null = null;
+    hasClientId = false;
   const opts = new Map<number, T.AnalysisOptions>(),
     listeners = new Set<(p: T.Progress) => void>();
   const rows: T.FluxRow[] = [];
@@ -1455,9 +1455,9 @@ export function createMock(seed = 42): T.FfrApi {
       });
       return mapped;
     },
-    metnoGetClientId: async () => clientId,
+    metnoGetClientId: async () => hasClientId,
     metnoSetClientId: async (id) => {
-      clientId = id;
+      if (id.trim()) hasClientId = true;
     },
     metnoFetch: async () => {
       await progress("Weather fetch");

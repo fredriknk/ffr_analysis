@@ -34,10 +34,12 @@ fn prefs(app: &AppHandle) -> Result<Preferences, ApiError> {
     if !path.exists() {
         return Ok(Preferences::default());
     }
-    serde_json::from_slice(
+    let mut prefs: Preferences = serde_json::from_slice(
         &std::fs::read(&path).map_err(|e| error(format!("{}: {e}", path.display())))?,
     )
-    .map_err(error)
+    .map_err(error)?;
+    prefs.client_id = prefs.client_id.filter(|id| !id.trim().is_empty());
+    Ok(prefs)
 }
 fn save_prefs(app: &AppHandle, prefs: &Preferences) -> Result<(), ApiError> {
     let path = prefs_path(app)?;
@@ -449,25 +451,20 @@ async fn import_manual_fluxes(app: AppHandle, args: Value) -> Result<ImportRepor
 }
 
 #[tauri::command]
-async fn metno_get_client_id(app: AppHandle) -> Result<Option<String>, ApiError> {
-    run(app, move |s, app| {
-        let _ = &s;
-        let _ = &app;
-        Ok(prefs(app)?.client_id)
-    })
-    .await
+async fn metno_get_client_id(app: AppHandle) -> Result<bool, ApiError> {
+    run(app, |_, app| Ok(prefs(app)?.client_id.is_some())).await
 }
 
 #[tauri::command]
 async fn metno_set_client_id(app: AppHandle, id: String) -> Result<(), ApiError> {
-    run(app, move |s, app| {
-        let _ = &s;
-        let _ = &app;
+    run(app, move |_, app| {
+        let id = id.trim();
+        if id.is_empty() {
+            return Ok(());
+        }
         let mut p = prefs(app)?;
-        p.client_id = Some(id.clone());
-        save_prefs(app, &p)?;
-        s.metno_set_client_id(id);
-        Ok(())
+        p.client_id = Some(id.to_owned());
+        save_prefs(app, &p)
     })
     .await
 }
@@ -475,11 +472,10 @@ async fn metno_set_client_id(app: AppHandle, id: String) -> Result<(), ApiError>
 #[tauri::command]
 async fn metno_fetch(app: AppHandle, args: Value) -> Result<(), ApiError> {
     run(app, move |s, app| {
-        let _ = &s;
-        let _ = &app;
-        if let Some(id) = prefs(app)?.client_id {
-            s.metno_set_client_id(id);
-        }
+        let id = prefs(app)?
+            .client_id
+            .ok_or_else(|| error("met.no client ID required"))?;
+        s.metno_set_client_id(id);
         Ok(s.metno_fetch(args, |p| progress(app, p))?)
     })
     .await

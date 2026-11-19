@@ -62,3 +62,22 @@ describe("diagnostic command adapter", () => {
     expect(typeof off).toBe("function");
   });
 });
+
+describe("external data command adapter", () => {
+  it("previews the first sheet without sending a name", async () => {
+    await tauriApi.previewTable("campaign.xlsx", { headerRow: 0 });
+    expect(invoke).toHaveBeenLastCalledWith("preview_table", {
+      path: "campaign.xlsx",
+      opts: { headerRow: 0 },
+    });
+  });
+
+  it("checks for a stored Frost ID and fetches without including the ID", async () => {
+    vi.mocked(invoke).mockResolvedValueOnce(true);
+    expect(await tauriApi.metnoGetClientId()).toBe(true);
+    expect(invoke).toHaveBeenLastCalledWith("metno_get_client_id");
+    const args = { station: "SN17850", from: 0, to: 86400000 };
+    await tauriApi.metnoFetch(args);
+    expect(invoke).toHaveBeenLastCalledWith("metno_fetch", { args });
+  });
+});

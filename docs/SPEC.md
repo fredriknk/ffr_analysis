@@ -430,7 +430,9 @@ Diagnostics in the existing shapes: `FluxTable` gains columns `attention` (numbe
   `gasColumns` maps one or both of `N2O` and `CO2` to column names. The offset defaults to 12 hours.
   Plot values match exact labels first, then numeric IDs. Unmatched rows with valid dates are
   imported without a plot and counted in `ImportReport.unmatchedPlots` (omitted when zero).
-- `metnoGetClientId()`, `metnoSetClientId(id)`, `metnoFetch({station, from, to})`
+- `metnoGetClientId() → boolean` reports whether the user has a stored ID.
+  `metnoSetClientId(id)` replaces it only when the trimmed ID is non-empty.
+  `metnoFetch({station, from, to})` uses the stored ID from app preferences.
 
 **Export**
 - `exportXlsx(args: { path, fluxIds, columns, mode: 'flat' | 'sheetPerPlot' | 'dailyPerPlot' })`

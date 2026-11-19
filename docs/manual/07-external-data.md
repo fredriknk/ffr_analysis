@@ -36,7 +36,7 @@ Use distinct column names when importing different series. If two series share t
 ## Fetch met.no weather
 
 1. Open the Frost guide and choose **Create a User**. Register with your email address and copy the client ID. [How to use Frost](https://frost.met.no/howto.html)
-2. In **External data**, find **met.no weather**. Paste the ID into **Frost client ID**. The app stores the ID in settings for your Windows user, outside the project file. Enter the ID again each time you fetch weather because the field clears after use.
+2. In **External data**, find **met.no weather**. If you are setting it up for the first time, paste the ID into **Frost client ID**. The app saves it for your Windows user when you fetch. On subsequent visits, **Client ID saved for this user** confirms you can fetch again. To replace it, click **Change client ID** and enter the new ID before fetching. The ID stays outside the project file.
 3. Set **Station** to the Frost station ID for your site. The default is `SN17850`. Set **From** and **To** for the requested interval. The app sends both dates at midnight UTC, so use the following day as **To** to cover the whole final day.
 4. Click **Fetch weather**. The resulting series can include air temperature, hourly minimum and maximum air temperature, and hourly precipitation. The app uses air temperature to calculate robot fluxes and displays daily temperature and precipitation in **Treatments**.
 
