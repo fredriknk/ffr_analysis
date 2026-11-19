@@ -9,6 +9,7 @@
     "lint": "eslint .",
     "test": "vitest run",
     "smoke": "playwright test",
+    "docs:screenshots": "playwright test --config playwright.docs.config.ts",
     "tauri": "tauri",
     "real-smoke": "node scripts/real-smoke.mjs"
   },
