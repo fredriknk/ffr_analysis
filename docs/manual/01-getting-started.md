@@ -39,7 +39,7 @@ The app converts an old `Users/<Name>` project to a new `.ffr` file. It brings o
 1. In **Start**, under **Bring your work with you**, select **Import legacy project**.
 2. In **Legacy folder**, enter the path to the old `Users/<Name>` folder or use **Browse folder**. Choose the folder for the individual trial.
 3. Select **Scan inputs**. Check the robot file count, the **Manual**, **Logger** and **Weather** indicators, and any warnings. The scan uses the legacy settings, so a moved folder can give a zero count.
-4. Check **Raw data folder** and enter the current path if it is blank or out of date. Check the paths in **Manual flux file (optional)**, **Logger file (optional)** and **Weather pickle (optional)** if you have those inputs. Old paths can point to a different computer. The importer can also use manual and logger paths from `config.yml`. Enter the weather file's path if you want to import it and the field is blank, even if the scan reports **Weather Yes**.
+4. Check **Raw data folder** and enter the current path if it is blank or out of date. Check the paths in **Manual flux file (optional)**, **Logger file (optional)** and **Weather pickle (optional)** if you have those inputs. Old paths can point to a different computer. The importer can also use manual and logger paths from `config.yml`. The scan fills **Weather pickle (optional)** when it finds the legacy weather file. If the file has moved, paste its current path.
 5. In **Output project**, enter the full path and a new filename ending in `.ffr`, such as `C:\Trials\spring-trial.ffr`.
 6. Select **Import project** and wait for the progress indicator to finish. The new project opens in **Review**. Check the imported dates, plot assignments and a few traces before continuing.
 

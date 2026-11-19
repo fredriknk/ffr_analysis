@@ -604,6 +604,10 @@ bytes])?;
         let v = self.scan_value(dir)?;
         let paths = &v["config"]["PATHS"];
         let exists = |k: &str| paths[k].as_str().is_some_and(|p| Path::new(p).exists());
+        let weather = Path::new(dir).join("../../metno_data.pickle");
+        let metno_pickle_path = weather
+            .is_file()
+            .then(|| weather.to_string_lossy().into_owned());
         Ok(LegacyScan {
             config_paths: paths
                 .as_object()
@@ -616,7 +620,8 @@ bytes])?;
             raw_files: v["rawCount"].as_u64().unwrap_or(0) as usize,
             manual_exists: exists("MANUAL"),
             logger_exists: exists("LOGGER_PATH"),
-            weather_exists: Path::new(dir).join("../../metno_data.pickle").exists(),
+            weather_exists: metno_pickle_path.is_some(),
+            metno_pickle_path,
             warnings: if v["rawCount"] == 0 {
                 vec!["No raw files found; choose a raw folder.".into()]
             } else {

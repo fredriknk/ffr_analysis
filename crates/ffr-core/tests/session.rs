@@ -2,6 +2,30 @@ use ffr_core::{AnalysisOptions, Session};
 use serde_json::json;
 
 #[test]
+fn legacy_scan_returns_the_weather_pickle_path_when_present() {
+    let dir = tempfile::tempdir().expect("temporary legacy root");
+    let legacy = dir.path().join("Users").join("Synthetic");
+    std::fs::create_dir_all(&legacy).expect("legacy folder");
+    let legacy = legacy.to_str().expect("legacy path");
+    let session = Session::default();
+
+    let scan = session.legacy_scan(legacy).expect("scan without weather");
+    assert!(!scan.weather_exists);
+    assert!(json!(scan).get("metnoPicklePath").is_none());
+
+    let weather = dir.path().join("metno_data.pickle");
+    std::fs::write(&weather, b"(dp0\n.").expect("synthetic pickle");
+    let scan = session.legacy_scan(legacy).expect("scan with weather");
+    assert!(scan.weather_exists);
+    let payload = json!(scan);
+    let found = payload["metnoPicklePath"].as_str().expect("weather path");
+    assert_eq!(
+        std::fs::canonicalize(found).expect("scanned weather file"),
+        std::fs::canonicalize(weather).expect("synthetic weather file"),
+    );
+}
+
+#[test]
 fn project_roundtrip_edits_backup_and_external_data() {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("test.ffr");

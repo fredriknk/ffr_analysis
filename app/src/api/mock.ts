@@ -1026,6 +1026,7 @@ export function createMock(seed = 42): T.FfrApi {
       manualExists: true,
       loggerExists: true,
       weatherExists: true,
+      metnoPicklePath: dir + "/../../metno_data.pickle",
       warnings: ["Browser demo uses synthetic inputs only."],
     }),
     legacyImport: async (args) => {

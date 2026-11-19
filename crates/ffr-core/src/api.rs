@@ -456,6 +456,8 @@ pub struct LegacyScan {
     pub manual_exists: bool,
     pub logger_exists: bool,
     pub weather_exists: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metno_pickle_path: Option<String>,
     pub warnings: Vec<String>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
