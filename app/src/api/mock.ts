@@ -56,6 +56,20 @@ function applyGasExclusion(r: T.FluxRow) {
   for (const g of ["CO2", "N2O", "CO", "H2O", "licor_H2O"])
     r[g + "_excluded"] = choice[g] ?? false;
 }
+function demoExternalTable() {
+  return {
+    columns: ["date", "plot", "N2O", "CO2", "temperature", "VWC"],
+    rows: Array.from({ length: 5 }, (_, i) => [
+      "2024-06-" + (10 + i),
+      i === 4 ? "Unknown plot" : "P01",
+      23 + i,
+      1800 + i * 10,
+      15 + i,
+      0.25,
+    ]),
+  };
+}
+
 export function createMock(seed = 42): T.FfrApi {
   let config: T.ProjectConfig = {
     name: "Ås field trial · 2023–24",
@@ -262,20 +276,22 @@ export function createMock(seed = 42): T.FfrApi {
     };
     if (r.source === "manual")
       return {
-        regs: gases.map((g) => ({
-          ...regression([], [], g, r.airTemp),
-          flux: Number(r[g + "_flux"] ?? 0),
-          slope:
-            Number(r[g + "_flux"] ?? 0) /
-            fluxConversion(
-              1,
-              r.airTemp,
-              g,
-              config.chamberHeight,
-              config.pressure,
-            ),
-          qc: "manual",
-        })),
+        regs: gases
+          .filter((g) => typeof r[g + "_flux"] === "number")
+          .map((g) => ({
+            ...regression([], [], g, r.airTemp),
+            flux: Number(r[g + "_flux"] ?? 0),
+            slope:
+              Number(r[g + "_flux"] ?? 0) /
+              fluxConversion(
+                1,
+                r.airTemp,
+                g,
+                config.chamberHeight,
+                config.pressure,
+              ),
+            qc: "manual",
+          })),
         traces: [],
         robust: [] as T.RobustRegression[],
         comparison,
@@ -408,7 +424,7 @@ export function createMock(seed = 42): T.FfrApi {
   function refresh(r: T.FluxRow) {
     if (r.source === "manual")
       for (const gas of gases)
-        if (typeof r[gas + "_flux"] !== "number")
+        if (!(gas + "_flux" in r))
           r[gas + "_flux"] = fluxConversion(
             (gas === "N2O" ? 0.00004 : 0.2) * (1 + Math.sin(r.id)),
             r.airTemp,
@@ -1379,15 +1395,7 @@ export function createMock(seed = 42): T.FfrApi {
     previewTable: async (path) => ({
       sheets: [path.toLowerCase().endsWith(".csv") ? "CSV" : "Logger readings"],
       headerCandidates: [0, 2],
-      columns: ["date", "plot", "N2O", "CO2", "temperature", "VWC"],
-      rows: Array.from({ length: 5 }, (_, i) => [
-        "2024-06-" + (10 + i),
-        "P01",
-        23 + i,
-        1800 + i * 10,
-        15 + i,
-        0.25,
-      ]),
+      ...demoExternalTable(),
     }),
     importSeries: async (args) => {
       await progress("Import series");
@@ -1409,16 +1417,43 @@ export function createMock(seed = 42): T.FfrApi {
         series = series.filter((s) => s.id !== id);
       });
     },
-    importManualFluxes: async () => {
+    importManualFluxes: async (args) => {
       await progress("Manual import");
+      const table = demoExternalTable();
+      const mapped = report(0);
       change("Import manual", [], () => {
-        for (let i = 0; i < 10; i++) {
+        for (const values of table.rows) {
+          const value = (column: string) =>
+            values[table.columns.indexOf(column)];
+          const time = Date.parse(String(value(args.dateColumn)));
+          if (!Number.isFinite(time)) {
+            mapped.skipped++;
+            continue;
+          }
+          const key = value(args.plotColumn);
+          const plot =
+            layout.plots.find((p) => p.label === key) ??
+            layout.plots.find((p) => p.id === Number(key));
+          if (!plot) mapped.unmatchedPlots = (mapped.unmatchedPlots ?? 0) + 1;
           const r = makeRow(rows.length + 1, true);
+          r.time = time + (args.offsetHours ?? 12) * 3600000;
+          r.plotId = plot?.id ?? 0;
+          r.plotLabel = plot?.label ?? "Unassigned";
+          r.treatmentId = plot?.treatmentId ?? 0;
+          r.treatmentName =
+            layout.treatments.find((t) => t.id === r.treatmentId)?.name ??
+            "Unassigned";
+          for (const gas of gases) {
+            const column = args.gasColumns[gas];
+            const flux = column === undefined ? null : value(column);
+            r[gas + "_flux"] = typeof flux === "number" ? flux : null;
+          }
           refresh(r);
           rows.push(r);
+          mapped.imported++;
         }
       });
-      return report(10);
+      return mapped;
     },
     metnoGetClientId: async () => clientId,
     metnoSetClientId: async (id) => {

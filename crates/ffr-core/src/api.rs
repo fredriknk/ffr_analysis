@@ -304,7 +304,14 @@ pub struct ImportReport {
     /// Of `imported`: files that had failed before and now load.
     #[serde(default)]
     pub retried: usize,
+    /// Of `imported`: manual rows whose plot value did not match the layout.
+    #[serde(default, rename = "unmatchedPlots", skip_serializing_if = "is_zero")]
+    pub unmatched_plots: usize,
     pub errors: Vec<ImportError>,
+}
+
+fn is_zero(value: &usize) -> bool {
+    *value == 0
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

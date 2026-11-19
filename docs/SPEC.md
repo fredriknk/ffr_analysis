@@ -426,7 +426,10 @@ Diagnostics in the existing shapes: `FluxTable` gains columns `attention` (numbe
   Omitting `opts.sheet` previews the first worksheet.
 - `importSeries(args)`, `deleteSeries(id)`. For each series and timestamp, `aggregate`
   can be `mean`, `sum` or `none` (keep the first valid reading, also the default when omitted).
-- `importManualFluxes(args) → ImportReport`
+- `importManualFluxes({path, sheet?, headerRow, dateColumn, plotColumn, gasColumns, offsetHours?}) → ImportReport`.
+  `gasColumns` maps one or both of `N2O` and `CO2` to column names. The offset defaults to 12 hours.
+  Plot values match exact labels first, then numeric IDs. Unmatched rows with valid dates are
+  imported without a plot and counted in `ImportReport.unmatchedPlots` (omitted when zero).
 - `metnoGetClientId()`, `metnoSetClientId(id)`, `metnoFetch({station, from, to})`
 
 **Export**

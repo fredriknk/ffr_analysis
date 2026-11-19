@@ -42,16 +42,16 @@ Use distinct column names when importing different series. If two series share t
 
 ## Import manual chamber fluxes
 
-Use **Import manual fluxes** for fluxes already calculated from a manual chamber campaign. Set **Sheet**, **Header row (zero based)** and **Time column** after previewing the table, as for a time series. Prepare the following columns.
+Use **Import manual fluxes** for fluxes already calculated from a manual chamber campaign. Preview the table and select **Sheet**, **Header row (zero based)** and **Time column** as for a time series. Then map the other columns and set the time offset.
 
-| Column | Contents |
+| Field | What to enter |
 | --- | --- |
-| Date or time column of your choice | Select its name in **Time column**. The app adds 12 hours to every imported timestamp, so a date at midnight is shifted by 12 hours. The offset is fixed in this wizard. |
-| `plot` | Numeric **Plot ID** in the project. For an existing plot with measurements, use **Data** and show **Plot ID** beside **Plot** to check the mapping. |
-| `N2O` | N₂O flux in µg N m⁻² h⁻¹. |
-| `CO2` | CO₂ flux in µg C m⁻² h⁻¹. |
+| **Plot column** | Plot labels such as `P03`, or numeric plot IDs. An exact label takes precedence if a value could match both. |
+| **N2O column** | N₂O flux in µg N m⁻² h⁻¹. Choose **None** if you are only importing CO₂. |
+| **CO2 column** | CO₂ flux in µg C m⁻² h⁻¹. Choose **None** if you are only importing N₂O. |
+| **Time offset (hours)** | Hours to add to each timestamp. The default is `12`, which moves a midnight date to noon. Use `0` to keep the source time. Negative and fractional hours are supported. |
 
-If **Import mapped data** is disabled, tick a gas under **Value columns**. The manual importer reads the named gas columns whenever they are present. Click **Import mapped data**. Check the new **manual** rows in **Data**, especially the times, plot assignments and flux values. In **Treatments**, tick **manual** to include them in the comparison.
+Choose at least one gas column and click **Import mapped data**. The report shows how many rows were imported, how many of those had no matching plot, and how many were skipped for unreadable dates. Rows with no matching plot are imported without a plot assignment. Check the new **manual** rows in **Data**. In **Treatments**, tick **manual** to include them in the comparison.
 
 ## Watch a robot data folder
 

@@ -459,7 +459,7 @@ bytes])?;
     }
 
     pub(super) fn table_value(&self, path: &str, opts: Value) -> Result<Value> {
-        let (sheets, rows) = read_table(path, opts["sheet"].as_str())?;
+        let (sheets, rows) = read_table(path, opts["sheet"].as_str(), false)?;
         let header = opts["headerRow"].as_u64().unwrap_or(0) as usize;
         Ok(json!({
         "sheets":sheets,
@@ -474,7 +474,7 @@ bytes])?;
         let path = args["path"]
             .as_str()
             .ok_or_else(|| Error::Invalid("path required".into()))?;
-        let (_, rows) = read_table(path, args["sheet"].as_str())?;
+        let (_, rows) = read_table(path, args["sheet"].as_str(), false)?;
         let header = args["headerRow"].as_u64().unwrap_or(0) as usize;
         let headers = rows
             .get(header)
@@ -560,35 +560,73 @@ bytes])?;
         let path = args["path"]
             .as_str()
             .ok_or_else(|| Error::Invalid("path required".into()))?;
-        let (_, rows) = read_table(path, args["sheet"].as_str())?;
+        // Keep CSV plot labels such as "003" intact instead of coercing them to numbers.
+        let csv = is_csv(path);
+        let (_, rows) = read_table(path, args["sheet"].as_str(), true)?;
         let h = args["headerRow"].as_u64().unwrap_or(0) as usize;
         let headers = rows
             .get(h)
             .ok_or_else(|| Error::Invalid("missing headers".into()))?;
-        let col =
-            |key: &str, default: &str| column(headers, args.get(key).unwrap_or(&json!(default)));
+        let col = |key: &str, default: &str| {
+            column(headers, args.get(key).unwrap_or(&json!(default))).filter(|&i| i < headers.len())
+        };
         let tc = col("dateColumn", "date")
             .ok_or_else(|| Error::Invalid("date column missing".into()))?;
         let pc =
             col("plotColumn", "nr").ok_or_else(|| Error::Invalid("plot column missing".into()))?;
+        let mut gas_cols = Vec::new();
+        for (gas, legacy) in [("N2O", "N2O_N_mug_m2h"), ("CO2", "CO2_C_mug_m2h")] {
+            if args["gasColumns"].is_null() {
+                if let Some(i) = column(headers, &json!(legacy)) {
+                    gas_cols.push((gas, i));
+                }
+            } else if let Some(mapping) = args["gasColumns"].get(gas) {
+                let i = column(headers, mapping)
+                    .filter(|&i| i < headers.len())
+                    .ok_or_else(|| Error::Invalid(format!("{gas} column missing")))?;
+                gas_cols.push((gas, i));
+            }
+        }
+        if gas_cols.is_empty() {
+            return Err(Error::Invalid("select at least one gas column".into()));
+        }
+        let offset_ms = (args["offsetHours"].as_f64().unwrap_or(12.) * 3_600_000.).round();
+        if !(i64::MIN as f64..i64::MAX as f64).contains(&offset_ms) {
+            return Err(Error::Invalid("time offset outside range".into()));
+        }
         let cfg = self.get_config()?;
         let layout = self.layout_value()?;
+        let db = self.db()?;
+        let tx = db.unchecked_transaction()?;
         let mut report = ImportReport::default();
         for values in rows.iter().skip(h + 1) {
-            let Some(time) = values.get(tc).and_then(|v| parse_time(v, &cfg.time_zone)) else {
+            let Some(time) = values.get(tc).and_then(|v| {
+                parse_time(v, &cfg.time_zone).or_else(|| {
+                    if csv {
+                        parse_time(&json!(number(v)?), &cfg.time_zone)
+                    } else {
+                        None
+                    }
+                })
+            }) else {
                 report.skipped += 1;
                 continue;
             };
-            let plot = values.get(pc).and_then(number).map(|n| n as i64);
-            let p = layout.plots.iter().find(|p| p["id"].as_i64() == plot);
+            let time = time
+                .checked_add(offset_ms as i64)
+                .ok_or_else(|| Error::Invalid("time offset outside range".into()))?;
+            let p = values.get(pc).and_then(|v| manual_plot(&layout.plots, v));
+            if p.is_none() {
+                report.unmatched_plots += 1;
+            }
             let row = json!({
             "id":0,
             "measurementId":null,
             "source":"manual",
-            "time":time+args["offsetHours"].as_i64().unwrap_or(12)*3600000,
+            "time":time,
             "filename":null,
             "side":null,
-            "plotId":plot,
+            "plotId":p.map(|p|p["id"].clone()),
             "plotLabel":p.map(|p|p["label"].clone()),
             "treatmentId":p.map(|p|p["treatmentId"].clone()),
             "treatmentName":null,
@@ -601,21 +639,19 @@ bytes])?;
             );
 
             let mut row: FluxRow = serde_json::from_value(row)?;
-            for (gas, col) in [("N2O", "N2O_N_mug_m2h"), ("CO2", "CO2_C_mug_m2h")] {
-                if let Some(i) = column(headers, args["gasColumns"].get(gas).unwrap_or(&json!(col)))
-                {
-                    row.insert(format!("{gas}_flux"), json!(values.get(i).and_then(number)));
-                }
+            for &(gas, i) in &gas_cols {
+                row.insert(format!("{gas}_flux"), json!(values.get(i).and_then(number)));
             }
-            self.db()?.execute(
+            db.execute(
                 "INSERT INTO fluxes(row,results) VALUES(?1,'{}')",
                 [serde_json::to_string(&row)?],
             )?;
-            let id = self.db()?.last_insert_rowid();
+            let id = db.last_insert_rowid();
             row.insert("id".into(), json!(id));
             self.write_row(id, &row)?;
             report.imported += 1;
         }
+        tx.commit()?;
         Ok(report)
     }
 
@@ -656,6 +692,21 @@ bytes])?;
             },
         })
     }
+}
+
+fn manual_plot<'a>(plots: &'a [Value], value: &Value) -> Option<&'a Value> {
+    let label = cell_text(value);
+    let label = label.trim();
+    if label.is_empty() {
+        return None;
+    }
+    plots.iter().find(|p| p["label"] == label).or_else(|| {
+        let id = label.parse::<i64>().ok().or_else(|| {
+            let n = label.parse::<f64>().ok()?;
+            (n.fract() == 0. && (i64::MIN as f64..i64::MAX as f64).contains(&n)).then_some(n as i64)
+        })?;
+        plots.iter().find(|p| p["id"].as_i64() == Some(id))
+    })
 }
 
 pub(super) fn column(headers: &[Value], v: &Value) -> Option<usize> {
@@ -701,9 +752,20 @@ pub(super) fn parse_time(v: &Value, zone: &str) -> Option<i64> {
     None
 }
 
-fn read_table_inner(path: &str, sheet: Option<&str>) -> Result<(Vec<String>, Vec<Vec<Value>>)> {
+fn is_csv(path: &str) -> bool {
+    Path::new(path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| e.eq_ignore_ascii_case("csv"))
+}
+
+fn read_table_inner(
+    path: &str,
+    sheet: Option<&str>,
+    csv_text: bool,
+) -> Result<(Vec<String>, Vec<Vec<Value>>)> {
     use calamine::{Data, Reader};
-    if path.to_lowercase().ends_with(".csv") {
+    if is_csv(path) {
         let mut reader = csv::ReaderBuilder::new()
             .has_headers(false)
             .from_path(path)
@@ -713,7 +775,13 @@ fn read_table_inner(path: &str, sheet: Option<&str>) -> Result<(Vec<String>, Vec
             .map(|r| {
                 r.map(|r| {
                     r.iter()
-                        .map(|s| s.parse::<f64>().map_or_else(|_| json!(s), |v| json!(v)))
+                        .map(|s| {
+                            if csv_text {
+                                json!(s)
+                            } else {
+                                s.parse::<f64>().map_or_else(|_| json!(s), |v| json!(v))
+                            }
+                        })
                         .collect()
                 })
                 .map_err(|e| Error::Invalid(e.to_string()))
@@ -852,16 +920,87 @@ pub(super) fn unknown_layout(dir: &str) -> Result<StoredLayout> {
     Ok(StoredLayout::default())
 }
 
-pub(super) fn read_table(
+fn read_table(
     path: &str,
     sheet: Option<&str>,
+    csv_text: bool,
 ) -> Result<(Vec<String>, Vec<Vec<Value>>)> {
-    read_table_inner(path, sheet).map_err(|e| Error::Invalid(format!("{path}: {e}")))
+    read_table_inner(path, sheet, csv_text).map_err(|e| Error::Invalid(format!("{path}: {e}")))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn manual_import_matches_labels_and_ids_and_applies_mapping_and_offset() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut session = Session::default();
+        session
+            .project_create(dir.path().join("manual.ffr").to_str().unwrap(), "Manual")
+            .unwrap();
+        let layout = json!({
+            "treatments": [{"id": 1, "name": "Test", "shortName": "T", "colour": "#000000", "sortOrder": 1}],
+            "plots": [
+                {"id": 1, "label": "P03", "treatmentId": 1, "block": 1, "polygon": null},
+                {"id": 2, "label": "003", "treatmentId": 1, "block": 1, "polygon": null},
+                {"id": 3, "label": "Other", "treatmentId": 1, "block": 1, "polygon": null}
+            ]
+        });
+        session
+            .set_layout(serde_json::from_value(layout).unwrap(), |_| {})
+            .unwrap();
+        let csv = dir.path().join("chambers.csv");
+        std::fs::write(
+            &csv,
+            "Collected,Plot key,Carbon dioxide,N2O_N_mug_m2h\n\
+             2024-06-01T00:00:00Z,P03,400,10\n\
+             2024-06-01T00:00:00Z,2.0,700,20\n\
+             2024-06-01T00:00:00Z,003,900,30\n\
+             2024-06-01T00:00:00Z,99,1000,40\n\
+             2024-06-01T00:00:00Z,1.5,1100,50\n\
+             bad date,missing,1200,60\n",
+        )
+        .unwrap();
+        let mut args = json!({
+            "path": csv, "dateColumn": "Collected", "plotColumn": "Plot key",
+            "gasColumns": {"CO2": "Carbon dioxide"}, "offsetHours": -1.5
+        });
+        let report = session.import_manual_fluxes(args.clone()).unwrap();
+        assert_eq!(
+            (report.imported, report.skipped, report.unmatched_plots),
+            (5, 1, 2)
+        );
+        assert_eq!(json!(report)["unmatchedPlots"], 2);
+        let rows = session.rows().unwrap();
+        assert_eq!(
+            rows.iter().map(|r| &r["plotId"]).collect::<Vec<_>>(),
+            [&json!(1), &json!(2), &json!(2), &Value::Null, &Value::Null]
+        );
+        assert_eq!(rows[0]["plotLabel"], "P03");
+        assert_eq!(rows[2]["plotLabel"], "003");
+        assert_eq!(rows[0]["time"], 1717200000000_i64 - 5_400_000);
+        assert_eq!(rows[0]["CO2_flux"], json!(400.));
+        assert!(!rows[0].contains_key("N2O_flux"));
+        args["gasColumns"] = json!({});
+        assert!(session.import_manual_fluxes(args).is_err());
+        assert_eq!(session.rows().unwrap().len(), 5);
+    }
+
+    #[test]
+    fn legacy_manual_import_defaults_to_legacy_columns_and_twelve_hours() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut session = Session::default();
+        session
+            .project_create(dir.path().join("manual.ffr").to_str().unwrap(), "Manual")
+            .unwrap();
+        let csv = dir.path().join("legacy.csv");
+        std::fs::write(&csv, "date,nr,N2O_N_mug_m2h\n1717200000,1,10\n").unwrap();
+        session.import_manual_fluxes(json!({"path": csv})).unwrap();
+        let row = session.row(1).unwrap();
+        assert_eq!(row["time"], 1717200000000_i64 + 43_200_000);
+        assert_eq!(row["N2O_flux"], json!(10.));
+    }
 
     #[test]
     fn workbook_preview_defaults_to_first_sheet_and_lists_real_names() {

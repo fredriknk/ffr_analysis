@@ -429,6 +429,8 @@ export interface ImportReport {
   skipped: number;
   /** Of `imported`: files that had failed before and now load. */
   retried?: number;
+  /** Of `imported`: manual rows without a matching plot. */
+  unmatchedPlots?: number;
   errors: { path: string; message: string }[];
 }
 /** A folder of robot raw files the project imports new files from. */

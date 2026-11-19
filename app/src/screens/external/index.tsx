@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import type { EChartsCoreOption } from "echarts/core";
 import { useEffect, useState } from "react";
 import { api, mockMode } from "../../api";
+import type { ImportReport } from "../../api/types";
 import { Chart } from "../../shared/charts/Chart";
 import {
   Empty,
@@ -13,6 +14,33 @@ import {
 } from "../../shared/common";
 import { useStore } from "../../store";
 import { RawFolderPanel } from "./RawFolderPanel";
+import { manualImportMapping, suggestedColumns } from "./columnMapping";
+
+function ColumnSelect({
+  label,
+  columns,
+  value,
+  placeholder,
+  onChange,
+}: {
+  label: string;
+  columns: string[];
+  value: string;
+  placeholder?: string;
+  onChange: (column: string) => void;
+}) {
+  return (
+    <Field label={label}>
+      <select value={value} onChange={(e) => onChange(e.target.value)}>
+        {placeholder && <option value="">{placeholder}</option>}
+        {columns.filter(Boolean).map((column) => (
+          <option key={column}>{column}</option>
+        ))}
+      </select>
+    </Field>
+  );
+}
+
 export function External() {
   const visible = useStore((s) => s.screen === "External data");
   const action = useAction(),
@@ -26,8 +54,12 @@ export function External() {
     [path, setPath] = useState(""),
     [sheet, setSheet] = useState<string>(),
     [header, setHeader] = useState(0),
-    [timeCol, setTimeCol] = useState("date"),
-    [values, setValues] = useState(["temperature"]),
+    [chosenColumns, setChosenColumns] = useState<
+      Partial<ReturnType<typeof suggestedColumns>>
+    >({}),
+    [chosenValues, setValues] = useState(["temperature"]),
+    [offset, setOffset] = useState("12"),
+    [manualReport, setManualReport] = useState<ImportReport>(),
     [aggregate, setAggregate] = useState<"mean" | "sum" | "none">("mean"),
     [preview, setPreview] = useState<{
       path: string;
@@ -49,16 +81,40 @@ export function External() {
     enabled: visible && !!series.data?.some((s) => s.id === selected),
   });
   const table = preview?.path === path ? preview.table : undefined;
+  const columns = table?.columns ?? [];
+  const mapping = { ...suggestedColumns(columns), ...chosenColumns };
+  const manual = manualImportMapping(columns, mapping, offset);
+  const values = chosenValues.filter(
+    (v) => v !== mapping.time && columns.includes(v),
+  );
   const activeSheet = sheet ?? table?.sheets[0];
   const previewIsCurrent =
     !!table &&
     preview?.header === header &&
     (preview.sheet ?? table.sheets[0]) === activeSheet;
 
-  function changePath(next: string) {
-    setPath(next);
+  function resetMapping() {
+    setChosenColumns({});
+    setValues(["temperature"]);
+  }
+
+  function resetPreview() {
     setSheet(undefined);
     setPreview(undefined);
+    resetMapping();
+  }
+
+  function openWizard(mode: "series" | "manual") {
+    if (mode === wizard) return;
+    resetPreview();
+    setOffset("12");
+    setManualReport(undefined);
+    setWizard(mode);
+  }
+
+  function changePath(next: string) {
+    setPath(next);
+    resetPreview();
   }
 
   return (
@@ -72,10 +128,10 @@ export function External() {
           </p>
         </div>
         <div className="button-group">
-          <button onClick={() => setWizard("manual")}>
+          <button onClick={() => openWizard("manual")}>
             Import manual fluxes
           </button>
-          <button className="primary" onClick={() => setWizard("series")}>
+          <button className="primary" onClick={() => openWizard("series")}>
             Import series +
           </button>
         </div>
@@ -154,8 +210,7 @@ export function External() {
             <button
               onClick={() => {
                 setWizard(null);
-                setSheet(undefined);
-                setPreview(undefined);
+                resetPreview();
               }}
             >
               Close
@@ -164,7 +219,10 @@ export function External() {
         >
           <div className="form-grid">
             <Field label="Excel / CSV path">
-              <input value={path} onChange={(e) => changePath(e.target.value)} />
+              <input
+                value={path}
+                onChange={(e) => changePath(e.target.value)}
+              />
             </Field>
             <button onClick={() => void pick().then((p) => p && changePath(p))}>
               Browse file
@@ -177,6 +235,7 @@ export function External() {
                     headerRow: header,
                     ...(sheet === undefined ? {} : { sheet }),
                   });
+                  if (!previewIsCurrent) resetMapping();
                   setPreview({ path, header, sheet, table });
                 })
               }
@@ -205,50 +264,86 @@ export function External() {
                     onChange={(e) => setHeader(Number(e.target.value))}
                   />
                 </Field>
-                <Field label="Time column">
-                  <select
-                    value={timeCol}
-                    onChange={(e) => setTimeCol(e.target.value)}
-                  >
-                    {table.columns.map((c) => (
-                      <option key={c}>{c}</option>
-                    ))}
-                  </select>
-                </Field>
-                <Field label="Aggregation">
-                  <select
-                    value={aggregate}
-                    onChange={(e) =>
-                      setAggregate(e.target.value as typeof aggregate)
-                    }
-                  >
-                    <option>mean</option>
-                    <option>sum</option>
-                    <option>none</option>
-                  </select>
-                </Field>
-              </div>
-              <p>Value columns</p>
-              <div className="toolbar">
-                {table.columns
-                  .filter((c) => c !== timeCol)
-                  .map((c) => (
-                    <label key={c}>
-                      <input
-                        type="checkbox"
-                        checked={values.includes(c)}
-                        onChange={(e) =>
-                          setValues(
-                            e.target.checked
-                              ? [...values, c]
-                              : values.filter((v) => v !== c),
-                          )
+                <ColumnSelect
+                  label="Time column"
+                  columns={columns}
+                  value={mapping.time}
+                  onChange={(time) =>
+                    setChosenColumns({ ...chosenColumns, time })
+                  }
+                />
+                {wizard === "manual" ? (
+                  <>
+                    <ColumnSelect
+                      label="Plot column"
+                      columns={columns}
+                      value={mapping.plot}
+                      placeholder="Choose a column"
+                      onChange={(plot) =>
+                        setChosenColumns({ ...chosenColumns, plot })
+                      }
+                    />
+                    {(["N2O", "CO2"] as const).map((gas) => (
+                      <ColumnSelect
+                        key={gas}
+                        label={gas + " column"}
+                        columns={columns}
+                        value={mapping[gas]}
+                        placeholder="None"
+                        onChange={(column) =>
+                          setChosenColumns({ ...chosenColumns, [gas]: column })
                         }
                       />
-                      {c}
-                    </label>
-                  ))}
+                    ))}
+                    <Field label="Time offset (hours)">
+                      <input
+                        type="number"
+                        step="any"
+                        value={offset}
+                        onChange={(e) => setOffset(e.target.value)}
+                      />
+                    </Field>
+                  </>
+                ) : (
+                  <Field label="Aggregation">
+                    <select
+                      value={aggregate}
+                      onChange={(e) =>
+                        setAggregate(e.target.value as typeof aggregate)
+                      }
+                    >
+                      <option>mean</option>
+                      <option>sum</option>
+                      <option>none</option>
+                    </select>
+                  </Field>
+                )}
               </div>
+              {wizard === "series" && (
+                <>
+                  <p>Value columns</p>
+                  <div className="toolbar">
+                    {columns
+                      .filter((c) => c && c !== mapping.time)
+                      .map((c) => (
+                        <label key={c}>
+                          <input
+                            type="checkbox"
+                            checked={values.includes(c)}
+                            onChange={(e) =>
+                              setValues(
+                                e.target.checked
+                                  ? [...values, c]
+                                  : values.filter((v) => v !== c),
+                              )
+                            }
+                          />
+                          {c}
+                        </label>
+                      ))}
+                  </div>
+                </>
+              )}
               <div className="preview-table">
                 <table>
                   <thead>
@@ -269,40 +364,39 @@ export function External() {
                   </tbody>
                 </table>
               </div>
-              {wizard === "manual" && (
-                <p>
-                  Manual mapping: date ? {timeCol}, plot → plot, N2O ? N2O, CO2
-                  ? CO2; +12 h offset.
-                </p>
-              )}
               <button
                 className="primary"
-                disabled={!previewIsCurrent || !values.length}
+                disabled={
+                  !previewIsCurrent ||
+                  (wizard === "manual"
+                    ? !manual
+                    : !mapping.time || !values.length)
+                }
                 onClick={() =>
-                  void action(async () => {
-                    if (wizard === "manual")
-                      await api.importManualFluxes({
-                        path,
-                        sheet,
-                        headerRow: header,
-                        dateColumn: timeCol,
-                        plotColumn: "plot",
-                        gasColumns: { N2O: "N2O", CO2: "CO2" },
-                        offsetHours: 12,
-                      });
-                    else
-                      await api.importSeries({
-                        path,
-                        sheet,
-                        headerRow: header,
-                        timeColumn: timeCol,
-                        valueColumns: values,
-                        aggregate,
-                      });
-                    setWizard(null);
-                    setSheet(undefined);
-                    setPreview(undefined);
-                  }, "Synthetic import complete")
+                  void action(
+                    async () => {
+                      const source = { path, sheet, headerRow: header };
+                      if (wizard === "manual") {
+                        if (!manual) return;
+                        setManualReport(
+                          await api.importManualFluxes({
+                            ...source,
+                            ...manual,
+                          }),
+                        );
+                      } else {
+                        await api.importSeries({
+                          ...source,
+                          timeColumn: mapping.time,
+                          valueColumns: values,
+                          aggregate,
+                        });
+                      }
+                      setWizard(null);
+                      resetPreview();
+                    },
+                    wizard === "series" ? "Time series imported" : undefined,
+                  )
                 }
               >
                 Import mapped data
@@ -310,6 +404,13 @@ export function External() {
             </>
           )}
         </Panel>
+      )}
+      {manualReport && (
+        <p role="status">
+          Manual flux import · {manualReport.imported} rows imported ·{" "}
+          {manualReport.unmatchedPlots ?? 0} without a matching plot ·{" "}
+          {manualReport.skipped} skipped
+        </p>
       )}
       <RawFolderPanel visible={visible} />
       <Panel title="met.no weather">
