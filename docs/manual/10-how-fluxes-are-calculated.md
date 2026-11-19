@@ -73,7 +73,7 @@ For N₂O–N, multiply `F` by `2 × 14 × 10⁶ × 3600` to obtain µg N m⁻²
 
 ## Locate the chamber and assign the plot
 
-The app starts from the robot coordinates in the file name. By default, it offsets the chamber 2 m perpendicular to the heading on the measured side and 0.2 m forward along the heading. If the heading is missing, it uses the robot position. With coordinates available, it assigns the robot flux to the first plot whose waypoint-number and side pair matches or whose polygon contains the calculated chamber position. It tests both for each plot in layout order. A saved per-flux plot override takes precedence. Plots supply the treatment assignments. See [Waypoints and robot routes](09-waypoints.md#make-plots-from-a-route).
+The app starts from the robot coordinates in the file name. By default, it offsets the chamber 2 m perpendicular to the heading on the measured side and 0.2 m forward along the heading. If the heading is missing, it uses the robot position. With coordinates available, a saved per-flux plot override takes precedence. Otherwise the app assigns the robot flux to the first plot in layout order with a matching waypoint number and chamber side. If no visit matches, it uses the first plot whose polygon contains the chamber position. Plots supply the treatment assignments. See [Waypoints and robot routes](09-waypoints.md#make-plots-from-a-route).
 
 ## Summarise treatments
 

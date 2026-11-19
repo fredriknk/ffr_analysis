@@ -286,7 +286,8 @@ export interface FluxFlags {
   excluded?: boolean;
   reviewed?: boolean;
   note?: string;
-  plotOverride?: number;
+  /** Use null to restore automatic robot plot assignment. */
+  plotOverride?: number | null;
   /** Per-gas exclusion choice merged into the flux; null returns to automatic. */
   gasExcluded?: Partial<Record<Gas, boolean | null>>;
 }

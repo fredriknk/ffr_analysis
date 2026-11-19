@@ -11,7 +11,7 @@ import {
 } from "./maths";
 import { demoPlotGeometry, demoRoute, plotCentre } from "./mockRoute";
 import type * as T from "./types";
-import { mockWaypointPlots } from "./mockWaypointPlots";
+import { mockWaypointPlots, waypointNumber } from "./mockWaypointPlots";
 const colours = [
   "#217a70",
   "#b46c28",
@@ -533,16 +533,47 @@ export function createMock(seed = 42): T.FfrApi {
       r.attention = score(ds);
     }
   }
+  function setRowPlot(r: T.FluxRow, plot?: T.Plot) {
+    const treatment = layout.treatments.find((t) => t.id === plot?.treatmentId);
+    Object.assign(r, {
+      plotId: plot?.id ?? 0,
+      plotLabel: plot?.label ?? "—",
+      treatmentId: plot?.treatmentId ?? 0,
+      treatmentName: treatment?.name ?? "Unassigned",
+    });
+  }
+  function assignRobotPlot(r: T.FluxRow) {
+    if (r.plotOverride != null) {
+      setRowPlot(
+        r,
+        layout.plots.find((p) => p.id === r.plotOverride),
+      );
+      return;
+    }
+    const filename = r.filename.split(/[\\/]/).pop() ?? "";
+    const waypointName = filename.match(/(?:left|right|both)(.*)/)?.[1] ?? "";
+    const waypoint = waypointNumber(waypointName);
+    const visitPlot = layout.plots.find((p) =>
+      p.waypoints?.some((v) => v.waypoint === waypoint && v.side === r.side),
+    );
+    setRowPlot(
+      r,
+      visitPlot ?? layout.plots.find((p) => inside(p.polygon ?? [], r.x, r.y)),
+    );
+  }
   function makeRow(id: number, manual = false): T.FluxRow {
     const i = id - 1,
       p = layout.plots[i % Math.max(1, layout.plots.length)] ?? {
         id: 0,
         label: "Unassigned",
         treatmentId: 0,
+        waypoints: null,
       },
       time = manual
         ? start + ((i * 4) % 728) * 86400000
-        : start + Math.floor(i / 72) * 7 * 86400000 + (i % 72) * 190000;
+        : start + Math.floor(i / 72) * 7 * 86400000 + (i % 72) * 190000,
+      side = i % 2 ? "right" : "left",
+      visit = p.waypoints?.find((v) => v.side === side);
     return {
       id,
       measurementId: manual ? null : Math.floor(i / 2) + 1,
@@ -553,8 +584,9 @@ export function createMock(seed = 42): T.FfrApi {
         : "FFR_" +
           new Date(time).toISOString().slice(0, 10) +
           "_" +
-          Math.floor(i / 2 + 1),
-      side: i % 2 ? "right" : "left",
+          Math.floor(i / 2 + 1) +
+          (visit ? "_both_Plot_" + visit.waypoint : ""),
+      side,
       plotId: p.id,
       plotLabel: p.label,
       treatmentId: p.treatmentId,
@@ -658,7 +690,8 @@ export function createMock(seed = 42): T.FfrApi {
             excluded: r.excluded,
             reviewed: r.reviewed,
             note: r.note,
-            plotOverride: r.plotId,
+            plotId: r.plotId,
+            plotOverride: r.plotOverride ?? null,
           })),
           config,
           layout,
@@ -681,16 +714,15 @@ export function createMock(seed = 42): T.FfrApi {
       for (const f of s.flags) {
         const r = rows[f.id - 1];
         if (!r) continue;
-        Object.assign(r, f);
-        const p = layout.plots.find((p) => p.id === f.plotOverride);
-        if (p)
-          Object.assign(r, {
-            plotId: p.id,
-            plotLabel: p.label,
-            treatmentId: p.treatmentId,
-            treatmentName:
-              layout.treatments.find((t) => t.id === p.treatmentId)?.name ?? "",
-          });
+        // Older saved edits stored the assigned plot under plotOverride.
+        const { plotId, plotOverride, ...flags } = f;
+        Object.assign(r, flags, {
+          plotOverride: plotId === undefined ? null : plotOverride,
+        });
+        setRowPlot(
+          r,
+          layout.plots.find((p) => p.id === (plotId ?? plotOverride)),
+        );
       }
       rows.filter((r) => r.source === "robot").forEach(refresh);
       neighbours();
@@ -928,6 +960,7 @@ export function createMock(seed = 42): T.FfrApi {
             const r = makeRow(rows.length + 1);
             r.filename = filename;
             r.measurementId = measurementId;
+            assignRobotPlot(r);
             refresh(r);
             rows.push(r);
           }
@@ -965,6 +998,10 @@ export function createMock(seed = 42): T.FfrApi {
       change("Field layout", [], () => {
         layout = structuredClone(l);
         rows.forEach((r) => {
+          if (r.source === "robot") {
+            assignRobotPlot(r);
+            return;
+          }
           const p = l.plots.find((p) => p.id === r.plotId),
             t = l.treatments.find((t) => t.id === p?.treatmentId);
           if (p && t)
@@ -1095,14 +1132,13 @@ export function createMock(seed = 42): T.FfrApi {
             gasChoices.set(id, merged);
             applyGasExclusion(r);
           }
-          if (flags.plotOverride) {
-            const p = layout.plots.find((p) => p.id === flags.plotOverride)!;
-            Object.assign(r, {
-              plotId: p.id,
-              plotLabel: p.label,
-              treatmentId: p.treatmentId,
-              treatmentName: layout.treatments[p.treatmentId - 1].name,
-            });
+          if (flags.plotOverride !== undefined) {
+            if (r.source === "robot") assignRobotPlot(r);
+            else if (flags.plotOverride !== null)
+              setRowPlot(
+                r,
+                layout.plots.find((p) => p.id === flags.plotOverride),
+              );
           }
         }),
       );
@@ -1369,17 +1405,7 @@ export function createMock(seed = 42): T.FfrApi {
           })),
         };
         for (const r of rows) {
-          if (r.source !== "robot") continue;
-          const plot = layout.plots.find((p) =>
-            inside(p.polygon ?? [], Number(r.x), Number(r.y)),
-          );
-          const t = layout.treatments.find((t) => t.id === plot?.treatmentId);
-          Object.assign(r, {
-            plotId: plot?.id ?? 0,
-            plotLabel: plot?.label ?? "—",
-            treatmentId: t?.id ?? 0,
-            treatmentName: t?.name ?? "Unassigned",
-          });
+          if (r.source === "robot") assignRobotPlot(r);
         }
         route = {
           points: structuredClone(args.points),

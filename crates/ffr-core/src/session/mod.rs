@@ -52,7 +52,8 @@ impl Session {
 /// 4: analyser error codes (about 1.8e304) are dropped like zeros; files
 ///    that are not robot files are removed (failed robot files are re-read by
 ///    the next import or folder scan).
-pub(crate) const ANALYSIS_VERSION: i64 = 4;
+/// 5: waypoint matches take precedence over polygon matches.
+pub(crate) const ANALYSIS_VERSION: i64 = 5;
 /// Sets `<gas>_excluded` for every gas from the user's per-gas choice in
 /// `gasExcluded` (`{gas: bool}`; default included). Whole-flux `excluded` is
 /// separate and wins everywhere. Drops the 2.1.0 `autoExcludedGases` field.
@@ -103,23 +104,28 @@ pub(crate) fn assign(
     for key in ["plotId", "plotLabel", "treatmentId", "treatmentName"] {
         row.insert(key.into(), Value::Null);
     }
-    let plot = layout.plots.iter().find(|p| {
-        if let Some(id) = row.get("plotOverride").filter(|v| !v.is_null()) {
-            return &p["id"] == id;
-        }
-        p["waypoints"].as_array().is_some_and(|ws| {
-            ws.iter().any(|w| {
-                w["side"] == if side == 1 { "left" } else { "right" }
-                    && w["waypoint"].as_i64()
-                        == m.waypoint
-                            .split(|c: char| !c.is_ascii_digit())
-                            .rfind(|s| !s.is_empty())
-                            .and_then(|s| s.parse::<i64>().ok())
+    let plot = if let Some(id) = row.get("plotOverride").filter(|v| !v.is_null()) {
+        layout.plots.iter().find(|p| &p["id"] == id)
+    } else {
+        let side = if side == 1 { "left" } else { "right" };
+        crate::waypoints::waypoint_number(&m.waypoint)
+            .and_then(|waypoint| {
+                layout.plots.iter().find(|p| {
+                    p["waypoints"].as_array().is_some_and(|visits| {
+                        visits
+                            .iter()
+                            .any(|v| v["side"] == side && v["waypoint"].as_i64() == Some(waypoint))
+                    })
+                })
             })
-        }) || p["polygon"]
-            .as_array()
-            .is_some_and(|poly| contains(poly, x, y))
-    });
+            .or_else(|| {
+                layout.plots.iter().find(|p| {
+                    p["polygon"]
+                        .as_array()
+                        .is_some_and(|poly| contains(poly, x, y))
+                })
+            })
+    };
     if let Some(p) = plot {
         row.insert("plotId".into(), p["id"].clone());
         row.insert("plotLabel".into(), p["label"].clone());
@@ -192,3 +198,56 @@ pub(crate) use import::preset_layout;
 
 mod metadata;
 use metadata::column_spec;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn plot_assignment_prefers_waypoint_then_polygon_and_honors_override() {
+        let cfg = ProjectConfig::default();
+        let m = raw::filename(
+            "2024-01-01-12-00-00-x10_0-y10_0-z0_0-h0_0_both_Lane_2_Plot_17_",
+            &cfg.time_zone,
+        )
+        .unwrap();
+        let mut layout = StoredLayout {
+            plots: vec![
+                json!({
+                    "id": 1, "label": "A", "treatmentId": 1,
+                    "polygon": [[8, 7], [12, 7], [12, 13], [8, 13]]
+                }),
+                json!({
+                    "id": 2, "label": "B", "treatmentId": 2,
+                    "polygon": [[9, 11], [13, 11], [13, 15], [9, 15]],
+                    "waypoints": [{"waypoint": 17, "side": "left"}]
+                }),
+            ],
+            treatments: vec![json!({"id": 2, "name": "Control"})],
+        };
+        let mut row = FluxRow::new();
+
+        assign(&mut row, &m, 1, &cfg, &layout);
+        assert_eq!(row["plotId"], 2);
+        assert_eq!(row["treatmentName"], "Control");
+        assign(&mut row, &m, 2, &cfg, &layout);
+        assert_eq!(row["plotId"], 1);
+
+        row.insert("plotOverride".into(), json!(1));
+        assign(&mut row, &m, 1, &cfg, &layout);
+        assert_eq!(row["plotId"], 1);
+        row.insert("plotOverride".into(), Value::Null);
+
+        let mut waypoint_only = layout.clone();
+        waypoint_only.plots.retain(|p| p["id"] == 2);
+        waypoint_only.plots[0]["polygon"] = Value::Null;
+        assign(&mut row, &m, 1, &cfg, &waypoint_only);
+        assert_eq!(row["plotId"], 2);
+        assign(&mut row, &m, 2, &cfg, &waypoint_only);
+        assert!(row["plotId"].is_null());
+
+        layout.plots[1]["waypoints"] = Value::Null;
+        assign(&mut row, &m, 1, &cfg, &layout);
+        assert_eq!(row["plotId"], 1);
+    }
+}

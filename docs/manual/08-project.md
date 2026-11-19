@@ -87,7 +87,7 @@ The map draws plot boundaries in their treatment colours. Use **Labels**, **Meas
 | Waypoint table | A plot can store pairs of waypoint number and chamber side. Route-generated plots and some legacy imports supply these pairs. |
 | Per-flux override | In **Review**, open **Plot assignment & note** and choose the plot for that flux. |
 
-Automatic assignment checks plots in layout order and takes the first plot with a matching waypoint and side or a containing polygon. A manual override takes precedence. For a route layout, compare the chamber positions and plot boundaries if a chamber seems to be assigned to the wrong plot. An earlier polygon match can take precedence over a later waypoint match.
+A manual override takes precedence. Automatic assignment uses the first plot in layout order with a matching waypoint number and chamber side. If no visit matches, it uses the first plot whose polygon contains the chamber position.
 
 | Key or mouse action | Result |
 | --- | --- |

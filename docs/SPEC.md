@@ -149,13 +149,13 @@ Units: `N2O_N_mug_m2h = flux × 2 × 14 × 1e6 × 3600`, `CO2_C_mug_m2h = flux �
 
 ### 4.6 Chamber position and plot
 
-Chamber position from vehicle position, heading and side: `prog/sort_results.py`
-`chamber_position` (2 m sideways, 0.2 m forward). A flux belongs to a plot by one of:
+Chamber position from vehicle position, heading and side uses `chamber_position` in
+`prog/sort_results.py` (2 m sideways, 0.2 m forward). A per-flux manual override takes
+precedence. Automatic assignment uses two passes in layout order.
 
-- **polygons**: point-in-polygon on the chamber position (Capture: a 6×6 grid, see
-  `Users/Capture/field_experiment.py` and `prog/polygon_utils.py`);
-- **waypoint table**: (waypoint number, side) → plot (Truesoil, Greenmove);
-- a per-flux manual override.
+1. Use the first plot with a matching (waypoint number, side) pair (Truesoil, Greenmove).
+2. If no waypoint pair matches, use the first polygon containing the chamber position
+   (Capture uses a 6×6 grid, see `Users/Capture/field_experiment.py` and `prog/polygon_utils.py`).
 
 Plots belong to treatments.
 
@@ -169,10 +169,8 @@ visits. The field direction is the edge of the minimum-area rectangle around the
 centres (or given). Footprints are centred on each group: auto (square, half the distance
 to the nearest other centre), a fixed square, or a fixed rectangle (width along the field
 direction, length across). Each plot stores its polygon and its `(waypoint number, side)`
-visits, where the waypoint number is the last digit run in the waypoint name. A flux
-belongs to the first plot whose visits match its file's waypoint and side, or whose polygon
-contains its chamber position, so moving or resizing a plot later does not lose fluxes that
-the route already ties to it.
+visits, where the waypoint number is the last digit run in the waypoint name. Matching
+visits keep fluxes assigned to their route plot when footprints move, resize or overlap.
 
 ### 4.7 Treatment summary ("cumsum")
 

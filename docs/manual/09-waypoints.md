@@ -97,7 +97,7 @@ The **Plots from route** preview shows what the robot measures. Each **Measure**
 
 Compare the plot count with the trial layout and check the number of chamber measurements and plots measured more than once. The map labels show the number of visits for plots with repeated measurements. A waypoint name without a number can still help form a plot, but its flux can only match the plot by position.
 
-The app stores each plot’s waypoint-number and side pairs alongside its footprint. It tests waypoint and side first for each plot, then checks whether the chamber position falls inside that plot’s polygon. The first match in layout order wins. An earlier polygon can therefore take precedence over a later waypoint match. The saved pairs let fluxes keep matching by waypoint and side after a footprint is moved or resized.
+The app stores each plot’s waypoint-number and side pairs alongside its footprint. It checks all plots for a matching visit before looking for a polygon that contains the chamber position. Within each pass, the first match in layout order wins. The saved pairs keep fluxes assigned to their route plot when footprints move, resize or overlap. A per-flux manual override takes precedence.
 
 - With no open project, choose **Create project from route…** and save a new `.ffr` file. The app stores the route and layout in the new project.
 - With an open project, choose **Use as project layout…**, review the plot count and choose **Replace layout**. The app keeps the treatments, places the new plots in **Unassigned**, and rechecks robot flux assignments. Project **Undo** can restore the previous plot layout.
