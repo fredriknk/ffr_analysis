@@ -2,24 +2,55 @@ import { beta, regression } from "./maths";
 import type {
   AnalysisOptions,
   Diagnostic,
+  DiagnosticsConfig,
   FluxRow,
   ProjectConfig,
   Regression,
   Trace,
 } from "./types";
-export const thresholds = {
-  negativeP: 0.01,
-  co2R2: 0.95,
-  co2BadR2: 0.8,
-  curvatureP: 0.001,
-  curvatureFraction: 0.4,
-  valveMinLagS: 1,
-  valveMinImprovement: 0.3,
+export const thresholds: DiagnosticsConfig = {
+  noiseFloorMultiplier: 3,
+  extraCutS: 3,
+  robustMad: 4,
+  noisyWarn: 4,
+  shapeFloorMultiplier: 1,
+  shapeWarnImpact: 0.15,
+  shapeBadImpact: 0.35,
   edgeRatio: 2.5,
   spikeMad: 6,
-  minPoints: 20,
-  minWindow: 60,
+  curvatureP: 0.001,
+  curvatureSlopeChange: 0.4,
+  curvatureGases: ["N2O", "CO2"],
+  lagContrastSd: 4,
+  valveSearchS: 10,
+  valveStepS: 0.5,
+  valveMinLagS: 1,
+  valveMinImprovement: 0.3,
+  valveEstimateCutS: 0.25,
+  leakReferenceFloor: 5,
+  leakFraction: 0.25,
+  leakDaySiblingFraction: 0.5,
+  leakMinDayPoints: 6,
+  n2oNegativeP: 0.01,
+  co2NegativeFloor: 1,
+  negativeInfoFloor: 1,
+  negativeWarnFloor: 3,
+  negativeBadFloor: 5,
+  neighbourDays: 3,
+  neighbourFallbackDays: 10,
+  minNeighbours: 6,
+  neighbourAsinhMadMin: 0.15,
   neighbourZ: 5,
+  neighbourRawZ: 8,
+  neighbourBadZ: 10,
+  neighbourBadRatio: 10,
+  neighbourBadFloor: 5,
+  normalSegmentS: 20,
+  normalSwitches: 10,
+  irregularFraction: 0.5,
+  minPoints: 20,
+  minWindowS: 60,
+  dropoutGapS: 5,
 };
 export const median = (v: number[]) => {
   const s = [...v].sort((a, b) => a - b),
@@ -57,7 +88,7 @@ export function findings(
           "The measurement failed validation: a valve event is incomplete, so no chamber fit is available.",
       },
     ];
-  const limits = { ...thresholds, ...cfg.diagnostics },
+  const limits = cfg.diagnostics,
     out: Diagnostic[] = [];
   const add = (
     code: string,
@@ -74,7 +105,7 @@ export function findings(
     );
   const n = regs.find((r) => r.gas === "N2O"),
     co2 = regs.find((r) => r.gas === "CO2");
-  if (n && n.slope < 0 && n.pval < limits.negativeP)
+  if (n && n.slope < 0 && n.pval < limits.n2oNegativeP)
     add(
       "n2o_negative",
       "bad",
@@ -105,7 +136,7 @@ export function findings(
       x = ix.map((i) => tr.t[i]),
       y = ix.map((i) => tr.y[i]),
       res = ix.map((i) => tr.y[i] - r.intercept - r.slope * tr.t[i]);
-    if (r.n < limits.minPoints || r.stop - r.start < limits.minWindow)
+    if (r.n < limits.minPoints || r.stop - r.start < limits.minWindowS)
       add(
         "few_points",
         "warn",
@@ -137,7 +168,7 @@ export function findings(
         y.filter((_, i) => x[i] >= mid),
       );
     // Orthogonalise x² against the linear model, then test the extra quadratic term.
-    if (x.length > 5) {
+    if (limits.curvatureGases.includes(r.gas) && x.length > 5) {
       const xx = x.map((t) => (t - mid) ** 2),
         qr = regression(x, xx),
         z = xx.map((v, i) => v - qr.intercept - qr.slope * x[i]),
@@ -153,7 +184,7 @@ export function findings(
         frac =
           Math.abs(a.slope - b.slope) /
           Math.max(1e-12, Math.abs(a.slope), Math.abs(b.slope));
-      if (p < limits.curvatureP && frac > limits.curvatureFraction)
+      if (p < limits.curvatureP && frac > limits.curvatureSlopeChange)
         add(
           "curvature",
           "warn",

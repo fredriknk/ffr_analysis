@@ -123,17 +123,18 @@ Open **Project** and expand **Diagnostic thresholds** in **Project & analysis de
 
 | Setting | Default | What it controls |
 | --- | --- | --- |
-| **noise Floor Multiplier** | 3 | Multiplies the typical flux standard error to set the gas-specific noise floor. |
-| **shape Floor Multiplier** | 1 | Requires the absolute change from the robust check to exceed one noise floor before it contributes to shape severity. |
-| **shape Warn Impact** / **shape Bad Impact** | 0.15 / 0.35 | Effective impact thresholds for shape findings. These are fractions, equivalent to 15% and 35%. |
-| **extra Cut S** / **robust Mad** | 3 s / 4 | Extra trim at both ends of a valve segment and the residual cutoff for the robust refit. |
-| **valve Search S** / **valve Step S** | 10 s / 0.5 s | How far and in what steps the app searches either side of the current timing. |
-| **lag Contrast Sd** / **valve Min Improvement** | 4 / 0.30 | How distinct the chamber signals must be for an estimate, and the minimum improvement used in the timing check. |
-| **valve Min Lag S** | 1 s | Minimum change from the current gas shift for a valve timing finding and for the robust refit to use the estimate. |
-| **edge Ratio** / **spike Mad** / **noisy Warn** | 2.5 / 6 / 4 | Cutoffs for large edge residuals, spikes and unusually high residual spread. |
-| **min Points** / **min Window S** | 20 / 60 s | Minimum number of points and time span for the short-fit check. |
-| **normal Switches** / **normal Segment S** / **irregular Fraction** | 10 / 20 s / 0.5 | Expected valve switching count and duration, with a 50% tolerance on duration. |
-| **dropout Gap S** | 5 s | A gap longer than this between valid readings can trigger **Instrument dropout**. |
-| **leak Reference Floor** / **leak Fraction** | 5 / 0.25 | The day or sibling CO₂ reference must exceed five noise floors. A flux below a quarter of that reference can trigger **Possible chamber leak**. |
-| **n2o Negative P** | 0.01 | Significance cutoff used for falling N₂O and CO₂. |
-| **neighbour Days** / **neighbour Fallback Days** / **min Neighbours** | 3 days / 10 days / 6 | Time either side of a flux to look for treatment or plot neighbours, and minimum number required. |
+| **Noise floor multiplier · ×** | 3 | Multiplies the typical flux standard error to set the gas-specific noise floor. |
+| **Minimum shape effect · noise floors** | 1 | Requires the absolute change from the robust check to exceed one noise floor before it contributes to shape severity. |
+| **Shape warning impact · fraction** / **Shape bad impact · fraction** | 0.15 / 0.35 | Effective impact thresholds for shape findings. These are fractions, equivalent to 15% and 35%. |
+| **Extra robust trim · s** / **Robust refit residual cutoff · robust SD** | 3 s / 4 | Extra trim at both ends of a valve segment and the residual cutoff for the robust refit. |
+| **Valve lag search radius · s** / **Valve lag search step · s** | 10 s / 0.5 s | How far and in what steps the app searches either side of the current timing. |
+| **Minimum chamber contrast · robust SD** / **Minimum valve lag improvement · fraction** | 4 / 0.30 | How distinct the chamber signals must be for an estimate, and the minimum improvement used in the timing check. |
+| **Minimum valve lag · s** | 1 s | Minimum change from the current gas shift for a valve timing finding and for the robust refit to use the estimate. |
+| **Edge-to-interior residual ratio · ×** / **Spike residual cutoff · robust SD** / **High residual noise ratio · ×** | 2.5 / 6 / 4 | Cutoffs for large edge residuals, spikes and unusually high residual spread. |
+| **Gases checked for curvature** | N₂O, CO₂ | Select the gas traces to check for curvature. |
+| **Minimum fitted points · count** / **Minimum fit span · s** | 20 / 60 s | Minimum number of points and time span for the short-fit check. |
+| **Expected valve switch count · count** / **Expected chamber segment duration · s** / **Segment duration tolerance · fraction** | 10 / 20 s / 0.5 | Expected valve switching count and duration, with a 50% tolerance on duration. |
+| **Maximum gap between readings · s** | 5 s | A gap longer than this between valid readings can trigger **Instrument dropout**. |
+| **Minimum leak reference · noise floors** / **Low flux leak cutoff · fraction** | 5 / 0.25 | The day or sibling CO₂ reference must exceed five noise floors. A flux below a quarter of that reference can trigger **Possible chamber leak**. |
+| **Negative flux p-value cutoff · probability** | 0.01 | Significance cutoff used for falling N₂O and CO₂. |
+| **Same-treatment search radius · days** / **Same-plot search radius · days** / **Minimum neighbours · count** | 3 days / 10 days / 6 | Time either side of a flux to look for treatment or plot neighbours, and minimum number required. |

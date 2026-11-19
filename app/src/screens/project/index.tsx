@@ -14,6 +14,7 @@ import {
 import { PlotMap } from "./PlotMap";
 import { useStore } from "../../store";
 import { emptyLayoutDraft, layoutDraftReducer } from "./layoutDraft";
+import { DiagnosticThresholds } from "./DiagnosticThresholds";
 /** Colours for new treatments (distinct, readable on the map in both themes). */
 const PALETTE = [
   "#2a9d8f",
@@ -307,30 +308,11 @@ export function Project() {
                 Gases: {cfg.gases.join(", ")} · N2O as µg N m⁻² h⁻¹ · CO2 as µg
                 C m⁻² h⁻¹
               </p>
-              <details className="diagnostic-thresholds">
-                <summary>Diagnostic thresholds</summary>
-                <div className="form-grid">
-                  {Object.entries(cfg.diagnostics ?? {}).map(([key, value]) => (
-                    <Field key={key} label={key.replace(/([A-Z])/g, " $1")}>
-                      <input
-                        type="number"
-                        step="any"
-                        aria-label={"Diagnostic threshold " + key}
-                        value={value}
-                        onChange={(e) =>
-                          setDraft({
-                            ...cfg,
-                            diagnostics: {
-                              ...cfg.diagnostics,
-                              [key]: Number(e.target.value),
-                            },
-                          })
-                        }
-                      />
-                    </Field>
-                  ))}
-                </div>
-              </details>
+              <DiagnosticThresholds
+                diagnostics={cfg.diagnostics}
+                gases={cfg.gases}
+                onChange={(diagnostics) => setDraft({ ...cfg, diagnostics })}
+              />
               <button
                 className="primary"
                 onClick={() =>

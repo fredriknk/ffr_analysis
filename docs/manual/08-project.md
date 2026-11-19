@@ -30,50 +30,87 @@ Choose **Save & recompute** to save the settings and recalculate robot regressio
 
 Expand **Diagnostic thresholds** in **Project & analysis defaults**. The thresholds control which findings appear and how they are ranked. The robust refit settings also affect the reported N₂O and CO₂ flux when **Robust refit** is selected. Findings never exclude a flux automatically. A gas’s noise floor is based on the median flux standard error from included robot measurements. A robust SD measures scatter using the median absolute deviation, or MAD.
 
+### Noise floor
+
 | Field | Default | Meaning |
 | --- | --- | --- |
-| **n2o Negative P** | 0.01 | P-value must be below this for the negative N₂O or decreasing CO₂ finding. |
-| **extra Cut S** | 3 s | Extra time trimmed from each end of each chamber segment for the robust refit. |
-| **robust Mad** | 4 | Maximum residual distance from the median, in robust SDs, for a point to stay in the robust refit. |
-| **lag Contrast Sd** | 4 | Difference between chamber signals needed to use a lag estimate, in robust noise SDs. |
-| **noisy Warn** | 4 | Residual SD above this multiple of the gas’s median residual SD triggers a noise finding. |
-| **shape Floor Multiplier** | 1 | Change from the original to the robust flux must exceed this many noise floors to contribute to shape severity. |
-| **shape Warn Impact** | 0.15 | Shape impact at or above this is a warning up to the bad threshold. |
-| **shape Bad Impact** | 0.35 | Shape impact at or above this is rated bad. |
-| **noise Floor Multiplier** | 3 | Multiplies the median flux standard error to give the noise floor. |
-| **negative Info Floor** | 1 | Negative N₂O magnitude above this many floors can give an informational finding. |
-| **co2 Negative Floor** | 1 | Negative CO₂ magnitude above this many floors can be rated bad. |
-| **negative Warn Floor** | 3 | Negative N₂O magnitude above this many floors can give a warning. |
-| **negative Bad Floor** | 5 | Negative N₂O magnitude above this many floors can be rated bad. |
-| **leak Reference Floor** | 5 | The reference flux used in a leak comparison must exceed this many floors. |
-| **leak Fraction** | 0.25 | A flux below this fraction of its reference can indicate a leak. |
-| **leak Day Sibling Fraction** | 0.5 | In the daily CO₂ leak check, the other chamber exceeding this fraction of the day’s median can raise the finding to bad. |
-| **neighbour Bad Z** | 10 | Transformed outlier score above which a neighbour finding is rated bad. |
-| **neighbour Bad Ratio** | 10 | A high flux can be rated bad if it exceeds this multiple of neighbours’ median absolute flux and clears the bad-floor test. |
-| **neighbour Bad Floor** | 5 | Noise-floor multiple that the high flux must also exceed in the bad-ratio test. |
-| **neighbour Asinh Mad Min** | 0.15 | Minimum spread used to score neighbours after the inverse hyperbolic sine transformation. |
-| **leak Min Day Points** | 6 | Minimum robot observations for the daily CO₂ leak comparison. |
-| **neighbour Raw Z** | 8 | Minimum outlier score on the original scale. The transformed score must also clear its threshold. |
-| **curvature P** | `1e-12` | P-value must be below this in the quadratic curvature test. |
-| **curvature Gases** | N₂O, CO₂ | Gases checked for curvature. The current number field cannot edit this list. |
-| **curvature Slope Change** | 0.4 | Relative difference required between slopes fitted to the two halves of the window for a curvature finding. |
-| **valve Search S** | 10 s | Lag search distance on either side of the current valve timing. |
-| **valve Step S** | 0.5 s | Step between candidate lags. |
-| **valve Min Lag S** | 1 s | Minimum lag magnitude for the extra shift in the robust refit. |
-| **valve Min Improvement** | 0.30 | Minimum fractional reduction in summed squared residuals for applying the estimated shift in the robust refit. |
-| **valve Estimate Cut S** | 0.25 s | Trim from each end of a segment during the valve lag search. |
-| **edge Ratio** | 2.5 | Ratio above which edge residuals are flagged compared with interior residuals. |
-| **irregular Fraction** | 0.5 | Allowed fractional deviation from the normal segment duration. |
-| **normal Segment S** | 20 s | Expected chamber segment duration. |
-| **normal Switches** | 10 | Expected switch count for the valve sequence check. |
-| **min Points** | 20 | Fits with fewer points get a short-fit finding. |
-| **min Window S** | 60 s | Fits spanning less time get a short-fit finding. |
-| **spike Mad** | 6 | A residual farther from the median than this many robust SDs can trigger a spike finding. |
-| **neighbour Z** | 3.5 | Minimum transformed outlier score. The original-scale score must also clear its threshold. |
-| **neighbour Days** | 3 days | Time radius for finding neighbours in the same treatment. |
-| **neighbour Fallback Days** | 10 days | Time radius for the same-plot comparison when there are too few treatment neighbours. |
-| **min Neighbours** | 6 | Minimum neighbours needed for a comparison. |
-| **dropout Gap S** | 5 s | A longer gap between readings within a chamber segment can flag a dropout. |
+| **Noise floor multiplier · ×** | 3 | Multiplies each gas’s median flux standard error to set its noise floor. |
+
+### Shape
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| **Extra robust trim · s** | 3 s | Trims this much time from each end of a chamber segment for the robust refit. |
+| **Robust refit residual cutoff · robust SD** | 4 | Drops points whose residual differs from the median by more than this in the robust refit. |
+| **Minimum shape effect · noise floors** | 1 | Requires the robust and original fluxes to differ by more than this before rating the shape effect. |
+| **Shape warning impact · fraction** | 0.15 | Sets the minimum effective impact for a shape warning. |
+| **Shape bad impact · fraction** | 0.35 | Sets the minimum effective impact for a shape finding rated bad. |
+| **Edge-to-interior residual ratio · ×** | 2.5 | Flags segment edges when their mean absolute residual exceeds this multiple of the interior mean. |
+| **Spike residual cutoff · robust SD** | 6 | Flags a spike when a fitted point’s residual differs from the median by more than this. |
+| **High residual noise ratio · ×** | 4 | Flags high noise when residual SD exceeds this multiple of the gas’s baseline residual SD. |
+| **Curvature p-value cutoff · probability** | `1e-12` | Requires the quadratic F-test p-value to fall below this cutoff. |
+| **Curvature slope difference · fraction** | 0.4 | Requires slopes from the two halves of the fit to differ by more than this fraction of the larger absolute slope. |
+| **Gases checked for curvature** | N₂O, CO₂ | Select which gas traces are checked for curvature. |
+
+### Valve timing
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| **Valve lag search radius · s** | 10 s | Searches this far before and after the current valve timing. |
+| **Valve lag search step · s** | 0.5 s | Sets the time between candidate lags. |
+| **Valve lag search trim · s** | 0.25 s | Trims this much time from each end of a segment during the lag search. |
+| **Minimum chamber contrast · robust SD** | 4 | Requires the two chambers’ concentrations to differ by more than this many robust noise SDs. |
+| **Minimum valve lag improvement · fraction** | 0.30 | Requires this fractional reduction in squared residuals to use the estimated lag. |
+| **Minimum valve lag · s** | 1 s | Minimum difference between the estimated lag and the current shift that raises a valve timing finding and lets the robust refit use the estimate. |
+
+### Chamber leak
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| **Minimum daily leak observations · count** | 6 | Requires this many included robot observations for the daily CO₂ comparison. |
+| **Minimum leak reference · noise floors** | 5 | Requires the reference flux for a leak comparison to exceed this many noise floors. |
+| **Low flux leak cutoff · fraction** | 0.25 | Flags a possible leak when the flux is below this fraction of its reference. |
+| **Other-chamber CO₂ leak cutoff · fraction** | 0.5 | Rates a daily CO₂ leak finding bad if the other chamber exceeds this fraction of the day’s CO₂ median. |
+
+### Negative flux
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| **Negative flux p-value cutoff · probability** | 0.01 | Requires the slope p-value to be below this cutoff for falling N₂O or CO₂. |
+| **Falling CO₂ bad cutoff · noise floors** | 1 | Rates significantly negative CO₂ bad when its magnitude exceeds this many noise floors. |
+| **Falling N₂O info cutoff · noise floors** | 1 | Flags significantly negative N₂O when its magnitude exceeds this many noise floors. |
+| **Falling N₂O warning cutoff · noise floors** | 3 | Raises a falling N₂O finding to warning when its magnitude exceeds this many noise floors. |
+| **Falling N₂O bad cutoff · noise floors** | 5 | Rates falling N₂O bad when its magnitude exceeds this many noise floors. |
+
+### Neighbours
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| **Same-treatment search radius · days** | 3 days | Looks this many days either side of the measurement for neighbours in the same treatment. |
+| **Same-plot search radius · days** | 10 days | Looks this many days either side for same-plot neighbours when the treatment has too few. |
+| **Minimum neighbours · count** | 6 | Requires this many neighbours to score a flux. |
+| **Minimum transformed neighbour spread · asinh scale** | 0.15 | Sets a lower bound on the robust spread used to score fluxes after the asinh transform. |
+| **Transformed outlier cutoff · z-score** | 3.5 | Requires the outlier score on the asinh scale to exceed this cutoff. |
+| **Raw outlier cutoff · z-score** | 8 | Requires the outlier score on the original flux scale to also exceed this cutoff. |
+| **Transformed bad outlier cutoff · z-score** | 10 | Rates an outlier bad if its score on the asinh scale exceeds this cutoff. |
+| **High-flux outlier ratio · ×** | 10 | Rates a high outlier bad above this multiple of the neighbours’ median absolute flux if it also clears the noise-floor cutoff. |
+| **High-flux outlier cutoff · noise floors** | 5 | Requires a high outlier to clear this many noise floors to be rated bad by the ratio rule. |
+
+### Valves and points
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| **Expected valve switch count · count** | 10 | Flags the valve sequence when the switch count differs from this value. |
+| **Expected chamber segment duration · s** | 20 s | Sets the reference duration used to check full chamber segments. |
+| **Segment duration tolerance · fraction** | 0.5 | Flags a chamber segment when its duration differs from the expected duration by more than this fraction. |
+| **Minimum fitted points · count** | 20 | Flags a fit that uses fewer points than this. |
+| **Minimum fit span · s** | 60 s | Flags a fit when its time span is shorter than this. |
+
+### Dropouts
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| **Maximum gap between readings · s** | 5 s | Flags N₂O or CO₂ when readings within a chamber segment and fit window are further apart than this. |
 
 See [Diagnostics](03-diagnostics.md) for how to inspect a finding in **Review**.
 

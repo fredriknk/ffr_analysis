@@ -301,6 +301,48 @@ test("triage, stable selection, lazy contact sheet, linked charts and all screen
   await pair("waypoints");
   expect(errors).toEqual([]);
 });
+test("project curvature checklist respects the lock and settings draft", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "New project…" }).click();
+  await page.getByText("Diagnostic thresholds", { exact: true }).click();
+
+  const checklist = page.getByRole("group", {
+    name: "Gases checked for curvature",
+  });
+  const n2o = checklist.getByRole("checkbox", { name: "N₂O", exact: true });
+  const co2 = checklist.getByRole("checkbox", { name: "CO₂", exact: true });
+  const co = checklist.getByRole("checkbox", { name: "CO", exact: true });
+  const noiseFloor = page.getByRole("spinbutton", {
+    name: "Noise floor multiplier · ×",
+  });
+  await expect(n2o).toBeChecked();
+  await expect(co2).toBeChecked();
+  await expect(co).not.toBeChecked();
+  await expect(n2o).toBeDisabled();
+  await expect(noiseFloor).toBeDisabled();
+
+  await page.getByRole("button", { name: /Unlock to edit/ }).click();
+  await expect(noiseFloor).toBeEnabled();
+  await n2o.uncheck();
+  await expect(
+    page.getByRole("button", { name: /Unlocked · Lock/ }),
+  ).toBeDisabled();
+  await page.getByRole("button", { name: "Discard changes" }).click();
+  await expect(n2o).toBeChecked();
+
+  await n2o.uncheck();
+  await co.check();
+  await page.getByRole("button", { name: "Save & recompute" }).click();
+  const lock = page.getByRole("button", { name: /Unlocked · Lock/ });
+  await expect(lock).toBeEnabled();
+  await lock.click();
+  await expect(n2o).not.toBeChecked();
+  await expect(co2).toBeChecked();
+  await expect(co).toBeChecked();
+  await expect(co).toBeDisabled();
+});
 test("empty project and API error states stay usable", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("button", { name: "New project…" }).click();

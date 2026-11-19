@@ -43,6 +43,50 @@ export interface AnalysisOptions {
   slope?: number;
   perGas?: Partial<Record<Gas, Partial<AnalysisOptions>>>;
 }
+export interface DiagnosticsConfig {
+  noiseFloorMultiplier: number;
+  extraCutS: number;
+  robustMad: number;
+  noisyWarn: number;
+  shapeFloorMultiplier: number;
+  shapeWarnImpact: number;
+  shapeBadImpact: number;
+  edgeRatio: number;
+  spikeMad: number;
+  curvatureP: number;
+  curvatureSlopeChange: number;
+  curvatureGases: string[];
+  lagContrastSd: number;
+  valveSearchS: number;
+  valveStepS: number;
+  valveMinLagS: number;
+  valveMinImprovement: number;
+  valveEstimateCutS: number;
+  leakReferenceFloor: number;
+  leakFraction: number;
+  leakDaySiblingFraction: number;
+  leakMinDayPoints: number;
+  n2oNegativeP: number;
+  co2NegativeFloor: number;
+  negativeInfoFloor: number;
+  negativeWarnFloor: number;
+  negativeBadFloor: number;
+  neighbourDays: number;
+  neighbourFallbackDays: number;
+  minNeighbours: number;
+  neighbourAsinhMadMin: number;
+  neighbourZ: number;
+  neighbourRawZ: number;
+  neighbourBadZ: number;
+  neighbourBadRatio: number;
+  neighbourBadFloor: number;
+  normalSegmentS: number;
+  normalSwitches: number;
+  irregularFraction: number;
+  minPoints: number;
+  minWindowS: number;
+  dropoutGapS: number;
+}
 export interface ProjectConfig {
   name: string;
   timeZone: string;
@@ -52,7 +96,7 @@ export interface ProjectConfig {
   chamberHeight: number;
   pressure: number;
   qcThreshold: number;
-  diagnostics: Record<string, number>;
+  diagnostics: DiagnosticsConfig;
   plotAssignment: "polygons" | "waypoint";
   /** Projected CRS of robot/waypoint coordinates: "EPSG:326NN" (UTM north) or "EPSG:327NN". */
   crs: string;
