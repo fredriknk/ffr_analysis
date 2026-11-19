@@ -68,7 +68,7 @@ pub struct PlotGenOptions {
 impl Default for PlotGenOptions {
     fn default() -> Self {
         Self {
-            cluster_distance: 1.,
+            cluster_distance: 1.5,
             shape: "auto".into(),
             size: 2.,
             width: 2.,
@@ -507,24 +507,6 @@ mod tests {
         assert_eq!(proposal.plots.len(), 2);
         assert!(proposal.plots.iter().all(|p| p.visits.len() == 4));
         assert_eq!(proposal.plots[0].visits[2].side, ChamberSide::Right);
-        let points: Vec<_> = (0..3)
-            .map(|i| {
-                let mut p = point(i as f64, 0., 0.);
-                p.side = "left".into();
-                p
-            })
-            .collect();
-        let opts = PlotGenOptions {
-            cluster_distance: 1.5,
-            ..Default::default()
-        };
-        assert_eq!(
-            generate(&points, &opts, Geometry::default())
-                .unwrap()
-                .plots
-                .len(),
-            2
-        );
         for (name, n) in [
             ("Plot_15", Some(15)),
             ("DrThr_2b", Some(2)),
@@ -533,6 +515,22 @@ mod tests {
         ] {
             assert_eq!(waypoint_number(name), n);
         }
+    }
+    #[test]
+    fn default_grouping_distance_uses_complete_link_at_one_and_a_half_metres() {
+        let points: Vec<_> = [0., 1.5, 3.]
+            .into_iter()
+            .map(|x| {
+                let mut p = point(x, 0., 0.);
+                p.side = "left".into();
+                p
+            })
+            .collect();
+        let opts = PlotGenOptions::default();
+        assert_eq!(opts.cluster_distance, 1.5);
+        let proposal = generate(&points, &opts, Geometry::default()).unwrap();
+        assert_eq!(proposal.plots.len(), 2);
+        assert_eq!(proposal.plots[0].visits.len(), 2);
     }
     #[test]
     fn field_orientation_and_shapes() {

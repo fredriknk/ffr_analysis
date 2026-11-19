@@ -144,10 +144,10 @@ fn run() -> Result<()> {
     let result = match arg(0)? {
         "waypoint-plots" => {
             let points = s.waypoints_read(arg(1)?)?;
-            let opts = ffr_core::waypoints::PlotGenOptions {
-                cluster_distance: a.get(2).map(|v| v.parse()).transpose()?.unwrap_or(1.),
-                ..Default::default()
-            };
+            let mut opts = ffr_core::waypoints::PlotGenOptions::default();
+            if let Some(distance) = a.get(2) {
+                opts.cluster_distance = distance.parse()?;
+            }
             json!(s.waypoint_plots(&points, &opts)?)
         }
         "diagnostics" => {

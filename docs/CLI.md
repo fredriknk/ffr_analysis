@@ -154,8 +154,8 @@ ffr-cli waypoint-plots <route.csv> [grouping-distance-m]
 ```
 
 Reads a robot waypoint CSV and returns a plot proposal with field angle, polygons
-and chamber visits. The optional distance is in metres and defaults to `1.0` in
-the CLI. The proposal uses automatic footprints and leaves the input CSV intact.
+and chamber visits. The grouping distance defaults to 1.5 m, matching the app.
+The proposal uses automatic footprints and leaves the input CSV intact.
 See [route format and plot generation](SPEC.md#46-chamber-position-and-plot).
 
 ```powershell
