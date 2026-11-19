@@ -19,9 +19,9 @@ Open **External data** to bring weather, logger readings and manual chamber flux
 | **Header row (zero based)** | The row with the column names. Use `0` for the first row, or `2` if you have two leading rows before the names. |
 | **Time column** | Column containing the date and time. For a CSV, a format such as `2024-06-10 14:30:00` works for local project time. You can also include a time-zone offset, as in `2024-06-10T14:30:00+02:00`. |
 | **Value columns** | Tick the numeric columns to import. Each becomes a separate series. |
-| **Aggregation** | The menu offers **mean**, **sum** and **none**. Currently all three import the selected columns as separate series without aggregating readings. Make any averages or totals in the source file first. |
+| **Aggregation** | For each series and timestamp, **mean** averages the readings, **sum** adds them, and **none** keeps the first valid reading in file order. |
 
-Use one reading per timestamp in each series. If timestamps repeat, the app keeps the first value. Rows with unreadable dates or missing numeric values for a series are skipped for that series.
+Rows with unreadable dates or missing numeric values for a series are skipped for that series.
 
 ![Excel and CSV import wizard](../images/external-import.png)
 

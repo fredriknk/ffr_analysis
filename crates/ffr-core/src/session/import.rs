@@ -502,9 +502,10 @@ bytes])?;
                 }
             }
         }
+        let aggregate = args["aggregate"].as_str();
         let mut count = 0;
         for (name, cols) in groups {
-            let mut p = vec![];
+            let mut readings = BTreeMap::new();
             for row in rows.iter().skip(header + 1) {
                 if let Some(time) = row
                     .get(time_col)
@@ -515,15 +516,37 @@ bytes])?;
                         .filter_map(|i| row.get(*i).and_then(number))
                         .collect();
                     if !values.is_empty() {
-                        p.push(json!({"time":time,"value":values.iter().sum::<f64>()/values.len() as f64}));
+                        // Logger presets average the sensor columns within each row first.
+                        let value = values.iter().sum::<f64>() / values.len() as f64;
+                        if !value.is_finite() {
+                            continue;
+                        }
+                        let reading = readings.entry(time).or_insert((value, 0));
+                        if reading.1 != 0 && matches!(aggregate, Some("mean" | "sum")) {
+                            reading.0 += value;
+                        }
+                        reading.1 += 1;
                     }
                 }
             }
-            count += p.len();
+            let points: Vec<_> = readings
+                .into_iter()
+                .filter_map(|(time, (total, n))| {
+                    let value = if aggregate == Some("mean") {
+                        total / n as f64
+                    } else {
+                        total
+                    };
+                    value
+                        .is_finite()
+                        .then(|| json!({"time": time, "value": value}))
+                })
+                .collect();
+            count += points.len();
             self.store_series(
                 &name,
                 args["unit"].as_str().unwrap_or(""),
-                p,
+                points,
                 args["maxGap"].as_i64().unwrap_or(3600000),
             )?;
         }
@@ -834,4 +857,50 @@ pub(super) fn read_table(
     sheet: Option<&str>,
 ) -> Result<(Vec<String>, Vec<Vec<Value>>)> {
     read_table_inner(path, sheet).map_err(|e| Error::Invalid(format!("{path}: {e}")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn series_import_aggregates_each_column_at_matching_timestamps() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut session = Session::default();
+        session
+            .project_create(dir.path().join("series.ffr").to_str().unwrap(), "Series")
+            .unwrap();
+        let csv = dir.path().join("logger.csv");
+        std::fs::write(
+            &csv,
+            "time,water,temp\n2024-06-02,4,20\n2024-06-01,2,\n2024-06-02,8,40\n\
+             2024-06-02,,60\n2024-06-01,no reading,10\ninvalid,100,100\n",
+        )
+        .unwrap();
+        for (i, (aggregate, water, temp)) in [
+            (Some("mean"), 6., 40.),
+            (Some("sum"), 12., 120.),
+            (Some("none"), 4., 20.),
+            (None, 4., 20.),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let mut args =
+                json!({"path": csv, "timeColumn": "time", "valueColumns": ["water", "temp"]});
+            if let Some(aggregate) = aggregate {
+                args["aggregate"] = json!(aggregate);
+            }
+            let report = session.import_series(args).unwrap();
+            assert_eq!(report.imported, 4);
+            let first_id = (2 * i + 1) as i64;
+            let data = session
+                .series_data_value(&[first_id, first_id + 1], None, None, None)
+                .unwrap();
+            assert_eq!(data[0]["points"][0]["value"], json!(10.));
+            assert_eq!(data[0]["points"][1]["value"], json!(temp));
+            assert_eq!(data[1]["points"][0]["value"], json!(2.));
+            assert_eq!(data[1]["points"][1]["value"], json!(water));
+        }
+    }
 }
