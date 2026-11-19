@@ -102,7 +102,12 @@ selects the XLSX writer. Use `.xlsx` for an Excel workbook.
 | --- | --- |
 | `flat` (default) | One sheet named `All Data`, with one row per flux. |
 | `sheetPerPlot` | One sheet per plot, with one row per flux. |
-| `dailyPerPlot` | One sheet per plot, with one row per measured day in the project time zone. Numeric values are averaged. The sheet includes `timediffHours`, `N2O_cumulative` and `CO2_cumulative`. |
+| `dailyPerPlot` | One sheet per plot, with one row per day with an included flux in the project time zone. Numeric values are averaged. The sheet includes `timediffHours`, `N2O_cumulative` and `CO2_cumulative`. |
+
+Daily aggregation skips excluded fluxes and applies each `<gas>_excluded` flag to
+the corresponding gas columns. Each cumulative total bridges gaps between days
+with a mean for that gas, as in Treatments. Flat CSV, flat XLSX and `sheetPerPlot`
+keep all exported rows and their exclusion flags.
 
 Use `dump-json exportXlsx` or `exportCsv` to select flux IDs and column keys.
 

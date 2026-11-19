@@ -39,12 +39,12 @@ To export one plot, open **Filter values** under **Plot** and choose the plot. U
 | --- | --- | --- |
 | **Export Excel** | **Flat table** | One sheet named `All Data`, with one row per exported flux. |
 | **Export Excel** | **Sheet per plot** | One sheet named `Plot <ID>` per plot, using the numeric plot ID, with one row per exported flux. Unassigned rows go to a sheet named `Plot ` with a blank ID. |
-| **Export Excel** | **Daily means per plot** | The same sheet grouping, with one row per measured day in the project time zone. Numeric values are averaged and other fields are copied from the first row of the day. The extra columns are listed below. |
+| **Export Excel** | **Daily means per plot** | The same sheet grouping, with one row per day with an included flux in the project time zone. Numeric values are averaged and other fields are copied from the first eligible row of the day. The extra columns are listed below. |
 | **Flat CSV** | Any | One comma-separated file with one row per exported flux. |
 
 Headers use the export keys listed below. Missing values are blank. Flat exports and individual rows in plot sheets are written in flux ID order. The `time` column in a flat or individual-flux export is a UTC timestamp in milliseconds since 1 January 1970. In **Daily means per plot**, it represents midnight of the grouped date, encoded as a UTC timestamp.
 
-The daily workbook uses the rows you send it, including any excluded rows in that set. To calculate a daily export for one gas without excluded observations, filter **Excluded** and that gas's exclusion flag to **No** before choosing the rows. **Treatments** applies exclusions separately for each gas.
+The daily workbook skips whole-flux exclusions. Each gas's measurements and statistics also omit observations flagged as excluded for that gas, so a daily gas mean is blank when it has no eligible values. Flat and sheet-per-plot exports include every selected flux and show its exclusion flags when those columns are selected.
 
 | Extra daily column | Unit | Contents |
 | --- | --- | --- |
@@ -52,7 +52,7 @@ The daily workbook uses the rows you send it, including any excluded rows in tha
 | `N2O_cumulative` | kg N ha⁻¹ | Running total from the daily N₂O means. |
 | `CO2_cumulative` | kg C ha⁻¹ | Running total from the daily CO₂ means. |
 
-Both cumulative columns start at zero. An interval adds to the total for a gas when both consecutive daily rows have a mean for that gas.
+Both cumulative columns start at zero. Each gas integrates between consecutive days with an eligible mean for that gas, bridging gaps as in **Treatments**. The total carries forward on a row with no eligible mean for that gas.
 
 ## Common columns
 

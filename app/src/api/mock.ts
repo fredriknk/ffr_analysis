@@ -851,6 +851,69 @@ export function createMock(seed = 42): T.FfrApi {
     skipped: 0,
     errors: [],
   });
+  function dailyExport(chosen: T.FluxRow[], columns: string[]) {
+    const dayMs = 86400000;
+    const hourMs = 3600000;
+    const cumulativeGases = ["N2O", "CO2"] as const;
+    const keys = [...new Set([...columns, "N2O_flux", "CO2_flux"])];
+    const gasFlags = keys.map((key) => {
+      const gas = gases.find(
+        (g) => key.startsWith(g + "_") && key !== g + "_excluded",
+      );
+      return gas ? gas + "_excluded" : undefined;
+    });
+    const plots = new Map<number, Map<number, T.FluxRow[]>>();
+    for (const row of chosen) {
+      if (row.excluded) continue;
+      const days = plots.get(row.plotId) ?? new Map<number, T.FluxRow[]>();
+      // Use the same UTC date buckets as the browser treatment summary.
+      const day = Math.floor(row.time / dayMs) * dayMs;
+      const observations = days.get(day) ?? [];
+      observations.push(row);
+      days.set(day, observations);
+      plots.set(row.plotId, days);
+    }
+    return [...plots].flatMap(([, days]) => {
+      let previousDay: number | undefined;
+      const previous = new Map<T.Gas, { day: number; mean: number }>();
+      const cumulative = { N2O: 0, CO2: 0 };
+      return [...days]
+        .sort(([a], [b]) => a - b)
+        .map(([day, observations]) => {
+          const row: Record<string, T.FluxRow[string]> = {};
+          keys.forEach((key, i) => {
+            const flag = gasFlags[i];
+            const eligible = flag
+              ? observations.filter((r) => r[flag] !== true)
+              : observations;
+            const values = eligible
+              .map((r) => r[key])
+              .filter(
+                (v): v is number => typeof v === "number" && Number.isFinite(v),
+              );
+            row[key] = values.length
+              ? values.reduce((sum, v) => sum + v, 0) / values.length
+              : eligible[0]?.[key];
+          });
+          for (const gas of cumulativeGases) {
+            const mean = row[gas + "_flux"];
+            if (typeof mean === "number" && Number.isFinite(mean)) {
+              const last = previous.get(gas);
+              if (last)
+                cumulative[gas] +=
+                  (((last.mean + mean) / 2) * 1e-5 * (day - last.day)) / hourMs;
+              previous.set(gas, { day, mean });
+            }
+            row[gas + "_cumulative"] = cumulative[gas];
+          }
+          row.time = day;
+          row.timediffHours =
+            previousDay === undefined ? 0 : (day - previousDay) / hourMs;
+          previousDay = day;
+          return row;
+        });
+    });
+  }
   function download(args: T.ExportArgs, mode = "flat") {
     let chosen = rows.filter((r) => args.fluxIds.includes(r.id));
     const escape = (v: unknown) =>
@@ -875,24 +938,21 @@ export function createMock(seed = 42): T.FfrApi {
           .join("\r\n");
     }
     if (mode === "dailyPerPlot") {
-      const s = summarize(chosen, layout.plots, layout.treatments, {
-        gas: "N2O",
-        sources: ["robot", "manual"],
-      });
-      content =
-        "plot,date,mean,cumulative\r\n" +
-        s.plots
-          .flatMap((p) =>
-            p.daily.map((d) =>
-              [
-                p.label,
-                new Date(d.time).toISOString(),
-                d.mean,
-                d.cumulative,
-              ].join(","),
-            ),
-          )
-          .join("\r\n");
+      const columns = [
+        ...new Set([
+          "plotLabel",
+          ...args.columns,
+          "timediffHours",
+          "N2O_cumulative",
+          "CO2_cumulative",
+        ]),
+      ];
+      content = [
+        columns.join(","),
+        ...dailyExport(chosen, columns).map((r) =>
+          columns.map((c) => escape(r[c])).join(","),
+        ),
+      ].join("\r\n");
     }
     const a = document.createElement("a"),
       url = URL.createObjectURL(

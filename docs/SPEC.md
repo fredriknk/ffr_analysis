@@ -426,6 +426,9 @@ Diagnostics in the existing shapes: `FluxTable` gains columns `attention` (numbe
 
 **Export**
 - `exportXlsx(args: { path, fluxIds, columns, mode: 'flat' | 'sheetPerPlot' | 'dailyPerPlot' })`
+  — daily aggregation skips excluded fluxes and applies each gas's exclusion flag
+  to its columns. N2O and CO2 cumulative values integrate between consecutive days
+  with a mean for the gas (§4.7). Flat and sheet-per-plot exports keep every selected row.
 - `exportCsv(args: { path, fluxIds, columns })`
 
 File and folder pickers are done in the UI with the Tauri dialog plugin; commands take paths.
