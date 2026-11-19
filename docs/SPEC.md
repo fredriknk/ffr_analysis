@@ -176,8 +176,11 @@ visits keep fluxes assigned to their route plot when footprints move, resize or 
 
 Port the maths of `App.allplot` in `prog/ffr_gui.py` (`getN2Odata`, `run_all_plots`):
 
-- per plot: daily mean flux (days without data are skipped), converted to kg ha⁻¹ h⁻¹
-  (`× 10000 / 1e9`), trapezoid between consecutive measured days, cumulative sum;
+- per plot: daily mean flux (days without data for the gas are skipped), trapezoid between
+  consecutive measured days, cumulative sum. For N2O and CO2, convert the rates to
+  kg ha⁻¹ h⁻¹ (`× 10000 / 1e9`) and integrate over hours to give kg ha⁻¹.
+  For CO, H2O and licor_H2O, integrate the rates in mol m⁻² s⁻¹ over seconds to give
+  mol m⁻². Each local calendar day counts as 24 hours;
 - per treatment: mean and population SD of its plots' totals; geometric mean and geometric
   SD of positive fluxes; distribution of daily means for a box plot.
 

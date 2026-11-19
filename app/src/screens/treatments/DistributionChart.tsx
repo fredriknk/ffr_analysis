@@ -1,7 +1,7 @@
 import { memo, useMemo, useState } from "react";
 import type { TreatmentSummary } from "../../api/types";
 import { Chart } from "../../shared/charts/Chart";
-import { Panel, fmt } from "../../shared/common";
+import { Panel } from "../../shared/common";
 import { useStore } from "../../store";
 import {
   inverse,
@@ -13,12 +13,17 @@ import {
 export const DistributionChart = memo(function DistributionChart({
   treatments,
   plots,
+  fluxUnit,
+  formatFlux,
 }: {
   treatments: TreatmentSummary["treatments"];
   plots: TreatmentSummary["plots"];
+  fluxUnit: string;
+  formatFlux: (value: number) => string;
 }) {
   const [scale, setScale] = useState<AxisScale>("asinh");
   const option = useMemo(() => {
+    const original = (v: number) => formatFlux(inverse(v, scale));
     const distributions = treatments.map((t) => {
       const daily = plots
         .filter((p) => p.treatmentId === t.id)
@@ -53,9 +58,9 @@ export const DistributionChart = memo(function DistributionChart({
               "\n5%, Q1, median, Q3, 95%: " +
               p.value
                 .slice(-5)
-                .map((v) => fmt(inverse(v, scale), 1))
+                .map(original)
                 .join(" / ")
-            : "Flux #" + p.value[2] + ": " + fmt(inverse(p.value[1], scale), 1),
+            : "Flux #" + p.value[2] + ": " + original(p.value[1]),
       },
       xAxis: {
         type: "category",
@@ -65,7 +70,8 @@ export const DistributionChart = memo(function DistributionChart({
       yAxis: {
         type: "value",
         scale: true,
-        axisLabel: { formatter: (v: number) => fmt(inverse(v, scale), 1) },
+        name: fluxUnit,
+        axisLabel: { formatter: original },
       },
       series: [
         {
@@ -89,7 +95,7 @@ export const DistributionChart = memo(function DistributionChart({
         },
       ],
     };
-  }, [treatments, plots, scale]);
+  }, [treatments, plots, scale, fluxUnit, formatFlux]);
   return (
     <Panel
       title="Daily means · whiskers 5th–95th percentile"

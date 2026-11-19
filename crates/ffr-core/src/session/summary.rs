@@ -1,7 +1,15 @@
 use super::*;
 
+pub(super) fn trapezoid(hours: f64, previous: f64, mean: f64, per_hour_factor: f64) -> f64 {
+    hours * (previous + mean) * 0.5 * per_hour_factor
+}
+
 impl Session {
     pub(super) fn summary_value(&self, q: SummaryQuery) -> Result<Value> {
+        let (unit, cumulative_unit, per_hour_factor) = match q.gas.as_str() {
+            "CO" | "H2O" | "licor_H2O" => ("mol m^-2 s^-1", "mol m^-2", 3600.),
+            _ => ("ug m^-2 h^-1", "kg ha^-1", 1e-5),
+        };
         let gas_excluded = format!("{}_excluded", q.gas);
         let rows: Vec<_> = self
             .rows()?
@@ -68,7 +76,7 @@ impl Session {
                             .ok_or_else(|| Error::Invalid("day".into()))
                     };
                     let hours = (local_day(time)? - local_day(t)?).num_days() as f64 * 24.;
-                    cumulative += hours * (m + mean) * 0.5 * 1e-5;
+                    cumulative += trapezoid(hours, m, mean, per_hour_factor);
                 }
                 daily.push(json!({"time":time,"mean":mean,"cumulative":cumulative}));
                 previous = Some((time, mean));
@@ -143,11 +151,88 @@ impl Session {
             ));
         }
         Ok(
-            json!({"gas":q.gas,"unit":"ug m^-2 h^-1","cumulativeUnit":"kg ha^-1","treatments":treatments,"plots":plots}),
+            json!({"gas":q.gas,"unit":unit,"cumulativeUnit":cumulative_unit,"treatments":treatments,"plots":plots}),
         )
     }
 
     pub fn treatment_summary(&self, q: SummaryQuery) -> Result<TreatmentSummary> {
         Ok(serde_json::from_value(self.summary_value(q)?)?)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cumulative_totals_use_each_gas_unit() {
+        let dir = tempfile::tempdir().expect("temp directory");
+        let mut session = Session::default();
+        session
+            .project_create(
+                dir.path().join("synthetic.ffr").to_str().unwrap(),
+                "Synthetic",
+            )
+            .unwrap();
+        session
+            .set_layout(
+                serde_json::from_value(json!({
+                    "treatments": [{"id": 1, "name": "T", "colour": "#000000"}],
+                    "plots": [{"id": 1, "label": "P", "treatmentId": 1, "polygon": null}]
+                }))
+                .unwrap(),
+                |_| {},
+            )
+            .unwrap();
+        // The two local dates straddle the spring DST change in Europe/Oslo.
+        for (id, date, rate) in [
+            (1, "2026-03-28T12:00:00+01:00", 1.),
+            (2, "2026-03-30T12:00:00+02:00", 3.),
+        ] {
+            let time = chrono::DateTime::parse_from_rfc3339(date)
+                .unwrap()
+                .timestamp_millis();
+            let row = json!({
+                "id": id, "time": time, "source": "robot", "excluded": false,
+                "plotId": 1, "plotLabel": "P", "treatmentId": 1,
+                "N2O_flux": rate, "CO2_flux": rate, "CO_flux": rate,
+                "H2O_flux": rate, "licor_H2O_flux": rate
+            });
+            session
+                .db()
+                .unwrap()
+                .execute(
+                    "INSERT INTO fluxes(id,row,results) VALUES(?1,?2,'{}')",
+                    params![id, row.to_string()],
+                )
+                .unwrap();
+        }
+        for (gas, unit, cumulative_unit, total) in [
+            ("N2O", "ug m^-2 h^-1", "kg ha^-1", 0.00096),
+            ("CO2", "ug m^-2 h^-1", "kg ha^-1", 0.00096),
+            ("CO", "mol m^-2 s^-1", "mol m^-2", 345_600.),
+            ("H2O", "mol m^-2 s^-1", "mol m^-2", 345_600.),
+            ("licor_H2O", "mol m^-2 s^-1", "mol m^-2", 345_600.),
+        ] {
+            let summary = session
+                .treatment_summary(SummaryQuery {
+                    gas: gas.into(),
+                    from: None,
+                    to: None,
+                    sources: vec!["robot".into()],
+                    flux_ids: None,
+                })
+                .unwrap();
+            assert_eq!(summary.unit, unit, "{gas}");
+            assert_eq!(summary.cumulative_unit, cumulative_unit, "{gas}");
+            let plot = &summary.plots[0];
+            assert_eq!(plot.daily.len(), 2);
+            assert_eq!(plot.daily[0].mean, 1.);
+            assert_eq!(plot.daily[0].cumulative, 0.);
+            assert_eq!(plot.daily[1].mean, 3.);
+            assert!((plot.daily[1].cumulative - total).abs() < 1e-12, "{gas}");
+            assert_eq!(plot.total, plot.daily[1].cumulative);
+            assert_eq!(summary.treatments[0].mean, plot.total);
+        }
     }
 }

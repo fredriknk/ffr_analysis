@@ -92,12 +92,15 @@ export function fluxConversion(
   height = 0.5,
   pressure = 101000,
 ) {
-  return (
-    ((slope * 1e-6 * pressure * height) / (8.314 * (temp + 273.15))) *
-    (gas === "N2O" ? 28 : gas === "CO2" || gas === "CO" ? 12 : 18) *
-    1e6 *
-    3600
-  );
+  const molar = (slope * 1e-6 * pressure * height) / (8.314 * (temp + 273.15));
+  if (gas !== "N2O" && gas !== "CO2") return molar;
+  return molar * (gas === "N2O" ? 28 : 12) * 1e6 * 3600;
+}
+
+function fluxUnit(gas: Gas) {
+  if (gas === "N2O") return "µg N m⁻² h⁻¹";
+  if (gas === "CO2") return "µg C m⁻² h⁻¹";
+  return "mol m⁻² s⁻¹";
 }
 export function regression(
   x: number[],
@@ -137,12 +140,7 @@ export function regression(
     maxY: n ? Math.max(...y) : 0,
     firstY: y[0] ?? 0,
     flux: fluxConversion(slope, temp, gas),
-    fluxUnit:
-      gas === "N2O"
-        ? "µg N m⁻² h⁻¹"
-        : gas === "CO2"
-          ? "µg C m⁻² h⁻¹"
-          : "µg m⁻² h⁻¹",
+    fluxUnit: fluxUnit(gas),
     qc:
       n < 4
         ? "insufficient"
@@ -159,6 +157,7 @@ export function summarize(
   treatments: Treatment[],
   q: SummaryQuery,
 ): TreatmentSummary {
+  const mass = q.gas === "N2O" || q.gas === "CO2";
   const selected = q.fluxIds ? new Set(q.fluxIds) : null;
   const valid = rows.filter(
     (r) =>
@@ -194,12 +193,13 @@ export function summarize(
         cumulative: 0,
       }));
     daily.forEach((d, i) => {
-      if (i)
-        total +=
-          (((d.mean + daily[i - 1].mean) / 2) *
-            1e-5 *
-            (d.time - daily[i - 1].time)) /
-          3600000;
+      if (i) {
+        const average = (d.mean + daily[i - 1].mean) / 2;
+        const elapsedMs = d.time - daily[i - 1].time;
+        total += mass
+          ? (average * 1e-5 * elapsedMs) / 3600000
+          : average * (elapsedMs / 1000);
+      }
       d.cumulative = total;
     });
     return {
@@ -213,8 +213,8 @@ export function summarize(
   });
   return {
     gas: q.gas,
-    unit: q.gas === "N2O" ? "µg N m⁻² h⁻¹" : "µg C m⁻² h⁻¹",
-    cumulativeUnit: "kg ha⁻¹",
+    unit: fluxUnit(q.gas),
+    cumulativeUnit: mass ? "kg ha⁻¹" : "mol m⁻²",
     plots: ps,
     treatments: treatments.map((t) => {
       const own = ps.filter((p) => p.treatmentId === t.id && p.points.length),

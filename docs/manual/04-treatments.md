@@ -40,9 +40,9 @@ In **Cumulative emissions map**, set **Colour by** to **Treatment** or **Cumulat
 ## How the totals are calculated
 
 1. The app averages the selected gas's fluxes for each plot on each measured day, using the project time zone. Whole-flux exclusions and exclusions for the selected gas never count in the comparison statistics.
-2. For N₂O and CO₂, it converts the daily means from µg m⁻² h⁻¹ to kg ha⁻¹ h⁻¹. Between consecutive measured days it averages the two daily rates and multiplies by the hours between the dates. This is the trapezoid method. It bridges days with missing measurements. The running total starts at zero on the first measured day and ends at the last. A plot with one measured day has a total of zero.
+2. The trapezoid method averages the rates on consecutive measured days and multiplies by the time between the dates. For N₂O and CO₂, the app converts the daily means to kg ha⁻¹ h⁻¹ and integrates over hours to give kg ha⁻¹. For CO, H2O and licor_H2O, it integrates the daily means in mol m⁻² s⁻¹ over seconds to give mol m⁻². Integration bridges days with missing measurements. The running total starts at zero on the first measured day and ends at the last. A plot with one measured day has a total of zero.
 3. Within each treatment, the app gives each plot total equal weight. The bar shows their mean and the whiskers show their population SD, a measure of the spread across those plots.
 
 The app also calculates a geometric mean and geometric SD for the positive individual fluxes in each treatment. These describe a typical positive flux and its spread as a multiplier. The cumulative bars use the arithmetic mean and population SD of the plot totals.
 
-Use N₂O or CO₂ for cumulative mass totals. The app also labels cumulative results for **CO**, **H2O** and **licor_H2O** as kg ha⁻¹, even though their input rates are in mol m⁻² s⁻¹ and the calculation uses the same multiplier as for N₂O and CO₂. See [How fluxes are calculated](10-how-fluxes-are-calculated.md).
+The charts display the selected gas's flux or cumulative units. See [How fluxes are calculated](10-how-fluxes-are-calculated.md).

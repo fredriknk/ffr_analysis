@@ -58,6 +58,15 @@ export function Treatments() {
     queryFn: () => api.treatmentSummary(q),
   });
   const summary = result.data;
+  const gas = summary?.gas ?? s.gas;
+  const fluxUnit = unit(summary?.unit);
+  const formatFlux = useMemo(
+    () => (value: number) =>
+      fluxUnit.startsWith("mol ") && Number.isFinite(value) && value !== 0
+        ? value.toExponential(2)
+        : fmt(value, 1),
+    [fluxUnit],
+  );
   const treatments = useMemo(
     () =>
       summary?.treatments.filter(
@@ -131,15 +140,20 @@ export function Treatments() {
   );
   const fluxLookup = useMemo(() => new Map(rows.map((r) => [r.id, r])), [rows]);
   const fluxOption = useMemo(() => {
-    const fluxKey = s.gas + "_flux";
+    const fluxKey = gas + "_flux";
     const display = (v: number) => (fluxAsinh ? Math.asinh(v) : v);
-    const original = (v: number) => fmt(fluxAsinh ? Math.sinh(v) : v, 1);
+    const original = (v: number) => formatFlux(fluxAsinh ? Math.sinh(v) : v);
     const subset = s.subset ? new Set(s.subset) : null;
     return {
       animation: false,
       grid: timeGrid,
       xAxis: timeAxis(bounds),
-      yAxis: { type: "value", scale: true, axisLabel: { formatter: original } },
+      yAxis: {
+        type: "value",
+        scale: true,
+        name: fluxUnit,
+        axisLabel: { formatter: original },
+      },
       dataZoom: timeZoom([0], "filter"),
       tooltip: {
         trigger: "item",
@@ -209,12 +223,14 @@ export function Treatments() {
     colours,
     fluxAsinh,
     fluxLookup,
+    fluxUnit,
+    formatFlux,
     from,
+    gas,
     hidden,
     plots,
     rows,
     s.focus,
-    s.gas,
     s.sources,
     s.subset,
     showExcluded,
@@ -351,7 +367,12 @@ export function Treatments() {
               plots={plots}
               cumulativeUnit={summary.cumulativeUnit}
             />
-            <DistributionChart treatments={treatments} plots={plots} />
+            <DistributionChart
+              treatments={treatments}
+              plots={plots}
+              fluxUnit={fluxUnit}
+              formatFlux={formatFlux}
+            />
           </div>
           <Panel
             title="Cumulative curves by plot"

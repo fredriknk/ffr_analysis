@@ -1088,7 +1088,9 @@ export function createMock(seed = 42): T.FfrApi {
               : key.endsWith("_slope")
                 ? "ppm s⁻¹"
                 : key.endsWith("_flux")
-                  ? "µg m⁻² h⁻¹"
+                  ? key === "N2O_flux" || key === "CO2_flux"
+                    ? "µg m⁻² h⁻¹"
+                    : "mol m⁻² s⁻¹"
                   : key === "airTemp"
                     ? "°C"
                     : undefined,

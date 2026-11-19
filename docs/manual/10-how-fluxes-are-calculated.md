@@ -80,11 +80,9 @@ The app starts from the robot coordinates in the file name. By default, it offse
 The summary uses the selected gas, date range, sources and flux subset. It omits excluded fluxes and any flux where the selected gas is excluded. Only observations with a plot and a value for the selected gas contribute to plot totals.
 
 1. For each plot, group observations by calendar day in the project’s time zone. Take the arithmetic mean of the available fluxes on each measured day.
-2. For N₂O–N and CO₂–C, multiply µg m⁻² h⁻¹ by `10,000 / 10⁹ = 10⁻⁵` to convert to kg ha⁻¹ h⁻¹.
-3. Integrate by the trapezoid rule between consecutive measured days. Multiply the average of their two rates by 24 hours times the difference in calendar days. Unmeasured days are bridged by that trapezoid. The first measured day starts at zero. The app treats each calendar day as 24 hours, including daylight saving transitions.
-4. Sum the trapezoids to get the cumulative plot total in kg ha⁻¹. For a treatment, take the arithmetic mean of its plot totals and the population SD, dividing the sum of squared deviations by the number of contributing plots.
-
-The summary applies the same `10⁻⁵` factor and kg ha⁻¹ label to every gas. The mass units above apply to the N₂O–N and CO₂–C rates. CO and water-vapour rates enter the summary in mol m⁻² s⁻¹, so their integrated values need a separate unit conversion.
+2. For N₂O–N and CO₂–C, multiply µg m⁻² h⁻¹ by `10,000 / 10⁹ = 10⁻⁵` to convert to kg ha⁻¹ h⁻¹. The rates for CO, H2O and licor_H2O are already in mol m⁻² s⁻¹.
+3. Integrate by the trapezoid rule between consecutive measured days. Multiply the average of their two rates by the elapsed time, using 24 hours per calendar day for N₂O–N and CO₂–C and 86,400 seconds per calendar day for CO, H2O and licor_H2O. This bridges unmeasured days and counts daylight saving transition days as full days. The first measured day starts at zero.
+4. Sum the trapezoids to get the cumulative plot total in kg ha⁻¹ for N₂O–N and CO₂–C or mol m⁻² for CO, H2O and licor_H2O. For a treatment, take the arithmetic mean of its plot totals and the population SD, dividing the sum of squared deviations by the number of contributing plots.
 
 The geometric mean is `exp(mean(ln(flux)))` over positive individual fluxes for a treatment. Its geometric SD is `exp(sample SD(ln(flux)))`, with `n − 1` in the variance denominator. The daily-means box plot on **Treatments** pools the per-plot daily means within each treatment. Its whiskers are the 5th and 95th percentiles, with the box spanning the 25th to 75th percentiles and a line at the median. See [Treatments](04-treatments.md).
 
