@@ -13,8 +13,8 @@ export const thresholds = {
   co2BadR2: 0.8,
   curvatureP: 0.001,
   curvatureFraction: 0.4,
-  valveMinLag: 2,
-  valveImprovement: 0.3,
+  valveMinLagS: 1,
+  valveMinImprovement: 0.3,
   edgeRatio: 2.5,
   spikeMad: 6,
   minPoints: 20,
@@ -26,6 +26,18 @@ export const median = (v: number[]) => {
     m = Math.floor(s.length / 2);
   return !s.length ? 0 : s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
 };
+export function usesValveLag(
+  delta: number,
+  improvement: number,
+  config: ProjectConfig,
+) {
+  const { valveMinLagS, valveMinImprovement } = config.diagnostics;
+  return (
+    delta !== 0 &&
+    Math.abs(delta) >= (valveMinLagS ?? thresholds.valveMinLagS) &&
+    improvement >= (valveMinImprovement ?? thresholds.valveMinImprovement)
+  );
+}
 export function findings(
   row: FluxRow,
   regs: Regression[],
@@ -78,10 +90,8 @@ export function findings(
       co2.slope,
       "CO2",
     );
-  if (
-    Math.abs(lag - o.valveOffset) >= limits.valveMinLag &&
-    improvement >= limits.valveImprovement
-  )
+  const offset = o.perGas?.CO2?.valveOffset ?? o.valveOffset;
+  if (usesValveLag(lag - offset, improvement, cfg))
     add(
       "valve_timing",
       "warn",

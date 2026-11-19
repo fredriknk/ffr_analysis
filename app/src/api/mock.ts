@@ -1,5 +1,11 @@
 import { diagnosticLabels, score } from "./diagnosticMeta";
-import { estimateLag, findings, median, thresholds } from "./diagnostics";
+import {
+  estimateLag,
+  findings,
+  median,
+  thresholds,
+  usesValveLag,
+} from "./diagnostics";
 import { findingLevels } from "./findingLevels";
 import {
   defaults,
@@ -287,8 +293,6 @@ export function createMock(seed = 42): T.FfrApi {
         valveOffset: 0,
       });
     lagCache.set(r.measurementId ?? r.id, rawLag);
-    const improvement =
-      Math.abs(rawLag.lag - o.valveOffset) < 1.5 ? 0 : rawLag.improvement;
     const robust: T.RobustRegression[] = failed
       ? []
       : (["N2O", "CO2"] as T.Gas[]).map((g) => {
@@ -297,7 +301,13 @@ export function createMock(seed = 42): T.FfrApi {
             robustOptions = {
               ...effective,
               perGas: {},
-              valveOffset: Math.abs(lag) >= 1 ? lag : effective.valveOffset,
+              valveOffset: usesValveLag(
+                lag - effective.valveOffset,
+                rawLag.improvement,
+                config,
+              )
+                ? lag
+                : effective.valveOffset,
               cutBeginnings: effective.cutBeginnings + 3,
               cutEnds: effective.cutEnds + 3,
             },
@@ -361,7 +371,7 @@ export function createMock(seed = 42): T.FfrApi {
       o,
       config,
       rawLag.lag,
-      improvement,
+      rawLag.improvement,
     ).filter((d) => d.code !== "co2_low_r2");
     for (const finding of diagnostics)
       if (["valve_timing", "edge_transient", "spike"].includes(finding.code)) {

@@ -129,7 +129,7 @@ Open **Project** and expand **Diagnostic thresholds** in **Project & analysis de
 | **extra Cut S** / **robust Mad** | 3 s / 4 | Extra trim at both ends of a valve segment and the residual cutoff for the robust refit. |
 | **valve Search S** / **valve Step S** | 10 s / 0.5 s | How far and in what steps the app searches either side of the current timing. |
 | **lag Contrast Sd** / **valve Min Improvement** | 4 / 0.30 | How distinct the chamber signals must be for an estimate, and the minimum improvement used in the timing check. |
-| **valve Min Lag S** | 1 s | Minimum change in shift for the robust refit to use estimated timing. |
+| **valve Min Lag S** | 1 s | Minimum change from the current gas shift for a valve timing finding and for the robust refit to use the estimate. |
 | **edge Ratio** / **spike Mad** / **noisy Warn** | 2.5 / 6 / 4 | Cutoffs for large edge residuals, spikes and unusually high residual spread. |
 | **min Points** / **min Window S** | 20 / 60 s | Minimum number of points and time span for the short-fit check. |
 | **normal Switches** / **normal Segment S** / **irregular Fraction** | 10 / 20 s / 0.5 | Expected valve switching count and duration, with a 50% tolerance on duration. |

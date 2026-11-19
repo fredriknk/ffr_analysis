@@ -105,12 +105,11 @@ pub fn robust_fits(
                 meaningful,
             },
         );
-        let offset = effective.valve_offset
-            + if delta.abs() >= c.valve_min_lag_s && improvement >= c.valve_min_improvement {
-                delta
-            } else {
-                0.
-            };
+        let offset = if c.uses_valve_lag(delta, improvement) {
+            effective.valve_offset + delta
+        } else {
+            effective.valve_offset
+        };
         let ranges = group_ranges(
             t,
             &shifted(raw, offset),

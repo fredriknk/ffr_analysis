@@ -215,8 +215,9 @@ and `seSlope`, including zero slopes. Residual SD baselines use the same cohort.
 For N2O and CO2, estimate separate valve lags over `valveSearchS` (10 s), in
 `valveStepS` (0.5 s) steps, minimising both chambers' SSE. Require chamber contrast
 above `lagContrastSd` (4) robust noise SDs and SSE improvement at least
-`valveMinImprovement` (0.30). Lag is applied to the diagnostic refit when its
-magnitude is at least `valveMinLagS` (1 s). `valveLagS` is CO2; `N2O_lagS` is
+`valveMinImprovement` (0.30). Both the valve timing finding and the diagnostic
+refit require a change from the current gas offset of at least `valveMinLagS` (1 s).
+`valveLagS` is CO2; `N2O_lagS` is
 nullable when contrast is insufficient. Per-gas analysis options can override
 `start`, `stop`, `cutBeginnings`, `cutEnds`, `valveOffset`; absent values inherit
 flux-level options. Zero offset with absent per-gas overrides preserves parity.

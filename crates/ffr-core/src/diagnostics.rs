@@ -683,7 +683,8 @@ pub fn analyse(
     }
     let (robust, lags) = robust_fits(raw, side, o, results, c);
     for (gas, estimate) in &lags {
-        if estimate.improvement >= c.valve_min_improvement && estimate.lag_s.abs() >= 1. {
+        let delta = estimate.lag_s - o.for_gas(gas).valve_offset;
+        if c.uses_valve_lag(delta, estimate.improvement) {
             d.push(finding(
                 "valve_timing",
                 "info",
@@ -803,6 +804,12 @@ pub const RULES: [(&str, &str, &str); 16] = [
     ),
 ];
 impl DiagnosticsConfig {
+    fn uses_valve_lag(&self, delta: f64, improvement: f64) -> bool {
+        delta != 0.
+            && delta.abs() >= self.valve_min_lag_s
+            && improvement >= self.valve_min_improvement
+    }
+
     pub fn validate(&self) -> crate::Result<()> {
         let probabilities = [
             self.n2o_negative_p,
@@ -1007,6 +1014,21 @@ mod tests {
             ..Default::default()
         };
         assert!(!has(&run(&r, &o), "valve_timing"));
+    }
+    #[test]
+    fn valve_timing_uses_configured_minimum_lag() {
+        let raw = trace(4., false, false, false);
+        let options = AnalysisOptions::default();
+        let results = regression::compute_with(&raw, 1, &options, 20.).expect("fit");
+        for (minimum, expected) in [(3., true), (5., false)] {
+            let c = DiagnosticsConfig {
+                valve_min_lag_s: minimum,
+                ..Default::default()
+            };
+            let lag = valve_lag(&raw, &options, &c);
+            let findings = analyse(&raw, 1, &options, &results, &c, lag);
+            assert_eq!(has(&findings, "valve_timing"), expected);
+        }
     }
     #[test]
     fn spike_and_curvature() {
