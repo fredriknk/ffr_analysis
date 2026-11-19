@@ -5,6 +5,7 @@ import { Chart } from "../../shared/charts/Chart";
 import { Empty, unit } from "../../shared/common";
 import { useStore } from "../../store";
 import { anchorSwitch, usedRuns, validReading } from "./traceGeometry";
+import { valveLagEstimate } from "./valveLag";
 
 const chamberColour = ["#98a5af", "#0072b2", "#d55e00"],
   // Faint: this chamber's valve segments. Stronger: the points the fit uses,
@@ -57,8 +58,8 @@ export function TraceChart({
     min = Math.min(0, ...tr.t),
     side = detail.flux.side === "left" ? 1 : 2,
     offset = o.valveOffset ?? 0,
-    lag = gas === "N2O" ? Number(detail.flux.N2O_lagS) : detail.valveLagS,
-    hasLag = Number.isFinite(lag) && Math.abs(lag - offset) >= 0.5,
+    lag = valveLagEstimate(detail, gas === "N2O" ? "N2O" : "CO2"),
+    hasLag = lag !== null && Math.abs(lag - offset) >= 0.5,
     switches = [...detail.switches].sort((a, b) => a.t - b.t);
   // Segments of this chamber, after the valve timing shift: exactly where the
   // points that can enter this flux's regression come from.

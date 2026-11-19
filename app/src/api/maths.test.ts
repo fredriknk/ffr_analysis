@@ -121,6 +121,8 @@ describe("scientific calculations", () => {
     expect(lagged.flux.N2O_robustFlux).toBeTypeOf("number");
     expect(lagged.flux.N2O_impact).toBeGreaterThanOrEqual(0);
     expect(lagged.flux.N2O_lagS).toBeGreaterThan(lagged.valveLagS);
+    expect(lagged.CO2_lagS).toBe(lagged.valveLagS);
+    expect(lagged.N2O_lagS).toBe(lagged.flux.N2O_lagS);
     expect(lagged.flux.CO2_impact).toBeGreaterThan(0);
     const robustOptions = { ...lagged.options, fit: "robust" as const };
     const robustPreview = await api.previewFlux(1009, robustOptions);
@@ -165,6 +167,8 @@ describe("scientific calculations", () => {
     expect(thumbs[0].t.length).toBe(thumbs[0].used.length);
     const failed = await api.getFluxDetail(211);
     expect(failed.regressions).toHaveLength(0);
+    expect(failed.CO2_lagS).toBeNull();
+    expect(failed.N2O_lagS).toBeNull();
     expect(failed.diagnostics.some((d) => d.code === "error")).toBe(true);
     const manual = await api.getFluxDetail(7489),
       table = await api.listFluxes(),

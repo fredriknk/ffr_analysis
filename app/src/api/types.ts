@@ -272,6 +272,8 @@ export interface FluxDetail {
   robust?: RobustRegression[];
   diagnostics: Diagnostic[];
   valveLagS: number;
+  CO2_lagS: number | null;
+  N2O_lagS: number | null;
   flux: FluxRow;
   options: AnalysisOptions;
   isOverridden: boolean;

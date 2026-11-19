@@ -37,7 +37,7 @@ fn check(name: &str, value: &Value) {
     for key in match name {
         "ProjectConfig" => vec!["diagnostics"],
         "AnalysisOptions" => vec!["valveOffset"],
-        "FluxDetail" => vec!["diagnostics", "valveLagS", "robust", "N2O_lagS"],
+        "FluxDetail" => vec!["diagnostics", "valveLagS", "robust"],
         "SeriesMeta" => vec!["key"],
         "Trace" => vec!["fit"],
         _ => vec![],
@@ -92,6 +92,8 @@ fn ui_contract_json_key_sets() {
     }
     let detail = json!(s.get_flux_detail(1).expect("detail"));
     check("FluxDetail", &detail);
+    assert_eq!(detail.get("CO2_lagS"), Some(&Value::Null));
+    assert_eq!(detail.get("N2O_lagS"), Some(&Value::Null));
     check("AnalysisOptions", &detail["options"]);
     let summary = s
         .treatment_summary(SummaryQuery {

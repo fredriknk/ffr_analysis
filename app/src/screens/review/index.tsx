@@ -26,6 +26,7 @@ import {
 } from "./Queue";
 import { TraceChart } from "./TraceChart";
 import { nextQueueId } from "./navigation";
+import { valveLagEstimate, type ValveLagTarget } from "./valveLag";
 const gasNames: Gas[] = ["N2O", "CO2", "CO", "H2O", "licor_H2O"];
 export function Review() {
   const s = useStore(),
@@ -42,9 +43,7 @@ export function Review() {
       () => localStorage.getItem("ffr-shortcuts") !== "hidden",
     );
   const [scope, setScope] = useState<"flux" | "file" | "day">("flux"),
-    [offsetGas, setOffsetGas] = useState<"all" | "N2Oall" | "CO2" | "N2O">(
-      "all",
-    ),
+    [offsetGas, setOffsetGas] = useState<ValveLagTarget>("all"),
     [editGas, setEditGas] = useState<Gas>("N2O"),
     [modeInfo, setModeInfo] = useState(false);
   const layout = useQuery({
@@ -258,12 +257,11 @@ export function Review() {
     changePreview(next);
     return next;
   }
-  function applyLag(gas: "N2O" | "CO2" | "all" | "N2Oall") {
-    if (!d || !o) return;
-    const co2 = d.valveLagS,
-      n2o = Number(d.flux.N2O_lagS);
-    const delta = gas.startsWith("N2O") ? n2o : co2;
-    if (!Number.isFinite(delta)) return;
+  const co2Lag = valveLagEstimate(d, "CO2"),
+    n2oLag = valveLagEstimate(d, "N2O"),
+    selectedLag = valveLagEstimate(d, offsetGas);
+  function applyLag() {
+    if (!d || !o || d.flux.id !== s.selected || selectedLag === null) return;
     const day = (t: number) =>
         new Intl.DateTimeFormat("en-CA", { timeZone: s.timeZone }).format(t),
       ids = (data.data?.rows ?? [])
@@ -277,14 +275,14 @@ export function Review() {
         )
         .map((r) => r.id);
     const partial: Partial<AnalysisOptions> =
-      gas === "all" || gas === "N2Oall"
+      offsetGas === "all" || offsetGas === "N2Oall"
         ? {
-            valveOffset: delta,
+            valveOffset: selectedLag,
             perGas: Object.fromEntries(
-              gasNames.map((g) => [g, { valveOffset: delta }]),
+              gasNames.map((g) => [g, { valveOffset: selectedLag }]),
             ),
           }
-        : { perGas: { [gas]: { valveOffset: delta } } };
+        : { perGas: { [offsetGas]: { valveOffset: selectedLag } } };
     void action(
       () => api.patchFluxOptions(ids, partial),
       "Valve offset applied",
@@ -922,8 +920,18 @@ export function Review() {
                 <div className="lag-estimates">
                   Estimated from the trace
                   <span>
-                    CO₂ <b>{significant(d.valveLagS, 3)} s</b> · N₂O{" "}
-                    <b>{significant(flux.N2O_lagS, 3)} s</b>
+                    CO₂{" "}
+                    <b>
+                      {co2Lag === null
+                        ? "Unavailable"
+                        : significant(co2Lag, 3) + " s"}
+                    </b>{" "}
+                    · N₂O{" "}
+                    <b>
+                      {n2oLag === null
+                        ? "Unavailable"
+                        : significant(n2oLag, 3) + " s"}
+                    </b>
                   </span>
                 </div>
                 <select
@@ -933,10 +941,18 @@ export function Review() {
                     setOffsetGas(e.target.value as typeof offsetGas)
                   }
                 >
-                  <option value="all">CO₂ estimate → all gases</option>
-                  <option value="N2Oall">N₂O estimate → all gases</option>
-                  <option value="CO2">CO₂ estimate → CO₂ only</option>
-                  <option value="N2O">N₂O estimate → N₂O only</option>
+                  <option value="all" disabled={co2Lag === null}>
+                    CO₂ estimate → all gases
+                  </option>
+                  <option value="N2Oall" disabled={n2oLag === null}>
+                    N₂O estimate → all gases
+                  </option>
+                  <option value="CO2" disabled={co2Lag === null}>
+                    CO₂ estimate → CO₂ only
+                  </option>
+                  <option value="N2O" disabled={n2oLag === null}>
+                    N₂O estimate → N₂O only
+                  </option>
                 </select>
                 <select
                   aria-label="Offset scope"
@@ -947,7 +963,10 @@ export function Review() {
                   <option value="file">Both chambers of this file</option>
                   <option value="day">Every robot flux this day</option>
                 </select>
-                <button onClick={() => applyLag(offsetGas)}>
+                <button
+                  disabled={selectedLag === null || d.flux.id !== s.selected}
+                  onClick={applyLag}
+                >
                   Apply estimate
                 </button>
               </div>

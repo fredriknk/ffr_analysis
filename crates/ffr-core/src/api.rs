@@ -250,6 +250,8 @@ pub struct Trace {
 pub struct FluxDetail {
     #[serde(default)]
     pub robust: Vec<crate::diagnostics::RobustFit>,
+    #[serde(default, rename = "CO2_lagS")]
+    pub co2_lag_s: Option<f64>,
     #[serde(default, rename = "N2O_lagS")]
     pub n2o_lag_s: Option<f64>,
     pub diagnostics: Vec<crate::diagnostics::Diagnostic>,

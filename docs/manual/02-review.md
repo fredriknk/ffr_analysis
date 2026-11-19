@@ -92,7 +92,7 @@ Look for a repeated jump in concentration just before or after the solid switch 
 
 To adjust this flux, drag the **Valve timing** handle on a trace, type a value in **Shift · s** in the inspector, or select **Use estimated valve timing** above a trace when offered. A positive shift puts switches later than the robot logged them. Dragging moves all the switches together, and the app previews which chamber each point belongs to. The chart edits the common shift unless the gas already has its own shift override.
 
-Under **Valve timing**, **Estimated from the trace** shows separate CO₂ and N₂O estimates. To copy an estimate, pick **CO₂ estimate → all gases**, **N₂O estimate → all gases**, **CO₂ estimate → CO₂ only** or **N₂O estimate → N₂O only**. Check that the chosen gas has an estimate. Choose the scope and select **Apply estimate**.
+Under **Valve timing**, **Estimated from the trace** shows separate CO₂ and N₂O estimates. Choose whether to apply an available estimate to its own gas or all gases, pick a scope, and select **Apply estimate**. If a gas shows **Unavailable**, its options are disabled.
 
 | Scope | Applies the chosen estimate to |
 | --- | --- |

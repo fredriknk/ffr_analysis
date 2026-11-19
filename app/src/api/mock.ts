@@ -280,6 +280,8 @@ export function createMock(seed = 42): T.FfrApi {
         robust: [] as T.RobustRegression[],
         comparison,
         lag: 0,
+        co2Lag: null,
+        n2oLag: null,
         diagnostics: [] as T.Diagnostic[],
       };
 
@@ -398,6 +400,8 @@ export function createMock(seed = 42): T.FfrApi {
       robust,
       comparison,
       lag: rawLag.lag,
+      co2Lag: failed ? null : rawLag.lag,
+      n2oLag: failed ? null : rawLag.lag + 2,
       diagnostics,
     };
   }
@@ -425,7 +429,7 @@ export function createMock(seed = 42): T.FfrApi {
     });
     r.N2O_qc = a.regs.find((r) => r.gas === "N2O")?.qc ?? "error";
     r.valveLagS = a.lag;
-    r.N2O_lagS = r.source === "robot" ? a.lag + 2 : 0;
+    r.N2O_lagS = a.n2oLag;
     Object.assign(r, a.comparison);
     if (
       r.source === "robot" &&
@@ -833,7 +837,9 @@ export function createMock(seed = 42): T.FfrApi {
         ),
       ),
       valveLagS: a.lag,
-      flux: { ...r, ...a.comparison },
+      CO2_lagS: a.co2Lag,
+      N2O_lagS: a.n2oLag,
+      flux: { ...r, ...a.comparison, N2O_lagS: a.n2oLag },
       options: structuredClone(o),
       isOverridden: opts.has(id),
       siblingFluxId: sibling?.id ?? null,

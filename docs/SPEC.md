@@ -404,7 +404,8 @@ Diagnostics in the existing shapes: `FluxTable` gains columns `attention` (numbe
 (string: comma-separated codes, worst first), `valveLagS` (number), `<gas>_n`, and
 `<gas>_resid` (residual SD of the fit), `<gas>_robustFlux`, `<gas>_impact`, `N2O_lagS`,
 `<gas>_excluded` (boolean);
-`FluxDetail` gains `diagnostics: Diagnostic[]`, `valveLagS`,
+`FluxDetail` gains `diagnostics: Diagnostic[]`, `valveLagS`, nullable
+`CO2_lagS` and `N2O_lagS` estimates for the review controls,
 `robust: {gas, slope, intercept, start, stop, n, flux}[]`, and each trace gains `fit: (number|null)[]` = fitted value at each used point;
 `ProjectConfig` gains `diagnostics` (thresholds) .
 - `undo() → UndoResult`, `redo() → UndoResult`, `history(limit) → Change[]`
