@@ -19,6 +19,7 @@ fn legacy_scan_returns_the_weather_pickle_path_when_present() {
     assert!(scan.weather_exists);
     let payload = json!(scan);
     let found = payload["metnoPicklePath"].as_str().expect("weather path");
+    assert!(!found.contains(".."), "{found}");
     assert_eq!(
         std::fs::canonicalize(found).expect("scanned weather file"),
         std::fs::canonicalize(weather).expect("synthetic weather file"),

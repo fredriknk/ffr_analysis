@@ -604,7 +604,11 @@ bytes])?;
         let v = self.scan_value(dir)?;
         let paths = &v["config"]["PATHS"];
         let exists = |k: &str| paths[k].as_str().is_some_and(|p| Path::new(p).exists());
-        let weather = Path::new(dir).join("../../metno_data.pickle");
+        // `Users/<Name>` → the legacy program folder two levels up, as a clean path.
+        let weather = Path::new(dir).ancestors().nth(2).map_or_else(
+            || Path::new(dir).join("../../metno_data.pickle"),
+            |root| root.join("metno_data.pickle"),
+        );
         let metno_pickle_path = weather
             .is_file()
             .then(|| weather.to_string_lossy().into_owned());
