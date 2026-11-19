@@ -422,7 +422,8 @@ Diagnostics in the existing shapes: `FluxTable` gains columns `attention` (numbe
 
 **External data**
 - `listSeries() → SeriesMeta[]`, `getSeries(ids, from?, to?, maxPoints?) → SeriesData[]`
-- `previewTable(path, opts) → TablePreview` — sheets, header candidates, first rows
+- `previewTable(path, opts) → TablePreview` — sheets, header candidates, first rows.
+  Omitting `opts.sheet` previews the first worksheet.
 - `importSeries(args)`, `deleteSeries(id)`. For each series and timestamp, `aggregate`
   can be `mean`, `sum` or `none` (keep the first valid reading, also the default when omitted).
 - `importManualFluxes(args) → ImportReport`

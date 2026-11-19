@@ -9,7 +9,7 @@ Open **External data** to bring weather, logger readings and manual chamber flux
 ## Import a logger or other time series
 
 1. Click **Import series +**, then **Browse file**. Choose an Excel workbook or comma-separated CSV file. The workbook reader supports `.xls`, `.xlsx`, `.xlsm`, `.xlsb` and `.ods`.
-2. Click **Preview table**. The first workbook preview looks for a sheet named `Measurements`. If the workbook has no such sheet, use a copy with that sheet name or save the sheet as CSV. For CSV, **Sheet** can be set to **CSV**.
+2. Click **Preview table**. The first preview opens the workbook's first worksheet and lists the available worksheets under **Sheet**. CSV files show **CSV**.
 3. Set the options below. After changing the sheet or header row, click **Preview table** again so the displayed column names match the file.
 4. Click **Import mapped data**. Select each new series in **Connected series** and check the chart.
 

@@ -1376,8 +1376,8 @@ export function createMock(seed = 42): T.FfrApi {
           ),
         };
       }),
-    previewTable: async () => ({
-      sheets: ["Measurements"],
+    previewTable: async (path) => ({
+      sheets: [path.toLowerCase().endsWith(".csv") ? "CSV" : "Logger readings"],
       headerCandidates: [0, 2],
       columns: ["date", "plot", "N2O", "CO2", "temperature", "VWC"],
       rows: Array.from({ length: 5 }, (_, i) => [

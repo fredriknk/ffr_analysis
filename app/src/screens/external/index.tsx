@@ -24,13 +24,17 @@ export function External() {
     [selected, setSelected] = useState(1),
     [wizard, setWizard] = useState<"series" | "manual" | null>(null),
     [path, setPath] = useState(""),
-    [sheet, setSheet] = useState("Measurements"),
+    [sheet, setSheet] = useState<string>(),
     [header, setHeader] = useState(0),
     [timeCol, setTimeCol] = useState("date"),
     [values, setValues] = useState(["temperature"]),
     [aggregate, setAggregate] = useState<"mean" | "sum" | "none">("mean"),
-    [preview, setPreview] =
-      useState<Awaited<ReturnType<typeof api.previewTable>>>(),
+    [preview, setPreview] = useState<{
+      path: string;
+      sheet?: string;
+      header: number;
+      table: Awaited<ReturnType<typeof api.previewTable>>;
+    }>(),
     [station, setStation] = useState("SN17850"),
     [client, setClient] = useState(""),
     [from, setFrom] = useState("2023-01-01"),
@@ -44,6 +48,19 @@ export function External() {
     queryFn: () => api.getSeries([selected]),
     enabled: visible && !!series.data?.some((s) => s.id === selected),
   });
+  const table = preview?.path === path ? preview.table : undefined;
+  const activeSheet = sheet ?? table?.sheets[0];
+  const previewIsCurrent =
+    !!table &&
+    preview?.header === header &&
+    (preview.sheet ?? table.sheets[0]) === activeSheet;
+
+  function changePath(next: string) {
+    setPath(next);
+    setSheet(undefined);
+    setPreview(undefined);
+  }
+
   return (
     <div className="page">
       <div className="page-heading">
@@ -137,6 +154,7 @@ export function External() {
             <button
               onClick={() => {
                 setWizard(null);
+                setSheet(undefined);
                 setPreview(undefined);
               }}
             >
@@ -146,32 +164,35 @@ export function External() {
         >
           <div className="form-grid">
             <Field label="Excel / CSV path">
-              <input value={path} onChange={(e) => setPath(e.target.value)} />
+              <input value={path} onChange={(e) => changePath(e.target.value)} />
             </Field>
-            <button onClick={() => void pick().then((p) => p && setPath(p))}>
+            <button onClick={() => void pick().then((p) => p && changePath(p))}>
               Browse file
             </button>
             <button
+              disabled={!path.trim()}
               onClick={() =>
-                void action(async () =>
-                  setPreview(
-                    await api.previewTable(path, { headerRow: header, sheet }),
-                  ),
-                )
+                void action(async () => {
+                  const table = await api.previewTable(path, {
+                    headerRow: header,
+                    ...(sheet === undefined ? {} : { sheet }),
+                  });
+                  setPreview({ path, header, sheet, table });
+                })
               }
             >
               Preview table
             </button>
           </div>
-          {preview && (
+          {table && (
             <>
               <div className="form-grid">
                 <Field label="Sheet">
                   <select
-                    value={sheet}
+                    value={activeSheet ?? ""}
                     onChange={(e) => setSheet(e.target.value)}
                   >
-                    {preview.sheets.map((v) => (
+                    {table.sheets.map((v) => (
                       <option key={v}>{v}</option>
                     ))}
                   </select>
@@ -189,7 +210,7 @@ export function External() {
                     value={timeCol}
                     onChange={(e) => setTimeCol(e.target.value)}
                   >
-                    {preview.columns.map((c) => (
+                    {table.columns.map((c) => (
                       <option key={c}>{c}</option>
                     ))}
                   </select>
@@ -209,7 +230,7 @@ export function External() {
               </div>
               <p>Value columns</p>
               <div className="toolbar">
-                {preview.columns
+                {table.columns
                   .filter((c) => c !== timeCol)
                   .map((c) => (
                     <label key={c}>
@@ -232,13 +253,13 @@ export function External() {
                 <table>
                   <thead>
                     <tr>
-                      {preview.columns.map((c) => (
+                      {table.columns.map((c) => (
                         <th key={c}>{c}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
-                    {preview.rows.map((r, i) => (
+                    {table.rows.map((r, i) => (
                       <tr key={i}>
                         {r.map((v, j) => (
                           <td key={j}>{String(v)}</td>
@@ -256,7 +277,7 @@ export function External() {
               )}
               <button
                 className="primary"
-                disabled={!values.length}
+                disabled={!previewIsCurrent || !values.length}
                 onClick={() =>
                   void action(async () => {
                     if (wizard === "manual")
@@ -279,6 +300,8 @@ export function External() {
                         aggregate,
                       });
                     setWizard(null);
+                    setSheet(undefined);
+                    setPreview(undefined);
                   }, "Synthetic import complete")
                 }
               >

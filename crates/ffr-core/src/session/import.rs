@@ -864,6 +864,32 @@ mod tests {
     use super::*;
 
     #[test]
+    fn workbook_preview_defaults_to_first_sheet_and_lists_real_names() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("campaign.xlsx");
+        let mut workbook = rust_xlsxwriter::Workbook::new();
+        for (name, column) in [("Field log", "Date"), ("Chambers", "Plot")] {
+            workbook
+                .add_worksheet()
+                .set_name(name)
+                .unwrap()
+                .write_string(0, 0, column)
+                .unwrap();
+        }
+        workbook.save(&path).unwrap();
+        let session = Session::default();
+        let first = session
+            .preview_table(path.to_str().unwrap(), json!({}))
+            .unwrap();
+        assert_eq!(first.sheets, ["Field log", "Chambers"]);
+        assert_eq!(first.columns, ["Date"]);
+        let second = session
+            .preview_table(path.to_str().unwrap(), json!({"sheet": "Chambers"}))
+            .unwrap();
+        assert_eq!(second.columns, ["Plot"]);
+    }
+
+    #[test]
     fn series_import_aggregates_each_column_at_matching_timestamps() {
         let dir = tempfile::tempdir().unwrap();
         let mut session = Session::default();
