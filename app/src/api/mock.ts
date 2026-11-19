@@ -248,6 +248,12 @@ export function createMock(seed = 42): T.FfrApi {
   const diagnosticMap = new Map<number, T.Diagnostic[]>(),
     lagCache = new Map<number, { lag: number; improvement: number }>();
   function analyse(r: T.FluxRow, o: T.AnalysisOptions) {
+    const comparison: Record<string, number | null> = {
+      N2O_robustFlux: null,
+      CO2_robustFlux: null,
+      N2O_impact: null,
+      CO2_impact: null,
+    };
     if (r.source === "manual")
       return {
         regs: gases.map((g) => ({
@@ -266,6 +272,7 @@ export function createMock(seed = 42): T.FfrApi {
         })),
         traces: [],
         robust: [] as T.RobustRegression[],
+        comparison,
         lag: 0,
         diagnostics: [] as T.Diagnostic[],
       };
@@ -335,6 +342,33 @@ export function createMock(seed = 42): T.FfrApi {
             ),
           };
         });
+    for (const fit of robust) {
+      const ordinary = regs.find((v) => v.gas === fit.gas);
+      comparison[fit.gas + "_robustFlux"] = fit.flux;
+      if (ordinary)
+        comparison[fit.gas + "_impact"] =
+          Math.abs(ordinary.flux - fit.flux) /
+          Math.max(
+            Math.abs(ordinary.flux),
+            Math.abs(fit.flux),
+            fit.gas === "N2O" ? 1 : 1000,
+          );
+    }
+    const diagnostics = findings(
+      r,
+      regs,
+      traces,
+      o,
+      config,
+      rawLag.lag,
+      improvement,
+    ).filter((d) => d.code !== "co2_low_r2");
+    for (const finding of diagnostics)
+      if (["valve_timing", "edge_transient", "spike"].includes(finding.code)) {
+        const impact = comparison[(finding.gas ?? "N2O") + "_impact"] ?? 0;
+        finding.severity =
+          impact >= 0.3 ? "bad" : impact >= 0.1 ? "warn" : "info";
+      }
     // The robust fit method reports the robust refit for N2O and CO2.
     if (o.fit === "robust")
       for (const fit of robust) {
@@ -352,16 +386,9 @@ export function createMock(seed = 42): T.FfrApi {
       regs,
       traces,
       robust,
+      comparison,
       lag: rawLag.lag,
-      diagnostics: findings(
-        r,
-        regs,
-        traces,
-        o,
-        config,
-        rawLag.lag,
-        improvement,
-      ),
+      diagnostics,
     };
   }
   function refresh(r: T.FluxRow) {
@@ -389,26 +416,7 @@ export function createMock(seed = 42): T.FfrApi {
     r.N2O_qc = a.regs.find((r) => r.gas === "N2O")?.qc ?? "error";
     r.valveLagS = a.lag;
     r.N2O_lagS = r.source === "robot" ? a.lag + 2 : 0;
-    for (const g of ["N2O", "CO2"]) {
-      const robust = a.robust.find((v) => v.gas === g),
-        value = Number(r[g + "_flux"]);
-      r[g + "_robustFlux"] = robust?.flux ?? null;
-      r[g + "_impact"] = robust
-        ? Math.abs(value - robust.flux) /
-          Math.max(
-            Math.abs(value),
-            Math.abs(robust.flux),
-            g === "N2O" ? 1 : 1000,
-          )
-        : null;
-    }
-    a.diagnostics = a.diagnostics.filter((d) => d.code !== "co2_low_r2");
-    for (const finding of a.diagnostics)
-      if (["valve_timing", "edge_transient", "spike"].includes(finding.code)) {
-        const impact = Number(r[(finding.gas ?? "N2O") + "_impact"] ?? 0);
-        finding.severity =
-          impact >= 0.3 ? "bad" : impact >= 0.1 ? "warn" : "info";
-      }
+    Object.assign(r, a.comparison);
     if (
       r.source === "robot" &&
       r.N2O_qc !== "error" &&
@@ -815,7 +823,7 @@ export function createMock(seed = 42): T.FfrApi {
         ),
       ),
       valveLagS: a.lag,
-      flux: { ...r },
+      flux: { ...r, ...a.comparison },
       options: structuredClone(o),
       isOverridden: opts.has(id),
       siblingFluxId: sibling?.id ?? null,

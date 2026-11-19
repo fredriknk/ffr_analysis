@@ -199,19 +199,27 @@ pub fn apply_fit_method(
     }
     used
 }
-pub fn baselines(rows: &[FluxRow], c: &DiagnosticsConfig) -> Baseline {
+pub fn baselines(rows: &[FluxRow], analysis: &[Findings], c: &DiagnosticsConfig) -> Baseline {
     let mut out = Baseline::new();
     for gas in ["N2O", "CO2"] {
-        let get = |suffix: &str| {
+        let values = |suffix: &str| {
             let key = format!("{gas}_{suffix}");
             rows.iter()
-                .filter(|r| r["source"] == "robot" && r["excluded"] != true)
-                .filter_map(|r| r.get(&key).and_then(Value::as_f64))
+                .enumerate()
+                .filter(|(_, r)| r["source"] == "robot" && r["excluded"] != true)
+                .filter_map(|(i, r)| {
+                    if suffix == "seFlux" {
+                        if let Some(ols) = analysis[i].ols.get(gas) {
+                            return Some(ols.se_flux);
+                        }
+                    }
+                    r.get(&key).and_then(Value::as_f64)
+                })
                 .filter(|v| v.is_finite() && *v >= 0.)
                 .collect::<Vec<_>>()
         };
-        let se = get("seFlux");
-        let noise = get("resid");
+        let se = values("seFlux");
+        let noise = values("resid");
         out.insert(
             gas.into(),
             GasBaseline {
@@ -240,7 +248,7 @@ fn grade_shapes(
     let mut curvature_max: f64 = 0.;
     for gas in ["N2O", "CO2"] {
         let floor = baseline[gas].floor;
-        let Some(flux) = row.get(&format!("{gas}_flux")).and_then(Value::as_f64) else {
+        let Some(flux) = ols_flux(row, analysis, gas) else {
             continue;
         };
         if let Some(robust) = analysis.robust.iter().find(|r| r.gas == gas) {
@@ -278,7 +286,7 @@ fn grade_shapes(
         .into();
         if let Some(gas) = d.gas.as_deref() {
             if let (Some(flux), Some(robust)) = (
-                row.get(&format!("{gas}_flux")).and_then(Value::as_f64),
+                ols_flux(row, analysis, gas),
                 analysis.robust.iter().find(|r| r.gas == gas),
             ) {
                 let unit = if gas == "N2O" {
@@ -286,10 +294,17 @@ fn grade_shapes(
                 } else {
                     "ug C m^-2 h^-1"
                 };
-                d.message = format!("{}: robust fit gives {:.1} instead of {flux:.1} {unit}; effective impact={:.1}%", d.code, robust.flux, 100. * effective);
+                d.message = format!("{}: robust fit {:.1}, ordinary least-squares fit {flux:.1} {unit}. Effective impact {:.1}%.", d.code, robust.flux, 100. * effective);
             }
         }
     }
+}
+fn ols_flux(row: &FluxRow, analysis: &Findings, gas: &str) -> Option<f64> {
+    analysis
+        .ols
+        .get(gas)
+        .map(|fit| fit.flux)
+        .or_else(|| row.get(&format!("{gas}_flux")).and_then(Value::as_f64))
 }
 fn local_day(row: &FluxRow, zone: chrono_tz::Tz) -> String {
     chrono::DateTime::from_timestamp_millis(row["time"].as_i64().unwrap_or(0))
@@ -351,9 +366,8 @@ pub fn contextualise(
         let f = &analysis[i];
         for gas in ["N2O", "CO2"] {
             let floor = baseline[gas].floor;
-            let original = r.get(&format!("{gas}_flux")).and_then(Value::as_f64);
             let robust = f.robust.iter().find(|f| f.gas == gas);
-            let change = original
+            let change = ols_flux(r, f, gas)
                 .zip(robust)
                 .map(|(v, rf)| impact(v, rf.flux, floor));
             r.insert(format!("{gas}_robustFlux"), json!(robust.map(|f| f.flux)));
@@ -387,7 +401,7 @@ pub fn contextualise(
                     format!("Residual SD is {ratio:.1} times the project median for {gas}."),
                 ));
             }
-            if let Some(flux) = original {
+            if let Some(flux) = r.get(&format!("{gas}_flux")).and_then(Value::as_f64) {
                 let p = r
                     .get(&format!("{gas}_pval"))
                     .and_then(Value::as_f64)
@@ -793,8 +807,16 @@ mod tests {
         let mut b = a.clone();
         b.insert("excluded".into(), json!(true));
         b.insert("CO2_seFlux".into(), json!(1000.));
-        let floors = baselines(&[a, b], &DiagnosticsConfig::default());
-        assert_eq!(floors["CO2"].floor, 6.);
+        let mut analysis = vec![Findings::default(); 2];
+        analysis[0].ols.insert(
+            "CO2".into(),
+            OlsComparison {
+                flux: 1.,
+                se_flux: 3.,
+            },
+        );
+        let floors = baselines(&[a, b], &analysis, &DiagnosticsConfig::default());
+        assert_eq!(floors["CO2"].floor, 9.);
         assert!((impact(58., 41., 1.) - 17. / 58.).abs() < 1e-14);
     }
 }

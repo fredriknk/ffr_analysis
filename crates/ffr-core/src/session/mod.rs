@@ -53,7 +53,8 @@ impl Session {
 ///    that are not robot files are removed (failed robot files are re-read by
 ///    the next import or folder scan).
 /// 5: waypoint matches take precedence over polygon matches.
-pub(crate) const ANALYSIS_VERSION: i64 = 5;
+/// 6: impact always compares the least-squares flux with the robust refit.
+pub(crate) const ANALYSIS_VERSION: i64 = 6;
 /// Sets `<gas>_excluded` for every gas from the user's per-gas choice in
 /// `gasExcluded` (`{gas: bool}`; default included). Whole-flux `excluded` is
 /// separate and wins everywhere. Drops the 2.1.0 `autoExcludedGases` field.

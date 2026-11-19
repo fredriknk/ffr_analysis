@@ -23,7 +23,7 @@ The attention score ranks fluxes for review. The strongest finding sets the scor
 
 The robust refit checks how sensitive the N₂O and CO₂ results are to uncertain readings. It keeps the same window bounds, can use gas-specific estimated switch timing, trims more from valve segment edges, and refits after leaving out unusually large residuals. A residual is the difference between a reading and the fitted line.
 
-With **Fit** set to **Linear**, the green line is the reported fit and the dashed purple line is the robust check. **Impact** shows the difference between the two flux estimates as a percentage of the larger flux magnitude or the gas's noise floor, whichever is greatest. The floor reflects typical uncertainty across the project and keeps tiny differences near zero in proportion. To report the robust result where available, choose **Robust** under **Fit**.
+With **Fit** set to **Linear**, the green line is the reported fit and the dashed purple line is the robust check. **Impact** compares the ordinary least-squares flux and the robust refit with either **Fit** setting. It shows their difference as a percentage of the largest of the two flux magnitudes and the gas's noise floor. The floor reflects typical uncertainty across the project and keeps tiny differences near zero in proportion. To report the robust result where available, choose **Robust** under **Fit**.
 
 For timing, edge, spike and noise findings, the app uses the larger meaningful impact across N₂O and CO₂ to grade severity. Curvature uses the difference between the first and second halves of the fit. A shape finding stays informational if the flux change is too small relative to the noise floor. Read the finding message alongside the per-gas **Impact** values.
 

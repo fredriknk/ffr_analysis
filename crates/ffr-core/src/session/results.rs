@@ -135,6 +135,10 @@ impl Session {
             });
         }
         if scale_analysis {
+            for ols in findings.ols.values_mut() {
+                ols.flux *= factor;
+                ols.se_flux *= factor;
+            }
             for robust in &mut findings.robust {
                 robust.flux *= factor;
             }
@@ -388,7 +392,7 @@ serde_json::to_string(findings)?])?;
             analyses.push(analysis);
         }
         let cfg = self.get_config()?;
-        let baseline = crate::diagnostics::baselines(&rows, &cfg.diagnostics);
+        let baseline = crate::diagnostics::baselines(&rows, &analyses, &cfg.diagnostics);
         db.execute("INSERT INTO meta(key,value) VALUES('diagnostic_baseline',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value",[serde_json::to_string(&baseline)?])?;
         let zone: chrono_tz::Tz = cfg
             .time_zone

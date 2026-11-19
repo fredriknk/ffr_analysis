@@ -121,6 +121,17 @@ describe("scientific calculations", () => {
     expect(lagged.flux.N2O_robustFlux).toBeTypeOf("number");
     expect(lagged.flux.N2O_impact).toBeGreaterThanOrEqual(0);
     expect(lagged.flux.N2O_lagS).toBeGreaterThan(lagged.valveLagS);
+    expect(lagged.flux.CO2_impact).toBeGreaterThan(0);
+    const robustOptions = { ...lagged.options, fit: "robust" as const };
+    const robustPreview = await api.previewFlux(1009, robustOptions);
+    expect(robustPreview.flux.CO2_impact).toBe(lagged.flux.CO2_impact);
+    expect(robustPreview.regressions.find((r) => r.gas === "CO2")?.flux).toBe(
+      lagged.flux.CO2_robustFlux,
+    );
+    const [robustRow] = await api.setFluxOptions([1009], robustOptions);
+    expect(robustRow.CO2_impact).toBe(lagged.flux.CO2_impact);
+    expect(robustRow.CO2_flux).toBe(lagged.flux.CO2_robustFlux);
+    await api.undo();
     const original = (await api.getFluxDetail(1010)).options;
     await api.setFluxOptions([1009], {
       ...lagged.options,

@@ -208,7 +208,7 @@ Findings have
 `{code, severity: 'info'|'warn'|'bad', gas?, value?, impact?, message}` and are
 recomputed with results. All numeric rule thresholds are `config.diagnostics` fields.
 
-For each gas, `floor = noiseFloorMultiplier (3) ? median(flux standard error)`
+For each gas, `floor = noiseFloorMultiplier (3) × median(OLS flux standard error)`
 from non-excluded robot fluxes; standard error uses the physical flux conversion
 and `seSlope`, including zero slopes. Residual SD baselines use the same cohort.
 
@@ -225,7 +225,8 @@ Robust fits use the same window, gas-specific lag, `extraCutS` (3) extra seconds
 at each segment end, and at most two passes dropping residuals above `robustMad`
 (4) MAD. Store `<gas>_robustFlux`, `<gas>_impact`, `<gas>_seFlux`, and return
 `FluxDetail.robust: {gas,slope,intercept,start,stop,n,flux}[]`.
-`impact = abs(flux ? robustFlux) / max(abs(flux), abs(robustFlux), floor)`.
+`impact = abs(olsFlux − robustFlux) / max(abs(olsFlux), abs(robustFlux), floor)`.
+The comparison uses the same fits regardless of which fit is reported.
 
 **Shape severity.** `valve_timing`, `edge_transient`, `spike`, `noisy` and
 `curvature` are info below `shapeWarnImpact` (0.15), warn below
@@ -233,7 +234,7 @@ at each segment end, and at most two passes dropping residuals above `robustMad`
 impact over N2O and CO2, with a gas contributing zero unless its absolute flux
 change exceeds `shapeFloorMultiplier` (1) times its floor. Curvature instead uses
 the absolute first-half versus second-half flux difference divided by
-`max(abs(flux), floor)`, with the same original-versus-robust absolute floor gate and maximum over gases.
+`max(abs(olsFlux), floor)`, with the same ordinary-versus-robust absolute floor gate and maximum over gases.
 Messages show robust versus original flux and effective impact. Small-effect
 findings remain visible as info chips and in diagnostic summaries.
 

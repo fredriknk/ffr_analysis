@@ -127,6 +127,7 @@ pub struct DiagnosticSummary {
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Findings {
+    pub ols: BTreeMap<String, OlsComparison>,
     #[serde(default)]
     pub robust: Vec<RobustFit>,
     #[serde(default)]
@@ -136,6 +137,11 @@ pub struct Findings {
     pub diagnostics: Vec<Diagnostic>,
     pub valve_lag_s: f64,
     pub valve_improvement: f64,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct OlsComparison {
+    pub flux: f64,
+    pub se_flux: f64,
 }
 fn finding(
     code: &str,
@@ -689,6 +695,19 @@ pub fn analyse(
     }
     score(&mut d);
     Findings {
+        ols: results
+            .iter()
+            .filter(|(gas, r)| ["N2O", "CO2"].contains(&gas.as_str()) && r.n > 0)
+            .map(|(gas, r)| {
+                (
+                    gas.clone(),
+                    OlsComparison {
+                        flux: r.flux,
+                        se_flux: r.se_slope * conversion(r),
+                    },
+                )
+            })
+            .collect(),
         robust,
         lags,
         half_differences,
@@ -905,9 +924,13 @@ mod tests {
         raw
     }
     fn run(raw: &Raw, o: &AnalysisOptions) -> Findings {
-        let results = regression::compute_with(raw, 1, o, 20.).expect("fit");
+        run_with_row(raw, o).0
+    }
+    fn run_with_row(raw: &Raw, o: &AnalysisOptions) -> (Findings, FluxRow) {
+        let mut results = regression::compute_with(raw, 1, o, 20.).expect("fit");
         let c = DiagnosticsConfig::default();
         let mut f = analyse(raw, 1, o, &results, &c, valve_lag(raw, o, &c));
+        apply_fit_method(raw, 1, o, &mut results, &c);
         let mut row: FluxRow = serde_json::from_value(json!({
         "id":1,
         "time":0,
@@ -953,7 +976,7 @@ mod tests {
             chrono_tz::Europe::Oslo,
         );
         f.diagnostics = d.remove(0);
-        f
+        (f, rows.remove(0))
     }
     fn has(f: &Findings, code: &str) -> bool {
         f.diagnostics.iter().any(|d| d.code == code)
@@ -1156,6 +1179,29 @@ mod tests {
         let mut k = keep.iter();
         y.retain(|_| *k.next().unwrap_or(&true));
         assert!(has(&run(&r, &AnalysisOptions::default()), "zero_readings"));
+    }
+    #[test]
+    fn impact_compares_ols_and_robust_with_either_reported_fit() {
+        let mut raw = trace(0., false, false, true);
+        raw.channels.get_mut("CO2").expect("CO2").1[51] += 1000.;
+        let mut options = AnalysisOptions::default();
+        let (ols_findings, ols) = run_with_row(&raw, &options);
+        options.fit = "robust".into();
+        let (robust_findings, robust) = run_with_row(&raw, &options);
+
+        assert_ne!(ols["CO2_flux"], robust["CO2_flux"]);
+        assert_eq!(robust["CO2_flux"], ols["CO2_robustFlux"]);
+        assert!(ols["CO2_impact"].as_f64().expect("impact") > 0.35);
+        assert_eq!(robust["CO2_impact"], ols["CO2_impact"]);
+        for findings in [ols_findings, robust_findings] {
+            let spike = findings
+                .diagnostics
+                .iter()
+                .find(|d| d.code == "spike" && d.gas.as_deref() == Some("CO2"))
+                .expect("CO2 spike");
+            assert_eq!(spike.severity, "bad");
+            assert_eq!(spike.impact, ols["CO2_impact"].as_f64());
+        }
     }
     #[test]
     fn robust_fit_method_reports_the_robust_refit() {
