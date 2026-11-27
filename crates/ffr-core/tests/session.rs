@@ -646,7 +646,7 @@ fn raw_folder_imports_new_files_inside_the_field() {
     let mut s = Session::default();
     s.project_create(dir.path().join("p.ffr").to_str().expect("path"), "Folder")
         .expect("create");
-    assert!(s.raw_folder_scan(|_| {}).is_err(), "no folder yet");
+    assert!(s.raw_folder_scan(false, |_| {}).is_err(), "no folder yet");
     // A plot far from the robot: every file is outside the field.
     s.set_layout(
         one_plot(json!([
@@ -663,7 +663,7 @@ fn raw_folder_imports_new_files_inside_the_field() {
         ..Default::default()
     }))
     .expect("set");
-    let r = s.raw_folder_scan(|_| {}).expect("scan");
+    let r = s.raw_folder_scan(false, |_| {}).expect("scan");
     assert_eq!((r.files, r.outside_field, r.imported), (8, 8, 0));
     // The left chambers (at 1.2, 4) are inside this plot.
     s.set_layout(
@@ -671,15 +671,146 @@ fn raw_folder_imports_new_files_inside_the_field() {
         |_| {},
     )
     .expect("layout");
-    let r = s.raw_folder_scan(|_| {}).expect("scan");
+    let r = s.raw_folder_scan(false, |_| {}).expect("scan");
     assert_eq!((r.files, r.known, r.imported), (8, 0, 8));
     assert_eq!(s.list_fluxes().expect("table").rows, 16);
-    let r = s.raw_folder_scan(|_| {}).expect("scan");
+    let r = s.raw_folder_scan(false, |_| {}).expect("scan");
     assert_eq!((r.known, r.imported), (8, 0));
     let stored = s.raw_folder_get().expect("get").expect("folder");
     assert_eq!(stored.last_report.expect("report").known, 8);
     s.raw_folder_set(None).expect("forget");
     assert!(s.raw_folder_get().expect("get").is_none());
+}
+
+/// A plot visited from a route at waypoint 1 (left chamber), with a footprint.
+fn route_plot(polygon: serde_json::Value) -> ffr_core::Layout {
+    let mut layout = one_plot(polygon);
+    layout.plots[0] = serde_json::from_value(json!({
+        "id": 1, "label": "P", "treatmentId": 1, "polygon": layout.plots[0].polygon,
+        "waypoints": [{"waypoint": 1, "side": "left"}]
+    }))
+    .expect("plot");
+    layout
+}
+
+fn folder_project(data: &std::path::Path, dir: &std::path::Path) -> Session {
+    write_robot_files(data, false);
+    let mut s = Session::default();
+    s.project_create(dir.join("p.ffr").to_str().expect("path"), "Folder")
+        .expect("create");
+    s.raw_folder_set(Some(ffr_core::RawFolder {
+        path: data.to_string_lossy().into(),
+        ..Default::default()
+    }))
+    .expect("set");
+    s
+}
+
+#[test]
+fn shared_folder_ignores_other_routes_with_the_same_waypoint_numbers() {
+    let (data, dir) = (
+        tempfile::tempdir().expect("tmp"),
+        tempfile::tempdir().expect("tmp"),
+    );
+    let s = folder_project(data.path(), dir.path());
+    // Same waypoint number (Plot_1, left) but the plot is far away: another
+    // project's route, not ours.
+    s.set_layout(
+        route_plot(json!([
+            [500., 500.],
+            [510., 500.],
+            [510., 510.],
+            [500., 510.]
+        ])),
+        |_| {},
+    )
+    .expect("layout");
+    let r = s.raw_folder_scan(false, |_| {}).expect("scan");
+    assert_eq!((r.files, r.outside_field, r.imported), (8, 8, 0));
+    // A footprint moved a few metres off the left chamber (1.2, 4) still
+    // keeps its route files.
+    s.set_layout(
+        route_plot(json!([[4., 3.], [6., 3.], [6., 5.], [4., 5.]])),
+        |_| {},
+    )
+    .expect("layout");
+    let r = s.raw_folder_scan(false, |_| {}).expect("scan");
+    assert_eq!((r.outside_field, r.imported), (0, 8));
+    let rows = s.list_fluxes().expect("table");
+    let plots: Vec<_> = rows.data["plotId"]
+        .iter()
+        .filter(|v| !v.is_null())
+        .collect();
+    assert_eq!(plots.len(), 8, "left chambers assigned by the route visit");
+}
+
+#[test]
+fn folder_date_range_and_unfiltered_folders_wait() {
+    let (data, dir) = (
+        tempfile::tempdir().expect("tmp"),
+        tempfile::tempdir().expect("tmp"),
+    );
+    let s = folder_project(data.path(), dir.path());
+    // No plots and no dates: nothing filters a shared folder, so nothing is
+    // imported until asked for.
+    let r = s.raw_folder_scan(false, |_| {}).expect("scan");
+    assert_eq!((r.files, r.waiting, r.imported), (8, 8, 0));
+    assert_eq!(
+        s.project_info()
+            .expect("info")
+            .expect("open")
+            .counts
+            .measurements,
+        0
+    );
+    let folder = |from: Option<&str>, to: Option<&str>| {
+        s.raw_folder_set(Some(ffr_core::RawFolder {
+            path: data.path().to_string_lossy().into(),
+            from: from.map(Into::into),
+            to: to.map(Into::into),
+            ..Default::default()
+        }))
+    };
+    assert!(
+        folder(Some("2022-09-03"), Some("2022-09-01")).is_err(),
+        "backwards"
+    );
+    assert!(folder(Some("1.9.2022"), None).is_err(), "not a date");
+    assert!(folder(None, Some("2022-9-1")).is_err(), "not YYYY-MM-DD");
+    // The files are from 1 and 2 September (Oslo time).
+    folder(Some(" "), Some("2022-09-01")).expect("set");
+    let stored = s.raw_folder_get().expect("get").expect("folder");
+    assert_eq!(
+        (stored.from, stored.to.as_deref()),
+        (None, Some("2022-09-01"))
+    );
+    let r = s.raw_folder_scan(false, |_| {}).expect("scan");
+    assert_eq!((r.outside_dates, r.waiting, r.imported), (4, 0, 4));
+    folder(Some("2022-09-02"), None).expect("set");
+    let r = s.raw_folder_scan(false, |_| {}).expect("scan");
+    assert_eq!((r.known, r.outside_dates, r.imported), (4, 0, 4));
+    // Without dates the rest waits again; `all` imports it.
+    std::fs::write(
+        data.path()
+            .join("2022-09-03-10-07-15-x1_0-y2_0-z0_0-h0_0_both_Plot_1_"),
+        std::fs::read(
+            data.path().join(
+                std::fs::read_dir(data.path())
+                    .expect("dir")
+                    .next()
+                    .expect("file")
+                    .expect("entry")
+                    .file_name(),
+            ),
+        )
+        .expect("read"),
+    )
+    .expect("copy");
+    folder(None, None).expect("set");
+    let r = s.raw_folder_scan(false, |_| {}).expect("scan");
+    assert_eq!((r.known, r.waiting, r.imported), (8, 1, 0));
+    let r = s.raw_folder_scan(true, |_| {}).expect("scan");
+    assert_eq!((r.waiting, r.imported), (0, 1));
 }
 
 #[test]

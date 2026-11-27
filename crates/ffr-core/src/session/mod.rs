@@ -140,7 +140,7 @@ pub(crate) fn assign(
         }
     }
 }
-fn contains(poly: &[Value], x: f64, y: f64) -> bool {
+pub(crate) fn contains(poly: &[Value], x: f64, y: f64) -> bool {
     if poly.is_empty() {
         return false;
     }

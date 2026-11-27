@@ -210,8 +210,8 @@ and [the Rust API types](../crates/ffr-core/src/api.rs).
 | `applyWaypointLayout` | `points`, `sourcePath?`, `plots` (each with `label`, `polygon`, `treatmentId?`, `block?`, `waypoints`) |
 | `getRoute` | None |
 | `rawFolderGet` | None |
-| `rawFolderSet` | `folder` (`path`, `fieldOnly?`, `auto?`, `lastScan?`, `lastReport?`) or `null` to clear. `fieldOnly` and `auto` default to `true`. |
-| `rawFolderScan` | None |
+| `rawFolderSet` | `folder` (`path`, `fieldOnly?`, `auto?`, `from?`, `to?`, `lastScan?`, `lastReport?`) or `null` to clear. `fieldOnly` and `auto` default to `true`; `from`/`to` are `YYYY-MM-DD` days in the project time zone. |
+| `rawFolderScan` | `all?` (`true` also imports files waiting because nothing filters them) |
 | `getLayout` | None |
 | `setLayout` | `layout` (with `treatments` and `plots` arrays) |
 | `listFluxes` | None |

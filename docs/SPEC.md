@@ -328,13 +328,23 @@ field lists may grow, but do not rename.
   (`retried`); the folder scan below retries failed files the same way. Opening a project
   removes stored "measurements" whose name is not a robot file name.
 - `rawFolderGet() → RawFolder | null`, `rawFolderSet(folder | null)`,
-  `rawFolderScan() → FolderReport` — the project's robot data folder
-  `{ path, fieldOnly, auto, lastScan?, lastReport? }`. A scan imports robot files in the
-  folder (up to three subfolder levels) that are not yet in the project; with `fieldOnly`
-  only files with a measured chamber that the plot assignment (4.6) puts in a plot (a
-  project without plots accepts all). Files left out are looked at again next scan.
-  `FolderReport = { files, known, outsideField, imported, errors }`. The path is
-  machine-specific and optional; it is not an undoable edit.
+  `rawFolderScan({ all? }) → FolderReport` — the project's robot data folder
+  `{ path, fieldOnly, auto, from?, to?, lastScan?, lastReport? }`. The folder may be shared
+  by many projects (tens of thousands of files). A scan imports robot files in the folder
+  (up to three subfolder levels) that are not yet in the project, deciding from the file
+  name alone:
+  - `from`/`to` (`YYYY-MM-DD`, inclusive, project time zone; either may be open): only
+    files measured on those days. `rawFolderSet` rejects other text and a range that ends
+    before it starts; blank means open.
+  - `fieldOnly`: only files with a measured chamber that the plot assignment (4.6) puts in
+    a plot *and* that lies inside that plot's polygon or within 5 m of it. A plot matched
+    by route waypoint therefore does not take another route's file with the same waypoint
+    number measured elsewhere. A plot without a polygon counts as near.
+  - With `fieldOnly`, no plots and no date range nothing filters the files: they are
+    counted as `waiting` and imported only by `rawFolderScan({ all: true })`.
+  Files left out are looked at again next scan.
+  `FolderReport = { files, known, outsideDates, outsideField, waiting, imported, errors }`.
+  The path is machine-specific and optional; it is not an undoable edit.
 
 `ProjectInfo = { path, name, timeZone, schemaVersion, counts: {measurements, fluxes, excluded, overridden, reviewed, manual, series}, timeRange: [number, number] | null }`
 
@@ -489,7 +499,9 @@ Screens:
 6. **External data** — list of series with a preview chart; import wizard for
    Excel/CSV (pick sheet, header row, time column, value columns, aggregate); met.no fetch;
    manual flux import; the **robot data folder** (choose it, "only inside the plots",
-   automatic checks on opening and every 5 minutes, "Import new files now", last result).
+   optional measured-from/to dates, automatic checks on opening and every 5 minutes,
+   "Import new files now", last result; waiting files show a notice with "Import all N
+   files").
 7. **Project** — name, time zone, default analysis options, gases/units, treatments and
    plots, backup copy. The **field map** draws plot polygons coloured by treatment with
    labels, every measured chamber position (positions outside every plot in red) and the

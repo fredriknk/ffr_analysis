@@ -1544,14 +1544,24 @@ export function createMock(seed = 42): T.FfrApi {
         throw { code: "core", message: "choose a folder" };
       rawFolder = folder ? { ...rawFolder, ...structuredClone(folder) } : null;
     },
-    rawFolderScan: async () => {
+    rawFolderScan: async (args) => {
       if (!rawFolder) throw { code: "core", message: "no raw-data folder set" };
       // The synthetic folder holds the demo's own files: nothing new.
-      const files = new Set(rows.map((r) => r.measurementId)).size;
+      const files = new Set(rows.map((r) => r.measurementId)).size,
+        held =
+          !args?.all &&
+          rawFolder.fieldOnly &&
+          !layout.plots.length &&
+          !rawFolder.from &&
+          !rawFolder.to;
       const report: T.FolderReport = {
         files: files + 3,
-        known: files,
-        outsideField: rawFolder.fieldOnly ? 3 : 0,
+        known: rawFolder.fieldOnly ? files : files + 3,
+        // The three extra files are another project's: left out by the
+        // plots, held back without them, and (unfiltered) already known.
+        outsideField: rawFolder.fieldOnly && !held ? 3 : 0,
+        outsideDates: 0,
+        waiting: held ? 3 : 0,
         imported: 0,
         errors: [],
       };

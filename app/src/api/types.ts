@@ -440,6 +440,9 @@ export interface RawFolder {
   fieldOnly: boolean;
   /** Check automatically while the project is open. */
   auto: boolean;
+  /** Only files measured on or after / on or before these days (`YYYY-MM-DD`, project time zone). */
+  from?: string | null;
+  to?: string | null;
   lastScan?: number | null;
   lastReport?: FolderReport | null;
 }
@@ -447,6 +450,10 @@ export interface FolderReport {
   files: number;
   known: number;
   outsideField: number;
+  /** New, but measured outside the folder's date range. */
+  outsideDates: number;
+  /** New, but held back because nothing filters them (no plots, no dates). */
+  waiting: number;
   imported: number;
   errors: { path: string; message: string }[];
 }
@@ -552,7 +559,12 @@ export interface FfrApi {
   getRoute(): Promise<StoredRoute | null>;
   rawFolderGet(): Promise<RawFolder | null>;
   rawFolderSet(folder: RawFolder | null): Promise<void>;
-  rawFolderScan(): Promise<FolderReport>;
+  /** Imports new files; `all` also imports files held back because nothing filters them. */
+  rawFolderScan(args?: {
+    all?: boolean;
+    /** Scan only if this project is still the open one. */
+    project?: string;
+  }): Promise<FolderReport>;
   mapTilesGet(): Promise<MapTiles | null>;
   mapTilesSet(dir: string | null): Promise<MapTiles | null>;
   mapTile(z: number, x: number, y: number): Promise<MapTile | null>;

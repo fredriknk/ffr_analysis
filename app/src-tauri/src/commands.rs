@@ -629,9 +629,20 @@ async fn raw_folder_set(app: AppHandle, folder: Option<RawFolder>) -> Result<(),
     run(app, move |s, _| Ok(s.raw_folder_set(folder)?)).await
 }
 #[tauri::command]
-async fn raw_folder_scan(app: AppHandle) -> Result<FolderReport, ApiError> {
+async fn raw_folder_scan(
+    app: AppHandle,
+    all: Option<bool>,
+    project: Option<String>,
+) -> Result<FolderReport, ApiError> {
     run(app, move |s, app| {
-        Ok(s.raw_folder_scan(|p| progress(app, p))?)
+        // "Import all" was asked for one project: never run it on another
+        // that was opened in the meantime.
+        if let Some(project) = project {
+            if s.project_info()?.map(|p| p.path) != Some(project) {
+                return Err(error("another project is open now; nothing was imported"));
+            }
+        }
+        Ok(s.raw_folder_scan(all.unwrap_or(false), |p| progress(app, p))?)
     })
     .await
 }

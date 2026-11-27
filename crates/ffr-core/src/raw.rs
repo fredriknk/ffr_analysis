@@ -2,7 +2,7 @@ use crate::{Error, Result};
 use chrono::{NaiveDateTime, TimeZone};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::{collections::BTreeMap, io::Read, path::Path};
+use std::{collections::BTreeMap, io::Read, path::Path, sync::LazyLock};
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Metadata {
     pub filename: String,
@@ -37,26 +37,32 @@ pub fn filename(name: &str, zone: &str) -> Result<Metadata> {
         .earliest()
         .ok_or_else(|| Error::Invalid("nonexistent local time".into()))?
         .timestamp_millis();
-    let num = |k: &str| -> Option<f64> {
-        let re = regex::Regex::new(&format!(r"-{}(-?\d+_\d+)", k)).ok()?;
-        re.captures(base)?
+    // Compiled once: a shared robot folder holds tens of thousands of names.
+    static NUMBERS: LazyLock<[regex::Regex; 4]> = LazyLock::new(|| {
+        ["x", "y", "z", "h"]
+            .map(|k| regex::Regex::new(&format!(r"-{k}(-?\d+_\d+)")).expect("number pattern"))
+    });
+    static SIDES: LazyLock<regex::Regex> =
+        LazyLock::new(|| regex::Regex::new("left|right|both").expect("sides pattern"));
+    let num = |i: usize| -> Option<f64> {
+        NUMBERS[i]
+            .captures(base)?
             .get(1)?
             .as_str()
             .replace('_', ".")
             .parse()
             .ok()
     };
-    let re = regex::Regex::new("left|right|both").map_err(|e| Error::Invalid(e.to_string()))?;
-    let m = re.find(base);
+    let m = SIDES.find(base);
     let sides = m.map_or("unknown", |m| m.as_str()).into();
     let waypoint = m.map_or("", |m| base[m.end()..].trim_matches('_')).into();
     Ok(Metadata {
         filename: base.into(),
         time,
-        x: num("x"),
-        y: num("y"),
-        z: num("z"),
-        heading: num("h"),
+        x: num(0),
+        y: num(1),
+        z: num(2),
+        heading: num(3),
         sides,
         waypoint,
     })

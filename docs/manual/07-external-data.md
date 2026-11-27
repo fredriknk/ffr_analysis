@@ -56,9 +56,12 @@ Choose at least one gas column and click **Import mapped data**. The report show
 ## Watch a robot data folder
 
 1. In **Robot data folder**, click **Browse folder** and choose the folder where robot files are copied. The scan checks that folder and up to three levels of subfolders.
-2. Set **Only files measured inside the project's plots**. With this option ticked, a file qualifies if the project assigns at least one of its measured chambers to a plot. A project with no plots accepts files from any position. Untick it to import files regardless of position.
-3. Tick **Check automatically (on opening and every 5 minutes)** to check when the project opens and every five minutes while it is open. Click **Save folder**. Saving with this option on also starts a check.
-4. To check on demand, click **Import new files now**. Read **Last checked** below the buttons for the time, number of robot files found, number already in the project, number outside the plots, number imported and any read failures.
+2. Set **Only files measured inside the project's plots**. With this option ticked, a file qualifies if the project assigns at least one of its measured chambers to a plot and that chamber is inside the plot or within 5 m of it. A file from another route that only shares a waypoint number is left out. Untick it to import files regardless of position.
+3. Optionally set **Measured from** and **Measured to** to import only files from those days, both included, in the project's time zone. Leave either blank to leave that end open. Use dates when other experiments used the same field.
+4. Tick **Check automatically (on opening and every 5 minutes)** to check when the project opens and every five minutes while it is open. Click **Save folder**. Saving with this option on also starts a check.
+5. To check on demand, click **Import new files now**. Read **Last checked** below the buttons for the time, number of robot files found, number already in the project, number outside the plots, number outside the dates, number imported and any read failures.
+
+One folder can hold the files of many projects. Each project picks out its own files by the plots and dates. With **Only files measured inside the project's plots** ticked, a project with no plots and no dates has nothing to tell its files apart, so the scan imports nothing and reports the new files as **waiting**. Draw the plots or set the dates, or click **Import all N files** to import every waiting file.
 
 The scan recognises files by the robot's original date, time and position in the filename. It reads original robot pickle files and gzip-compressed JSON robot files (`.gz`). It skips files already imported successfully. Files outside the plots are checked again on the next scan, so a later plot change can bring them in. A file with a valid robot name that fails to load appears as a failed measurement. The scan tries it again and replaces the failed entry if the file becomes readable.
 

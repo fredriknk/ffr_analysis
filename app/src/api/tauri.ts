@@ -66,7 +66,11 @@ export const tauriApi: FfrApi = {
   getRoute: () => invoke("get_route"),
   rawFolderGet: () => invoke("raw_folder_get"),
   rawFolderSet: (folder) => invoke("raw_folder_set", { folder }),
-  rawFolderScan: () => invoke("raw_folder_scan"),
+  rawFolderScan: (args) =>
+    invoke("raw_folder_scan", {
+      all: args?.all ?? false,
+      project: args?.project ?? null,
+    }),
   mapTilesGet: () => invoke("map_tiles_get"),
   mapTilesSet: (dir) => invoke("map_tiles_set", { dir }),
   mapTile: (z, x, y) => invoke("map_tile", { z, x, y }),

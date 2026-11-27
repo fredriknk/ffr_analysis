@@ -70,7 +70,7 @@ fn call(s: &mut Session, command: &str, a: Value) -> Result<Value> {
             s.raw_folder_set(serde_json::from_value(a["folder"].clone())?)?;
             Value::Null
         }
-        "rawFolderScan" => json!(s.raw_folder_scan(|_| {})?),
+        "rawFolderScan" => json!(s.raw_folder_scan(a["all"].as_bool().unwrap_or(false), |_| {})?),
         "getLayout" => json!(s.get_layout()?),
         "setLayout" => {
             s.set_layout(serde_json::from_value(a["layout"].clone())?, |_| {})?;

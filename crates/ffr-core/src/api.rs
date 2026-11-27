@@ -503,6 +503,10 @@ pub struct RawFolder {
     pub field_only: bool,
     /// Check automatically while the project is open (the app decides when).
     pub auto: bool,
+    /// Import only files measured on or after / on or before these days
+    /// (`YYYY-MM-DD`, in the project's time zone). Either may be left open.
+    pub from: Option<String>,
+    pub to: Option<String>,
     /// When the folder was last checked (Unix ms) and what that found.
     pub last_scan: Option<i64>,
     pub last_report: Option<FolderReport>,
@@ -513,6 +517,8 @@ impl Default for RawFolder {
             path: String::new(),
             field_only: true,
             auto: true,
+            from: None,
+            to: None,
             last_scan: None,
             last_report: None,
         }
@@ -527,6 +533,11 @@ pub struct FolderReport {
     pub known: usize,
     /// New, but no chamber inside any plot (with `fieldOnly`).
     pub outside_field: usize,
+    /// New, but measured outside the folder's date range.
+    pub outside_dates: usize,
+    /// New, but held back: nothing filters them (`fieldOnly` with no plots and
+    /// no date range), so they are imported only when asked for explicitly.
+    pub waiting: usize,
     pub imported: usize,
     pub errors: Vec<ImportError>,
 }

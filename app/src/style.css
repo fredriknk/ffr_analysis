@@ -2892,3 +2892,12 @@ body.handle-dragging * {
   font-size: 12px;
   overflow-wrap: anywhere;
 }
+.raw-folder-waiting {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-left: 3px solid #bb792a;
+  font-size: 12px;
+}
+.raw-folder-waiting p {
+  margin: 0 0 6px;
+}
